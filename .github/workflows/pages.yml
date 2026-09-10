@@ -1,0 +1,73 @@
+# Publish site/teaser/ to GitHub Pages.
+#
+# Pages is deployed from an *artifact*, not from a branch folder. That matters
+# for this site specifically:
+#
+#   * Branch-folder Pages runs Jekyll over the whole repository, which would
+#     make the README the site and would process files it has no business
+#     processing. Artifact deployment runs no generator at all: what is in
+#     site/teaser/ is what is served, byte for byte.
+#   * The README stays the repository's front page on GitHub and is no longer
+#     served by Pages. site/teaser/README.md says so.
+#
+# Every action is pinned by commit SHA rather than by tag. A tag is a moving
+# pointer; a workflow that deploys a public site should not change what it
+# runs because someone else moved a tag. The version each SHA corresponds to
+# is in the comment beside it, so a reader can check the pin.
+#
+# The data directory is verified before it is uploaded. verify_teaser_data.py
+# re-derives the fixture's published values from base.bin, checks every digest
+# in data/MANIFEST.sha256, and checks that data/inline.js decompresses to the
+# four files beside it. It is stdlib-only, so no dependencies are installed.
+# A data directory that fails its own check never reaches the web.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# No path filter on purpose. A filter that is subtly wrong fails by silently
+# not deploying, which is the failure mode that takes longest to notice.
+# Deploying on every push to main is cheap and always right.
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one in flight: a cancelled
+# deploy can leave the site serving a half-published state.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Verify the teaser data before publishing it
+        run: python3 site/teaser/verify_teaser_data.py
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
+
+      - name: Upload site/teaser as the Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: site/teaser
+          # Required. The action's tar excludes dotfiles unless this is set,
+          # and .nojekyll is a dotfile -- without it the marker this site
+          # relies on is dropped from the artifact without a word.
+          include-hidden-files: true
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1

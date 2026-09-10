@@ -225,6 +225,24 @@ def main():
                 max(len(q["title"]) for q in queries["queries"]) < 400,
                 f"longest title {max(len(q['title']) for q in queries['queries'])} chars")
 
+    # ---- 5b. app.js is stamped with the digests actually on disk ----------
+    print("\napp.js cache-bust stamp against the manifest")
+    app = open(os.path.join(os.path.dirname(d), "app.js"),
+               encoding="utf-8").read()
+    m = re.search(r"const DATA_VERSION = (\{.*?\});", app, re.S)
+    if not m:
+        ok &= check("app.js carries a DATA_VERSION block", False)
+    else:
+        stamped = json.loads(m.group(1))
+        want = {name: digest[:8] for name, digest in entries}
+        ok &= check("stamp matches every manifest line", stamped == want,
+                    f"{len(stamped)} entries")
+        if stamped != want:
+            for k in sorted(set(stamped) | set(want)):
+                if stamped.get(k) != want.get(k):
+                    print(f"       {k}: app.js {stamped.get(k)} "
+                          f"manifest {want.get(k)}")
+
     # ---- 6. the file:// bundle is the same four files ----------------------
     print("\ndata/inline.js against the four files beside it")
     src = open(os.path.join(d, "inline.js"), encoding="utf-8").read()

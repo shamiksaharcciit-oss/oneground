@@ -52,3 +52,11 @@ fixtures/glove-100-angular/ground_truth_distances.npy
 dist/
 build/
 *.egg-info/
+
+# Scratch scripts. docs/RELEASE.md section 6 publishes the briefs and the
+# reports -- the receipt trail, including the runs that failed -- and keeps
+# the working itself in archive/private-history. These are the working: one
+# shot text patches, API probes, log captures, the harnesses a measurement was
+# taken with. A report names the script a number came from; the script is not
+# part of what ships.
+tasks/scratch/

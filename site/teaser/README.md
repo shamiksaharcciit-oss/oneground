@@ -7,11 +7,14 @@ recounts the closure for all 150,000 vectors rather than stepping through
 precomputed frames.
 
     index.html      the page
-    app.js          loading, the canvas, the closure recount, the four sections
+    app.js          loading, the canvas, the closure recount, the five sections
     style.css       docs/design/tokens.css, copied in verbatim, plus layout
     fonts/          empty; see fonts/README.md for why
     data/           what corpora/export_teaser_data.py writes
+    CNAME           the custom domain Pages serves this artifact on
+    .nojekyll       nothing here is ever processed by a generator
     verify_teaser_data.py   re-derives the numbers from data/base.bin alone
+    check_hosted.py         proves a hosted copy is this repository's copy
 
 No framework, no build step, no CDN, no webfont, no telemetry, no runtime
 network call to anything but its own directory.
@@ -136,6 +139,26 @@ prints both. It has never disagreed.
 
 ## Hosting
 
+This directory is the site at **https://oneground.oneproof.dev/**, deployed
+from an artifact by `.github/workflows/pages.yml` on every push to `main`.
+Nothing is generated on the way: what is here is what is served.
+
+**The repository README is no longer served by Pages.** Before that workflow,
+Pages built the branch root with Jekyll and the README was the site. It is
+still the repository's front page on GitHub; it is not the web page.
+
+To confirm a hosted copy is this one:
+
+    python site/teaser/check_hosted.py https://oneground.oneproof.dev
+
+It compares every file in `data/MANIFEST.sha256` plus `index.html`, `app.js`
+and `style.css` against the repository, and reports verified / contradicted /
+couldn't-check per file. A file the host does not have is couldn't-check, not
+a contradiction, and only a contradiction exits non-zero.
+
+`docs/HOSTING.md` has the DNS record, the Pages settings, and the caching
+story. The rest of this section is what any other host would need.
+
 Static. Any host, any path, no server-side anything. Copy `site/teaser/`
 wherever and serve it.
 
@@ -150,6 +173,12 @@ wherever and serve it.
 
 Serving `base.bin` with `Content-Type: application/octet-stream` and letting
 the host gzip the `.json` files is enough; there is nothing else to configure.
+
+Each data URL carries `?v=<first 8 hex of that file's sha256>`, stamped into
+the generated block at the top of `app.js` by the export from
+`data/MANIFEST.sha256`. A new export changes the digests, changes the URLs,
+and a cache has nothing stale to serve. `verify_teaser_data.py` fails if the
+stamp and the manifest disagree, so it cannot go stale unnoticed.
 
 Two things to know before deploying only this directory:
 
