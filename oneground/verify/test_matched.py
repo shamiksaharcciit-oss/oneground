@@ -842,12 +842,18 @@ def test_a_session_with_no_manifest_says_couldnt_check_not_ok():
         assert "couldnt-check" in p.stdout, p.stdout
 
 
+ARXIV_SESSION = "sessions/verify-arxiv-150k-two-engines.yaml"
+
+
 def test_the_arxiv_session_declares_a_tarball_and_a_manifest():
-    """Not synthetic: this is the session about to be run."""
+    """Not synthetic: this is the session about to be run.
+
+    Renamed in task 015 from verify-arxiv-150k-via-characterize: the session
+    is now named for what it does rather than for the workdir it came from,
+    because it will be read months later beside task 011's single-engine one.
+    """
     import yaml
-    spec = yaml.safe_load(
-        open("sessions/verify-arxiv-150k-via-characterize.yaml",
-             encoding="utf-8"))
+    spec = yaml.safe_load(open(ARXIV_SESSION, encoding="utf-8"))
     env = spec["env"]
     assert env["ONEGROUND_CORPUS_TARBALL"] == "/workspace/arxiv-150k-large.tgz"
     assert env["ONEGROUND_CORPUS_MANIFEST"] == \
@@ -856,6 +862,10 @@ def test_the_arxiv_session_declares_a_tarball_and_a_manifest():
     assert env["ONEGROUND_CONCURRENCY"] == "32"
     assert env["ONEGROUND_TARGET_QPS"] == "200"
     assert env["ONEGROUND_DURATION_MIN"] == "5"
+    # Two engines, in order, measured sequentially on one pod. This is the
+    # whole point of the session, and it is the one field that would silently
+    # halve the run if it were wrong.
+    assert env["ONEGROUND_ENGINES"] == "qdrant,pgvector"
     # The manifest has to reach the pod, and it does so only if git carries it.
     from oneground.verify import runpod as rp
     carried, why = rp.git_carries("fixtures/arxiv-150k/MANIFEST.sha256")

@@ -310,11 +310,17 @@ install into the pod's own filesystem.
 
 ## Verification
 
-**Test suite.** `python -m pytest -q`: **451 passed, 2 skipped** (was 449
-before this task's changes; the two skips are the live RunPod test without a
-key and one live-engine conformance test without its URL). No failures — the
-`runs/` test that failed throughout tasks 012 and 012b now passes, because
-this worktree has an arxiv-150k workdir.
+**Test suite.** `python -m pytest -q`: **451 passed, 2 skipped**. The two
+skips are the live RunPod test without a key and a live-engine conformance
+test without its URL.
+
+*A correction to something I said before checking it:* I reported that the
+`runs/` test which failed throughout tasks 012 and 012b "now passes because
+this worktree has the workdir". It passed because **master fixed it** — task
+013 renamed it `..._needs_local_run` and made it skip when the workdir is
+absent, which is the right resolution of the item routed to the master
+stream. The workdir was not present at that point; it is now, so the test
+runs against real data rather than skipping.
 
 **Conformance, live.** 8 passed with both engines reachable.
 

@@ -314,16 +314,40 @@ if has_engine pgvector; then
     echo "--------------------------------------------------------------"
     echo "installing postgresql-$PG_MAJOR + pgvector from apt.postgresql.org"
     export DEBIAN_FRONTEND=noninteractive
+    # Each step announces itself. The session watchdog terminates a pod whose
+    # log has not grown for 15 minutes, and a quiet `apt-get install` is
+    # exactly the kind of step that looks like a hang from outside. These
+    # echoes are what keep a slow-but-working install from being killed --
+    # and, if it does fail, what says which step it died on.
+    echo "  [1/7] apt-get update"
     apt-get update -qq
+    echo "  [2/7] prerequisites"
     apt-get install -y -qq --no-install-recommends         ca-certificates curl gnupg lsb-release >/dev/null
+    echo "  [3/7] PGDG signing key and source"
     install -d /usr/share/postgresql-common/pgdg
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main"         > /etc/apt/sources.list.d/pgdg.list
+    echo "  [4/7] apt-get update (with PGDG)"
     apt-get update -qq
     # Pinned exactly. An unpinned install would drift the moment PGDG
     # publishes a point release, and the pod row would stop being comparable
     # to the local one without anything saying so.
-    apt-get install -y -qq --no-install-recommends         "postgresql-$PG_MAJOR=$PG_VERSION_PIN"         "postgresql-$PG_MAJOR-pgvector=$PGVECTOR_VERSION_PIN" >/dev/null
+    echo "  [5/7] postgresql-$PG_MAJOR=$PG_VERSION_PIN"
+    echo "        postgresql-$PG_MAJOR-pgvector=$PGVECTOR_VERSION_PIN"
+    if ! apt-get install -y -q --no-install-recommends         "postgresql-$PG_MAJOR=$PG_VERSION_PIN"         "postgresql-$PG_MAJOR-pgvector=$PGVECTOR_VERSION_PIN"; then
+        echo "ERROR: the pinned PGDG packages could not be installed." >&2
+        echo "  available postgresql-$PG_MAJOR-pgvector versions:" >&2
+        apt-cache madison "postgresql-$PG_MAJOR-pgvector" >&2 || true
+        echo "  available postgresql-$PG_MAJOR versions:" >&2
+        apt-cache madison "postgresql-$PG_MAJOR" >&2 || true
+        echo "  This is the first pod run of this path (task 015). If the" >&2
+        echo "  pins have moved, the fix is to update PG_VERSION_PIN and" >&2
+        echo "  PGVECTOR_VERSION_PIN to versions listed above -- and to keep" >&2
+        echo "  them matched to oneground/verify/compose/pgvector.yml, or a" >&2
+        echo "  pod row stops being comparable to a local one." >&2
+        exit 1
+    fi
+    echo "  [6/7] initdb + start"
     PGBIN="/usr/lib/postgresql/$PG_MAJOR/bin"
     "$PGBIN/postgres" --version
 
@@ -342,6 +366,7 @@ if has_engine pgvector; then
     su postgres -c "$PGBIN/createuser -p $PG_PORT -s $PG_USER" || true
     su postgres -c "$PGBIN/createdb -p $PG_PORT -O $PG_USER $PG_DB" || true
     su postgres -c "$PGBIN/psql -p $PG_PORT -d $PG_DB -c         'CREATE EXTENSION IF NOT EXISTS vector'"
+    echo "  [7/7] extension"
     su postgres -c "$PGBIN/psql -p $PG_PORT -d $PG_DB -tAc         \"SELECT 'pgvector ' || extversion FROM pg_extension WHERE extname='vector'\""
 fi
 

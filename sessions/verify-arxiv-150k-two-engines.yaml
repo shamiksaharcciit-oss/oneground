@@ -3,7 +3,7 @@
 # This file describes a session; it creates nothing. `oneground pod
 # up` is the only thing that can create a billable resource, and it
 # still requires a typed 'y' at a terminal.
-# Generated 2026-09-09T22:42:05Z
+# Generated 2026-09-10T23:03:51Z
 #
 # The pod runs the engine's compose file and the load generator on
 # the same host, so latency is attributable and throughput can be
@@ -25,7 +25,7 @@ env:
   ONEGROUND_CONCURRENCY: '32'
   ONEGROUND_TARGET_QPS: '200'
   ONEGROUND_DURATION_MIN: '5'
-  ONEGROUND_ENGINES: qdrant
+  ONEGROUND_ENGINES: qdrant,pgvector
   ONEGROUND_REQUIREMENTS: requirements.arxiv-150k.pod.yaml
   ONEGROUND_CORPUS_TARBALL: /workspace/arxiv-150k-large.tgz
   ONEGROUND_CORPUS_MANIFEST: fixtures/arxiv-150k/MANIFEST.sha256

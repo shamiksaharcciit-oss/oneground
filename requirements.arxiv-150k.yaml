@@ -143,6 +143,10 @@ verify:
   # The session generator computes its inputs from the named file, so what it
   # prints is what the pod will actually read.
   requirements_on_pod: requirements.arxiv-150k.pod.yaml
+  # Named for what the session is, not for the workdir it came from: this is
+  # the first run that measures two engines, and the file will be read months
+  # from now beside the single-engine session from task 011.
+  session_path: sessions/verify-arxiv-150k-two-engines.yaml
   # Confirmed from build 3's log: the volume holds the release tarball, not a
   # loose directory. The preflight extracts vectors.npy and queries.npy from
   # it -- not sample.jsonl.zst, which `verify` never reads -- and then checks

@@ -44,8 +44,8 @@ import time
 import numpy as np
 
 from .. import intake
-from ..adapters import (AdapterError, get as get_engine, managed_namespace,
-                        namespace_for)
+from ..adapters import (AdapterError, engines as registered_engines,
+                        get as get_engine, managed_namespace, namespace_for)
 from ..receipts import (library_versions, round_floats, sha256_file,
                         write_json_stable, write_manifest)
 from ..sample import loaders
@@ -437,13 +437,31 @@ def _prepare_runpod(req, cfg, workdir, requirements_path, log_fn):
     """Generate the session spec for a matched-environment run. Creates
     nothing; prints what the developer has to run."""
     engines = list(cfg.get("engines") or [cfg.get("engine", "qdrant")])
-    for name in engines:
-        if name != "qdrant":
-            raise VerifyError(
-                f"{requirements_path}: verify.engines names {name!r}, and "
-                "the only adapter in this build is qdrant. The code path "
-                "handles a list so a second engine needs no change here, but "
-                "the adapter has to exist first.")
+    # Refuse an engine with no adapter, by asking the registry rather than by
+    # naming the engines this build happens to have. The previous form
+    # hard-coded "the only adapter in this build is qdrant" and would have
+    # gone on refusing pgvector after the adapter existed -- a guard that
+    # knows a list of names is a guard that is wrong the day the list changes.
+    known = set(registered_engines())
+    unknown = [n for n in engines if n not in known]
+    if unknown:
+        raise VerifyError(
+            f"{requirements_path}: verify.engines names "
+            f"{', '.join(repr(n) for n in unknown)}, and this build has no "
+            f"adapter for {'them' if len(unknown) > 1 else 'it'}. Registered: "
+            f"{', '.join(sorted(known))}. See docs/ADAPTERS.md.")
+    # A pod session must also know where each engine will listen, or the run
+    # reaches the pod and fails there, having already been paid for.
+    missing_endpoints = [
+        n for n in engines
+        if not ((cfg.get("pod_endpoints") or {}).get(n)
+                or cfg.get("pod_endpoint")
+                or DEFAULT_ENDPOINTS.get(n))]
+    if missing_endpoints:
+        raise VerifyError(
+            f"{requirements_path}: no pod endpoint for "
+            f"{', '.join(missing_endpoints)}. Set verify.pod_endpoints so the "
+            "pod-side run knows where to reach each engine.")
     image = str(cfg.get("image") or POD_IMAGE)
     path = runpod_target.write_session(req, workdir, cfg, engines, image,
                                        path=cfg.get("session_path"),
