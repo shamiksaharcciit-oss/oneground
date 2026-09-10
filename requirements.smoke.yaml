@@ -1,0 +1,107 @@
+# oneground requirements — the arxiv-smoke fixture through the product path.
+#
+# 2,000 synthetic documents. Small enough to run characterize, simulate and a
+# live `verify` against a Qdrant container on a laptop in minutes, which is
+# what makes it the fixture to exercise a change against before spending an
+# hour on arxiv-150k.
+#
+# The vectors are the committed smoke artifacts, so this file needs no
+# external asset.
+
+oneground: 1
+
+run:
+  name: arxiv-smoke-via-product-path
+  mode: measure
+  seed: 20260908                     # the smoke fixture's own sampling seed
+  workdir: ./runs/arxiv-smoke
+
+corpus:
+  sample:
+    kind: receipt
+    vectors:
+      path: ./fixtures/arxiv-smoke/vectors.npy
+      normalized: true               # the builder normalized at embed time
+    queries:
+      path: ./fixtures/arxiv-smoke/queries.npy
+      count_min: 50
+      source: written
+    target_sample_size: 2000         # the whole thing; no subsampling
+
+simulate:
+  kind: declared
+  families: [single_node_hnsw, semantic_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+  # The two configurations the fixture publishes reference_results for.
+  include:
+    - {family: single_node_hnsw, M: 32, efConstruction: 200, efSearch: 128}
+    - {family: semantic_sharded, centroids: 256, epsilon: 0.2, probe: 2,
+       M: 32, efSearch: 96}
+
+  grid:
+    single_node_hnsw: {M: [32], efSearch: [128]}
+    semantic_sharded:
+      centroids: [256]
+      epsilon: [0.2]
+      probe: [2]
+      M: [32]
+      efSearch: [96]
+
+# ------------------------------------------------------------------
+# verify — measure a real engine on the same sample (task 009)
+# ------------------------------------------------------------------
+verify:
+  kind: declared
+  # Task 011: the matched-environment target. `local` stays available and is
+  # what task 009 used; on this laptop it cannot attribute latency.
+  target: runpod
+  engines: [qdrant]
+  duration_minutes: 1            # smoke proves the path; arXiv measures
+  warmup_seconds: 10
+  cost:
+    prices: oneground/cost/prices.example.yaml
+    error_band: 0.25
+  # Kept so `--target local` still works unchanged.
+  local_target: local                      # local | existing
+  engine: qdrant
+  endpoint: http://localhost:6333    # the compose file's port
+  metric: inner_product              # vectors are normalized; ranks as cosine
+  ks: [10, 100]
+
+  engine_params:
+    # Chosen to match the simulate sweep's single_node_hnsw reference row
+    # (M=32, efSearch=128), so calibration_error_recall compares like with
+    # like rather than two different indexes.
+    m: 32
+    ef_construct: 200
+    hnsw_ef: 128
+    # Without this the collection is under Qdrant's 20 MB default and no HNSW
+    # graph is ever built -- the searches would be exact scans reported as
+    # index recall. Measured in task 009; see oneground/adapters/qdrant/ADAPTER.md.
+    indexing_threshold: 1
+
+# ------------------------------------------------------------------
+# constraints -- what the decision is measured against (task 010)
+# ------------------------------------------------------------------
+constraints:
+  kind: declared
+  recall_at_k:
+    k: 10
+    min: 0.90                        # single_node clears this; semantic does not
+  storage_amplification_max: 2.0
+  memory_budget_gb: 1.0
+  latency:
+    # Now measurable: the pod puts the client beside the engine. The
+    # environment_id is filled in from the run that produced verify.json.
+    p95_ms: 40
+    at_qps: 50
+    concurrency: 8
+  # Previously no latency constraint here, deliberately. Task 009 measured that this
+  # machine cannot attribute latency to the engine at all -- the empty-
+  # collection RTT p95 was 132% of the query p95, so `verify` reports
+  # `couldnt_check: environment noise` for every threshold. A latency
+  # constraint in this file would make every option couldnt_check forever and
+  # say nothing about the architectures. See tasks/scratch/010-latency.yaml
+  # for the run that exercises that path on purpose.

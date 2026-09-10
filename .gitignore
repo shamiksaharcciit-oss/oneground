@@ -1,0 +1,54 @@
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+
+# Large fixture artifacts: re-derivable from the spec's seeds by
+# corpora/build_fixture.py, and their digests are committed in MANIFEST.sha256.
+# Small artifacts (MANIFEST.sha256, characterization.json, query_ids.json,
+# ground_truth.npy) ARE committed.
+fixtures/*/vectors.npy
+fixtures/*/projection.npy
+fixtures/*/sample.jsonl.zst
+
+# Model caches (weights are pinned by sha256 in the fixture spec, not vendored)
+.cache/
+hf_cache/
+models_cache/
+.huggingface/
+sentence_transformers_cache/
+logs/
+*.bundle
+
+# Pod session records (task 006). Pod ids, start times and the rate agreed at
+# confirmation — local bookkeeping, not receipts, and never the API key.
+.oneground/
+
+# VS Code workspace files — local editor state, not project configuration.
+*.code-workspace
+
+# Packaging and run outputs, both produced by task 007's own deliverables:
+# `pip install -e .` writes the egg-info, and `oneground characterize` writes
+# a workdir under runs/ (the arxiv-150k run alone is 1.4 MB of sample ids).
+*.egg-info/
+runs/
+
+# Calibration fixture arrays (task 012): 486 MB total and re-derivable by
+# anyone from the upstream ANN-Benchmarks HDF5, whose sha256 is recorded in
+# fixtures/glove-100-angular.fixture.yaml. Scoped to this fixture on purpose:
+# arxiv-smoke's queries.npy is small and IS committed.
+# (vectors.npy is already covered by the fixtures/*/vectors.npy rule above.)
+fixtures/glove-100-angular/queries.npy
+fixtures/glove-100-angular/ground_truth.npy
+fixtures/glove-100-angular/ground_truth_distances.npy
+
+# Built HNSW indexes parked by `calibrate curve` (task 012b). ~600 MB each and
+# rebuildable, but a rebuild is 69 minutes -- the cache exists so a failure in
+# the two-minute search after it does not throw that away. Under .cache/,
+# which is already ignored; named here so the reason is on the record.
+
+# Build artifacts. `python -m build` writes these; they are re-derivable and
+# the release attaches the ones the developer built, not whatever is on disk.
+dist/
+build/
+*.egg-info/

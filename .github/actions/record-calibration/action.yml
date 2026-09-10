@@ -1,0 +1,140 @@
+# Record what a calibration job appended, without ever writing to master.
+#
+# Two jobs, one action:
+#
+#   1. Push the appended history lines to the `calibration` branch. master
+#      merges from it. The harness never commits to master directly, so a
+#      scheduled bot cannot move the branch a release is cut from.
+#   2. If any BLOCKING line came out `contradicted`, open an issue whose body
+#      carries the offending line verbatim, and fail.
+#
+# `couldnt_check` does not open an issue and does not fail. It is a gap in the
+# reference, not a defect in this installation, and it is already visible in
+# the history and in `oneground calibrate show`.
+
+name: record calibration
+description: >
+  Commit appended calibration lines to the calibration branch and open an
+  issue on a contradiction.
+
+inputs:
+  scope:
+    description: blocking | advisory
+    required: true
+    default: blocking
+  label:
+    description: short name of the job, used in the commit message
+    required: true
+  history:
+    description: path to the history file
+    required: false
+    default: calibration/history.jsonl
+  branch:
+    description: branch the harness is allowed to write to
+    required: false
+    default: calibration
+
+runs:
+  using: composite
+  steps:
+    - name: what changed
+      id: diff
+      shell: bash
+      run: |
+        set -euo pipefail
+        if git diff --quiet -- "${{ inputs.history }}"; then
+          echo "appended=0" >> "$GITHUB_OUTPUT"
+          echo "no new calibration lines"
+        else
+          n="$(git diff --numstat -- "${{ inputs.history }}" | awk '{print $1}')"
+          echo "appended=${n:-0}" >> "$GITHUB_OUTPUT"
+          echo "$n new line(s)"
+        fi
+
+    - name: push to the calibration branch
+      if: steps.diff.outputs.appended != '0'
+      shell: bash
+      env:
+        BRANCH: ${{ inputs.branch }}
+      run: |
+        set -euo pipefail
+        git config user.name  "oneground calibration bot"
+        git config user.email "noreply@users.noreply.github.com"
+        # Take the appended lines onto the calibration branch, so that master
+        # is never a target of an automated push.
+        cp "${{ inputs.history }}" /tmp/history.jsonl
+        git fetch origin "$BRANCH" || true
+        git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null \
+          || git checkout -B "$BRANCH"
+        cp /tmp/history.jsonl "${{ inputs.history }}"
+        git add "${{ inputs.history }}"
+        git commit -m "calibration(${{ inputs.label }}): ${{ steps.diff.outputs.appended }} line(s) from run ${{ github.run_id }}" \
+          || { echo "nothing to commit"; exit 0; }
+        git push origin "$BRANCH"
+
+    - name: find contradictions
+      id: bad
+      shell: bash
+      run: |
+        set -euo pipefail
+        python - <<'PY' >> "$GITHUB_OUTPUT"
+        import json, os
+        path = "${{ inputs.history }}"
+        scope = "${{ inputs.scope }}"
+        bad = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
+                if d.get("outcome") != "contradicted":
+                    continue
+                if d.get("outcome_scope", "blocking") != "blocking":
+                    continue
+                bad.append(d)
+        # Only this run's lines matter; earlier contradictions are history and
+        # have their own issues already.
+        bad = bad[-int("${{ steps.diff.outputs.appended }}" or 0):] if bad else []
+        print(f"count={len(bad)}")
+        if bad and scope == "blocking":
+            body = "\n".join(json.dumps(d, indent=2, sort_keys=True) for d in bad)
+            print("body<<ONEGROUND_EOF")
+            print(body)
+            print("ONEGROUND_EOF")
+        PY
+
+    - name: open an issue carrying the line
+      if: inputs.scope == 'blocking' && steps.bad.outputs.count != '0'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const body = `${{ steps.bad.outputs.body }}`;
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `calibration contradicted (${{ inputs.label }}, run ${context.runId})`,
+            body: [
+              'A blocking calibration check came out `contradicted`.',
+              '',
+              'The tolerance is not to be widened to clear this. Diagnose which',
+              'layer moved -- the pinned dependencies, the engine, the corpus',
+              'digest, or the simulator -- and record the decomposition.',
+              '',
+              'The offending history line(s):',
+              '',
+              '```json',
+              body,
+              '```',
+              '',
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n'),
+            labels: ['calibration'],
+          });
+
+    - name: fail on a blocking contradiction
+      if: inputs.scope == 'blocking' && steps.bad.outputs.count != '0'
+      shell: bash
+      run: |
+        echo "::error::${{ steps.bad.outputs.count }} blocking calibration check(s) contradicted"
+        exit 1

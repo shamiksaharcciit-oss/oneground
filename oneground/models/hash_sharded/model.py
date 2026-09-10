@@ -1,0 +1,173 @@
+"""hash_sharded — N shards by a seeded hash of the vector id.
+
+The deliberately dumb partition. Vectors are split across N shards by hashing
+their id, so the partition carries no semantic information at all: every query
+must fan out to **all N shards**, and the results are merged.
+
+Why a family that cannot possibly route well is worth measuring
+---------------------------------------------------------------
+Because it is the honest control. Its recall is essentially the single-node
+baseline's -- nothing is unreachable, only spread out -- at a fan-out of N and
+no storage amplification. So it isolates the one question semantic sharding is
+supposed to answer:
+
+    semantic_sharded is worth its complexity only if it beats hash_sharded's
+    recall at a *lower* fan-out, or matches it at lower cost.
+
+On a corpus where semantic sharding routes well, `probe=1` beats fan-out N. On
+arxiv-150k, where 89% of queries are ambiguous, it does not -- and hash
+sharding is what makes that comparison concrete rather than rhetorical. This
+family is the reason "scale out horizontally" has a measured price tag in the
+table instead of a shrug.
+
+Definition
+----------
+Shard assignment is `blake2b(str(vector_id)) mod N`, seeded with the run seed
+so two runs agree and two different seeds give different partitions. The id is
+the vector's row index in the sample unless the caller supplies ids. There is
+no replication: every vector lives in exactly one shard, so storage
+amplification is 1.0 and copies are 1 at every percentile.
+
+Ceiling is the full set: every shard is probed, so nothing is unreachable and
+routing loss is zero by definition. Any gap from 1.0 is index loss.
+
+Known limits
+------------
+- A hash partition ignores the data entirely, so shard sizes are even only in
+  expectation; with small N and few vectors they can be visibly uneven.
+- Fan-out is N by construction. This family has no way to probe fewer shards,
+  which is the whole point of it, but it means `node_counts` is the only knob
+  that trades cost against anything.
+"""
+
+import hashlib
+import time
+from dataclasses import dataclass
+
+import numpy as np
+
+from ..base import (BuiltIndex, Candidates, Config, Footprint,
+                    estimate_memory_bytes, exact_over, merge_candidates)
+
+NAME = "hash_sharded"
+
+SHARD_DEPTH = 30
+EF_CONSTRUCTION = 200
+
+DEFAULT_GRID = {"M": (32,), "efSearch": (96,)}
+
+
+def shard_of(vector_id, n_shards, seed):
+    """Seeded, stable assignment of one vector to one shard.
+
+    blake2b rather than Python's `hash()`: `hash()` is randomized per process
+    unless PYTHONHASHSEED is set, which would make a "deterministic" model
+    silently non-reproducible across runs.
+    """
+    h = hashlib.blake2b(str(vector_id).encode("utf-8"),
+                        digest_size=8,
+                        key=str(int(seed)).encode("utf-8")[:64])
+    return int.from_bytes(h.digest(), "big") % int(n_shards)
+
+
+def assign_shards(n_vectors, n_shards, seed, ids=None):
+    """Shard id per vector row, as an int64 array."""
+    src = ids if ids is not None else range(n_vectors)
+    return np.fromiter((shard_of(v, n_shards, seed) for v in src),
+                       dtype=np.int64, count=n_vectors)
+
+
+@dataclass
+class HashSharded:
+    name: str = NAME
+
+    # -- sweep -------------------------------------------------------------
+    def configs(self, space):
+        grid = {**DEFAULT_GRID, **space.for_family(NAME)}
+        node_counts = grid.get("shards", space.node_counts)
+        seen, out = set(), []
+        for params in space.included_for(NAME):
+            p = {"shards": 3, "M": 32, "efSearch": 96}
+            p.update(params)
+            c = Config.make(NAME, p)
+            if c.label not in seen:
+                seen.add(c.label)
+                out.append(c)
+        for n in node_counts:
+            for M in grid["M"]:
+                for ef in grid["efSearch"]:
+                    c = Config.make(NAME, {"shards": int(n), "M": int(M),
+                                           "efSearch": int(ef)})
+                    if c.label not in seen:
+                        seen.add(c.label)
+                        out.append(c)
+        return out
+
+    # -- build -------------------------------------------------------------
+    def build(self, vectors, config, seed, context=None):
+        import faiss
+        t0 = time.time()
+        n_shards = int(config.get("shards", 3))
+        ids = (context or {}).get("ids")
+        assign = assign_shards(len(vectors), n_shards, seed, ids)
+
+        shards, ids_of = {}, {}
+        for r in range(n_shards):
+            member = np.where(assign == r)[0].astype(np.int64)
+            if len(member) == 0:
+                continue
+            s = faiss.IndexHNSWFlat(vectors.shape[1],
+                                    int(config.get("M", 32)),
+                                    faiss.METRIC_INNER_PRODUCT)
+            s.hnsw.efConstruction = EF_CONSTRUCTION
+            s.add(vectors[member])
+            s.hnsw.efSearch = int(config.get("efSearch", 96))
+            shards[r], ids_of[r] = s, member
+
+        return BuiltIndex(
+            family=NAME, config=config, n_base=len(vectors),
+            dim=vectors.shape[1],
+            state={"shards": shards, "ids_of": ids_of, "assign": assign,
+                   "vectors": vectors},
+            build_seconds=time.time() - t0)
+
+    # -- search ------------------------------------------------------------
+    def search(self, built, queries, k, config):
+        shards, ids_of = built.state["shards"], built.state["ids_of"]
+        for s in shards.values():
+            s.hnsw.efSearch = int(config.get("efSearch", 96))
+
+        ids = np.full((len(queries), k), -1, dtype=np.int64)
+        scores = np.full((len(queries), k), -np.inf, dtype=np.float32)
+        depth = max(SHARD_DEPTH, k)
+        for qi in range(len(queries)):
+            cid, csc = [], []
+            for r, s in shards.items():          # every shard, every query
+                n = min(depth, s.ntotal)
+                sc, loc = s.search(queries[qi:qi + 1], n)
+                cid.append(ids_of[r][loc[0]])
+                csc.append(sc[0])
+            ids[qi], scores[qi] = merge_candidates(cid, csc, k)
+        return Candidates(ids=ids, scores=scores)
+
+    # -- ceiling -----------------------------------------------------------
+    def ceiling(self, built, queries, k):
+        """Every shard is probed, so everything is reachable."""
+        ids, _ = exact_over(built.state["vectors"],
+                            np.arange(built.n_base), queries, k)
+        return ids
+
+    # -- footprint ---------------------------------------------------------
+    def footprint(self, built):
+        M = int(built.config.get("M", 32))
+        n_shards = int(built.config.get("shards", 3))
+        return Footprint(
+            stored_vectors=built.n_base,          # no replication
+            amplification=1.0,
+            memory_bytes=estimate_memory_bytes(built.n_base, built.dim, M),
+            fanout=float(n_shards),               # the cost this family shows
+            shards=len(built.state["shards"]),
+        )
+
+
+MODEL = HashSharded()

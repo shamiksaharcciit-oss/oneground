@@ -1,0 +1,27 @@
+{
+  "built_at": "2026-09-10T00:05:49Z",
+  "dim": 100,
+  "environment": "local:windows-amd64",
+  "fixture": "glove-100-angular",
+  "ground_truth_kind": "declared",
+  "libraries": {
+    "faiss-cpu": "1.15.0",
+    "numpy": "2.5.3",
+    "sentence-transformers": "6.0.1",
+    "torch": "2.14.0+cpu",
+    "umap-learn": "0.5.12"
+  },
+  "mean_reachable_share_of_top10": 1.0,
+  "n_base": 1183514,
+  "n_train_full": 1183514,
+  "platform": "Windows-11-10.0.26200-SP0",
+  "published_top10_fully_reachable": 1.0,
+  "python": "3.12.10",
+  "source_sha256": "544af1d5e84e112cd4749571dcfd8ca109818a572f850af75a3a09e093a953c4",
+  "subset": null,
+  "torch": {
+    "cuda_device_name": null,
+    "torch": "2.14.0+cpu",
+    "torch_cuda": null
+  }
+}

@@ -1,0 +1,63 @@
+# arxiv-150k canonical build, as a pod session.
+#
+# This is the session that produced builds 2 and 3 by hand (corpora/POD_SETUP.md
+# steps 1-9). `oneground pod plan sessions/arxiv-build.yaml` resolves it live
+# and prices it; `up` is the only thing that creates anything.
+#
+# The volume was renamed to `vecbench` before task 006b; the datacenter is
+# derived from this name, so it has to be the real one.
+
+gpu:
+  # Display names, tried in order; the first one actually offered in the
+  # volume's datacenter wins. Build 3 ran on an RTX PRO 4500 Blackwell.
+  # Checked live in EU-RO-1: RTX PRO 4500 is offered ($0.34/hr); RTX 6000 Ada
+  # and RTX 4090 are NOT offered there, so they are fallbacks in name only
+  # while the volume stays in EU-RO-1. RTX PRO 6000 is the real second choice.
+  - RTX PRO 4500
+  - RTX PRO 6000
+  - RTX 6000 Ada
+  - RTX 4090
+
+volume: vecbench            # by name; datacenter derived from it
+volume_mount_path: /workspace
+
+# Pinned tag, looked up on Docker Hub rather than guessed. CUDA 13.0 matches
+# build 3's torch 2.14.0+cu130, and ubuntu2404 gives python 3.12.3 -- the exact
+# interpreter build 3's build_info.json records. The image's own torch (2.9.1)
+# is irrelevant: setup builds a fresh venv WITHOUT --system-site-packages and
+# installs the pins from requirements.txt, which is what task 003b found had
+# gone wrong in build 1.
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+
+disk_gb: 20
+
+env:
+  HF_HOME: /workspace/hf
+
+setup: corpora/POD_SETUP.md      # executed as the venv-on-local-disk script
+run: bash corpora/run_arxiv_150k.sh
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-session.log
+done_marker: DONE                # run_arxiv_150k.sh prints this near the end
+
+outputs:
+  # The review bundle: small enough for the repo.
+  - {remote: /workspace/arxiv-150k-small.tgz, local: ./, extract: true}
+  # The release asset: 483 MB at build 3, deliberately outside the repo.
+  - {remote: /workspace/arxiv-150k-large.tgz, local: ../oneground-assets/}
+
+# The stall watchdog: `watch` terminates if the run's log stops growing for
+# this long. The slow phase used to be `pip install` onto the network volume
+# (~30 min); the local-disk venv cut that to minutes, so 20 covers the worst
+# legitimate quiet period -- embedding logs progress throughout.
+stall_minutes: 20
+
+caps:
+  # Build 3 took 19 minutes; an hour is generous. The worst case is now
+  # budgeted at the TOP of the live price range, not its floor: at $0.72/hr
+  # (the rate task 006b was actually billed) one hour is $0.72, inside
+  # max_usd. Confirming at the floor is what made 006b's cap hold by luck.
+  max_hours: 1.0
+  max_concurrent: 1
+  max_usd: 1.50

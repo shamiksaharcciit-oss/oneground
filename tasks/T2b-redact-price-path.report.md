@@ -1,0 +1,227 @@
+# Report: T2b-redact-price-path
+
+## Repo state expected vs found
+
+| the brief assumed | found |
+|---|---|
+| `cfb70ec` on master, redacting developer paths | yes — *"task 014: redact developer paths; --asset; the branch lifecycle"*. |
+| `requirements.arxiv-150k.yaml` redacted by it | yes: `~/oneground-assets\arxiv-150k\` → `~/oneground-assets/arxiv-150k/`. |
+| the workdir intact, so report-only re-run is enough | yes — `oneground report` finished in 0.3 s and touched neither `simulate.json` nor `verify.json`. |
+| `verdict.price_table.path` is the developer path to remove | yes, it was the only `<developer>` string in `site/teaser/`. |
+| **re-running the report would clear it** | **no.** See below. |
+
+**The brief's mechanism does not reach the field it targets.** Re-running
+`oneground report` from the redacted requirements changed exactly one string in
+`report.json`, and it was not `price_table.path`:
+
+    calibration.engine_line.source
+      before  <repo>-012\runs\arxiv-smoke\verify.json
+      after   C:\Users\<developer>\projects\oneground-012\runs\arxiv-smoke\verify.json
+
+`price_table.path` is not read from the requirements file at all. It is where
+`prices.example.yaml` sits on the machine that ran the report — built at
+runtime from the package's own location
+(`oneground/cost/__init__.py:45`) — so no edit to a requirements file can
+change it. After the re-run it still read
+`<repo>\oneground\cost\prices.example.yaml`, and so
+did three `run_environment` fields (`executable`, `prefix`, `requirements`),
+which are `sys.executable`, `sys.prefix` and the resolved requirements path.
+
+I did the re-run anyway — the brief asked for it, and it is what confirmed the
+decision is unchanged — and then removed the path where the teaser stream
+actually controls it: in the export, which decides what it copies. That is
+inside this stream's scope; changing how the package records
+`price_table.path` would not be.
+
+## What was done
+
+1. `oneground report requirements.arxiv-150k.yaml` in `.venv`. Report only —
+   `simulate.json` and `verify.json` were read, not rewritten.
+2. Diffed the regenerated `report.json` against the copy taken immediately
+   before, field by field (`tasks/scratch/T2b-diff-report.py`).
+3. Added `public_price_table()` to `corpora/export_teaser_data.py`: when the
+   verdict block is built, `price_table.path` is rewritten to a repo-relative
+   path — `oneground/cost/prices.example.yaml` — which is the shape every other
+   source string on the page already has. A path outside the repository is
+   reduced to its basename. A `path_note` records that the export rewrote it,
+   so the page never implies this is the literal `report.json` value.
+4. `corpora/export_teaser_data.py --report-only`, 1.2 s.
+5. Scanned the shipped data for identifiers, including inside the compressed
+   bundle (`tasks/scratch/T2b-scan-identifiers.py`).
+
+## Measurements
+
+### The decision and the quoted numbers, before vs after the re-run
+
+Method: `tasks/scratch/T2b-diff-report.py`, comparing every leaf of
+`report.json` against the copy taken before the re-run, ignoring
+`generated_at` and `inputs`.
+
+| | |
+|---|---|
+| `recommendation` | **unchanged** — `single_node_hnsw[M=32,efConstruction=200,efSearch=128]` |
+| `summary` | **unchanged** — 1 meets / 6 fails / 1 couldn't-check of 8 |
+| every option outcome and constraint verdict | **unchanged** (no differences) |
+| every `options[*].measurement` field | **unchanged** (no differences) |
+| all 18 decision-log entries | **unchanged**, text for text |
+| `costs` and `price_table` | **unchanged** (including the path — that is the point above) |
+| anything else | one field: `calibration.engine_line.source`, the redaction |
+
+### `values.json`, T2 commit vs now
+
+Method: `tasks/scratch/T2b-diff-values.py`, against `git show HEAD:`.
+
+Every number the page prints is identical: RTT baseline p95 6.987379, sequential
+p95 7.17682 and share 0.973604, under-load p95 38.216508 and share 0.182837,
+qps 199.99 achieved of 200.0 target, 59,999 of 60,000 completed at concurrency
+32, recall@10 measured 0.99935, calibration error −0.0018, ingest 2775.256229/s,
+Qdrant 1.19.1, environment `tf8sd2usxbblsm`, date 2026-09-09, cost 140.16 with
+band 105.12–175.20, and the recommendation and summary above.
+
+What moved, and why:
+
+| field | before | after |
+|---|---|---|
+| `verdict.price_table.path` | `~\…\prices.example.yaml` | `oneground/cost/prices.example.yaml` |
+| `verdict.price_table.path_note` | absent | added, saying the export rewrote it |
+| `verdict.generated_at` | `2026-09-09T23:22:20Z` | `2026-09-10T18:23:41Z` |
+| `verdict.calibration` | `{history: "not yet available", note, tolerance}` | the real calibration history: engine and family lines, `statements`, `history_path` |
+
+**Two quoted decision-log entries changed their text, and neither came from
+this task's re-run** — `report.json` had already been regenerated by the 012–014
+work between my T2 commit and now, so the page had been quoting a superseded
+report:
+
+- `scope`: *"judged against **4** constraint(s): recall_at_k,
+  storage_amplification, latency_p95, monthly_budget"* → *"judged against **5**
+  constraint(s): recall_at_k, storage_amplification, latency_p95, **qps**,
+  monthly_budget"*. This is the undercount I filed under *Observed, not done*
+  in the T2 report; the package fixed it. The page's own lede already said five,
+  so the page now agrees with itself.
+- `indistinguishable`: gained a closing clause — *"Overall:
+  hash_sharded[…] couldnt_check; single_node_hnsw[…] meets — indistinguishable
+  on recall is not indistinguishable overall."*
+
+Both are corrections that make the quoted text stronger, but they are text
+changes in quoted entries and the brief asked for "unchanged", so they are
+called out rather than absorbed. No **number** the page prints moved.
+
+### What changed on disk
+
+Method: sha256 of every file in `site/teaser/data/` before and after, and
+`git diff --stat`.
+
+    unchanged  base.bin          08268d208c3dd8a4…
+    unchanged  centroids.json    26cd059b1a053bfb…
+    unchanged  queries.json      97289c3ab2aca602…
+    rewritten  values.json       29c88d49ff72e41a… → 943ab45d738606a3…   47,506 bytes
+    rewritten  inline.js         d0dce51ca730f12b… → c712922c2caacea7…  4,702,225 bytes
+    rewritten  MANIFEST.sha256   37455b6d710ea9e3… → 7077ccefa48d479e…
+
+`git diff --stat -- site/teaser/` lists three files and nothing else, and the
+`MANIFEST.sha256` diff is exactly two lines — the `values.json` and `inline.js`
+lines. The `base.bin`, `centroids.json` and `queries.json` lines are untouched.
+
+The re-run also rewrote `runs/arxiv-150k-via-characterize/report.json`,
+`manifest.yaml` and `report.html`. `runs/` is gitignored
+(`.gitignore:34`), so none of that is in the commit.
+
+### `<developer>` in `site/teaser/`
+
+    grep -rl "<developer>" site/teaser/   →   0 files
+
+**0**, which is the brief's bar. A plain grep cannot see inside `inline.js`,
+which is gzip+base64, so each of the four payloads was decompressed and
+searched as bytes as well:
+
+    base.bin        0
+    centroids.json  0
+    queries.json    0
+    values.json     0
+
+## Verification
+
+**Passed.** `site/teaser/verify_teaser_data.py` — every check, including
+`inline.js` decompressing to the four files beside it byte-for-byte, and load
+size 4.59 MB over http / 4.78 MB from `file://`, both under 5 MB.
+
+**Passed.** `public_price_table()` behaviour, exercised directly against the
+imported module: a path inside the repo → `oneground/cost/prices.example.yaml`;
+a path on another drive → `prices.yaml`; a table with no `path` key → returned
+unchanged; `None` → `None`.
+
+**Passed.** The page renders the new data with **no console output, no
+exceptions, and seven same-origin requests** (method: a minimal CDP probe,
+`scratchpad/console.js` — `Runtime.consoleAPICalled`, `Log.entryAdded`,
+`Runtime.exceptionThrown` and `Network.requestWillBeSent` over one load).
+`verdict.calibration.tolerance` survives the new calibration shape, so the
+verdict source line still reads *"…calibration tolerance 0.01"*, and the
+heading still reads `Three options. One recommended.`
+
+**Couldn't check.** Edge, and a real phone — as at the end of T1 and T2. This
+task changed one string in the data and no layout, so the bounds check and the
+slider were not re-run; nothing they measure was touched.
+
+## Observed, not done
+
+- **`<hostname>` now ships in `values.json`.** The newer `report.json`
+  carries a real calibration history, and two of its fields read
+  `environment: "local:<hostname>"` —
+  `verdict.calibration.engine_line.environment` and `family_line.environment`.
+  That is a machine name, the same class of identifier as a home-directory
+  path, and it arrived in the teaser only in this task. **Nothing on the page
+  renders it** — the page reads only `calibration.tolerance` — but it is in the
+  published bytes.
+
+  I did not redact it. `cfb70ec` is an explicit ruling on what goes and what
+  stays ("developer paths go, pod ids stay", synthetic IPs stay), hostnames
+  were not covered, and extending a redaction policy is your call rather than
+  mine. If you want it gone it is one line beside `public_price_table()`, and
+  it should probably be fixed in the calibration writer so every consumer
+  benefits rather than just this page.
+
+- **`verdict.calibration.engine_line.source`** ships as
+  `C:\Users\<developer>\projects\oneground-012\…` — already redacted to the
+  project's convention, carrying no name, and left as `cfb70ec` wrote it.
+
+- **`run_environment` still carries three `<developer>` paths in `report.json`**
+  (`executable`, `prefix`, `requirements`). It is not copied into
+  `values.json`, so it does not reach the teaser, but it is in the run artifact
+  and would leak if anything else published one.
+
+- **The scan flagged 53 "home tilde path" hits inside `base.bin`.** They are a
+  false positive: `~` followed by a separator byte occurring by chance in
+  3.9 MB of float32. `base.bin` holds no strings.
+
+## Repo now contains
+
+Changed:
+
+    corpora/export_teaser_data.py      public_price_table(), REPO_ROOT
+    site/teaser/data/values.json       regenerated; price_table.path relative
+    site/teaser/data/inline.js         the same four files, rebundled
+    site/teaser/data/MANIFEST.sha256   two lines
+
+New:
+
+    tasks/T2b-redact-price-path.report.md   this file
+    tasks/scratch/T2b-patch-export.py       the one-shot patch
+    tasks/scratch/T2b-diff-report.py        report.json before vs after
+    tasks/scratch/T2b-diff-values.py        values.json vs the T2 commit
+    tasks/scratch/T2b-scan-identifiers.py   the identifier scan, bundle included
+
+Unchanged and asserted so: `base.bin`, `centroids.json`, `queries.json`. No
+file under `oneground/`, `fixtures/`, `docs/`, `models/`, `adapters/` or
+`policies/` was written. `runs/` was rewritten by the report re-run and is
+gitignored. No new dependency.
+
+## Blocked on developer
+
+Nothing blocking. Two decisions:
+
+1. **`<hostname>` in the shipped `values.json`** — redact before the
+   public cut, or accept it. See *Observed*.
+2. **`price_table.path` in `report.json` itself** is still an absolute
+   developer path for every consumer other than this page. The teaser now
+   defends itself; the package does not. Worth a task if any other artifact
+   gets published.

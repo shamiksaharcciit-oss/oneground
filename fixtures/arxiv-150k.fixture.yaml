@@ -1,0 +1,317 @@
+# oneground fixture: arxiv-150k
+# ------------------------------------------------------------------
+# A public corpus with frozen ground truth and published characterization
+# values, so anyone can verify their oneground installation reproduces the
+# same numbers. Fixtures are for learning and for checking the tool.
+# They are never used to choose a store for a real corpus.
+#
+# House rule: every field below is either a receipt (re-derivable from the
+# records) or declared (bytes frozen). Values marked TO_BE_FILLED are set by
+# the first canonical build and never edited by hand afterwards.
+
+fixture:
+  id: arxiv-150k
+  version: 1
+  status: verified           # planned | built | verified
+  license_notice: >
+    arXiv metadata (titles, abstracts, categories, dates) is released under
+    CC0 1.0 via the arXiv dataset on Kaggle / Hugging Face. This fixture
+    redistributes a sampled subset of that metadata plus derived vectors.
+    Abstract text is included for the learner interface only.
+
+source:
+  name: arXiv metadata snapshot
+  provider: arxiv.org via Kaggle "Cornell-University/arxiv" (mirrored on Hugging Face)
+  snapshot_date: "2026-09-05"          # date of the metadata dump used
+  snapshot_sha256: 99dc9b05b10f5ddf4726e09f57ede4fa25aae6151fe0b93ff4048b9f8d54ef7b
+  fields_used: [id, title, abstract, categories, update_date]
+  kind: declared                       # upstream bytes are frozen, not re-derivable by us
+
+sampling:
+  target_size: 150000
+  rule: >
+    Stratified by year of update_date across 2007–2025 in proportion to each
+    year's volume, then uniform within year. No category balancing: the real
+    skew (cs.LG / cs.CL growth) is a feature of the fixture, not noise.
+  seed: 20260908
+  exclusions:
+    - abstracts shorter than 200 characters
+    - records with missing categories or update_date
+    - withdrawn papers (abstract begins with "This paper has been withdrawn")
+  text_template: "{title}. {abstract}"
+  sample_sha256: 404cb92e6d7dd42bde81798d86926b3b64e3cd069547a8ebef5c06120ae73655
+  kind: receipt
+
+embedding:
+  model: BAAI/bge-base-en-v1.5
+  weights_sha256: c7c1988aae201f80cf91a5dbbd5866409503b89dcaba877ca6dba7dd0a5167d7
+  library: sentence-transformers
+  library_version: 6.0.1
+  max_seq_length: 512
+  normalize: true                      # unit vectors; inner product == cosine
+  dtype: float32
+  dimension: 768
+  batch_size: 128
+  device: cuda                         # see cuda_device below; the CPU pod was host-contended (task 003 report)
+  torch_version: "2.14.0+cu130"   # recorded by the builder (build 3)
+  torch_cuda: "13.0"   # recorded by the builder (build 3)
+  cuda_device: "NVIDIA RTX PRO 4500 Blackwell"   # recorded by the builder (build 3)
+  # digest of the raw array bytes; MANIFEST.sha256 holds the .npy file digest (with header)
+  vectors_sha256: cb973a94ba305a9afe81c98bdc05e51ee3b91023281c33997bc5212fe6db5f5f
+  kind: receipt
+
+queries:
+  count: 2000
+  rule: >
+    Held out from the sample before ground truth: 1,000 drawn uniformly,
+    1,000 drawn from the top 5% categories by volume (query skew mirrors
+    corpus skew). Query text is the title only, embedded with the same model,
+    so queries are shorter than documents — as in real search.
+  seed: 20260909
+  # digest of the raw array bytes; MANIFEST.sha256 holds the .npy file digest (with header)
+  queries_sha256: 16e0f4882b317bfad531f844230f76ad1ef90e62ac365fbe4b986ab2fdde5ebe
+  kind: receipt
+
+ground_truth:
+  method: exact k-NN, brute force (faiss IndexFlatIP)
+  k: 100
+  metric: inner_product
+  base_excludes_queries: true
+  # digest of the raw array bytes; MANIFEST.sha256 holds the .npy file digest (with header)
+  ground_truth_sha256: 96fc8bd08f719963ca0d70896c21c11e57c92d6fd0c4a1fed14e339fa12d09bf
+  kind: receipt
+
+analogy:
+  # What this fixture is LIKE, for Tier-2 matching. Declared, not measured:
+  # these are the builder's description of the corpus, in the same vocabulary
+  # `corpus.declared` uses, so a user who has no sample yet can be shown the
+  # nearest published corpus and told plainly that its numbers are its own.
+  #
+  # Matching on these never produces a verdict. It produces an analogy, and
+  # the report labels every number that comes with it as measured on this
+  # fixture and not on the user's corpus.
+  kind: declared
+  corpus_type: papers            # news | papers | tickets | catalog | chat_memory | docs | other
+  text_length: medium            # abstracts: ~1,200 chars, so medium
+  topics_trend: true             # arXiv categories rise and fade; the drift pair measures it
+  time_ordered: true             # update_date is a real timeline
+  languages: [en]
+  dimension: 768
+  embedding_model: BAAI/bge-base-en-v1.5
+  model_family: bge              # matched when the exact model differs
+
+characterization:
+  # Published values. A local build must reproduce each within tolerance.
+  # All are computed on the fixture vectors against the ground truth above.
+  intrinsic_dimensionality:
+    estimator: TwoNN
+    value: 32.55
+    tolerance: 0.5
+  boundary_crispness:
+    definition: >
+      Fraction of base vectors whose second-nearest centroid distance exceeds
+      1.20 x their nearest centroid distance, under k-means with 256 centroids
+      (seed 20260908, 20 iterations). Higher is crisper.
+    value: 0.036
+    tolerance: 0.02
+  ambiguous_query_rate:
+    definition: fraction of queries with d2 <= 1.10 * d1 against the same centroids
+    value: 0.891
+    tolerance: 0.02
+  skew_top10_share:
+    definition: share of base vectors in the 10 largest centroid regions
+    value: 0.075
+    tolerance: 0.02
+  drift:
+    definition: >
+      Centroids trained on records with update_date before 2019-01-01;
+      recall@10 at one-region routing measured separately on queries whose
+      source paper is before / after that date. Reported as the pair.
+    value_before: 0.522
+    value_after: 0.549
+    tolerance: 0.02
+  kind: receipt
+
+reference_results:
+  # Baseline numbers from the canonical build, for verifying an installation.
+  # Not a leaderboard. Configurations are fixed here on purpose.
+  single_node_hnsw:
+    params: {M: 32, efConstruction: 200, efSearch: 128}
+    recall_at_10: 0.997
+    tolerance: 0.01
+  semantic_sharded:
+    params: {centroids: 256, epsilon: 0.20, probe: 2, M: 32, efSearch: 96}
+    recall_at_10: 0.932
+    routing_ceiling: 0.932
+    storage_amplification: 3.715
+    p50_copies: 4
+    p95_copies: 4
+    p99_copies_per_vector: 4
+    tolerance: 0.01
+  kind: receipt
+
+projection:
+  # For the learner interface and the hero image only. Not a measurement.
+  method: UMAP
+  params: {n_neighbors: 30, min_dist: 0.08, metric: cosine, seed: 20260908}
+  color_by: top-level arXiv category
+  note: >
+    The projection is illustrative. Regions and closure bands drawn on it
+    are computed in the full 768-d space, then mapped onto the projection.
+  kind: declared
+
+artifacts:
+  directory: fixtures/arxiv-150k/
+  files:
+    - sample.jsonl.zst          # id, title, abstract, categories, update_date
+    - vectors.npy               # (150000, 768) float32, normalized
+    - queries.npy               # (2000, 768) float32, normalized
+    - query_ids.json            # source record ids for the held-out queries
+    - ground_truth.npy          # (2000, 100) int64
+    - characterization.json     # measurement only; versions in build_info.json
+    - build_info.json           # declared
+    - projection.npy            # (150000, 2) float32, UMAP
+    - ground_view_base.parquet       # declared
+    - ground_view_queries.parquet    # declared
+    - ground_view_centroids.parquet  # declared
+    - MANIFEST.sha256           # digests of every file above
+
+verification:
+  command: oneground fixture verify arxiv-150k
+  passes_when: >
+    Every artifact digest matches MANIFEST.sha256, and every characterization
+    and reference_results value reproduces within its stated tolerance from a
+    local rebuild of ground truth and the two reference configurations.
+  outcomes: [verified, contradicted, couldnt_check]
+  note: couldnt_check is reported when a dependency version differs from the pinned one; it is never rounded up to verified.
+
+changelog:
+  # 'version' is the fixture schema version; 'build' is the canonical build number
+  - build: 1-prep
+    date: 2026-09-08
+    note: Specification written. Canonical build pending.
+  - build: 1
+    date: 2026-09-08
+    note: >
+      Canonical build completed on RunPod (RTX 4090). Values published.
+      Device changed cpu->cuda; see report.
+  - build: 2
+    date: 2026-09-08
+    note: >
+      Build 2 in the pinned environment (numpy 2.5.3) supersedes build 1
+      (numpy 2.1.2); canonical artifacts are build 2. See findings.
+  - build: 3
+    date: 2026-09-09
+    note: >
+      Pinned environment on an RTX PRO 4500 Blackwell, torch recorded by the
+      builder, ground-view export added. Canonical artifacts are build 3.
+  - build: 3
+    date: 2026-09-10
+    note: >
+      status built -> verified. `oneground fixture verify arxiv-150k`
+      reproduced every published value from the release asset on a second
+      machine and a second operating system: 11/11 digests verified, 8/8
+      values verified, nothing contradicted, nothing couldnt_check.
+
+      Verified on the developer's laptop -- Windows-11-10.0.26200-SP0,
+      Python 3.12.10 in the project .venv, numpy 2.5.3, faiss-cpu 1.15.0,
+      scikit-learn 1.9.0, all 65 pins in requirements.txt matched. Build 3
+      itself was made on Linux-6.8.0-138-generic-x86_64-with-glibc2.39,
+      Python 3.12.3, numpy 2.5.3, faiss-cpu 1.15.0, torch 2.14.0+cu130 on an
+      NVIDIA RTX PRO 4500 Blackwell (build_info.json). Same pins, different
+      OS and different hardware.
+
+      The eight values, recomputed vs published (tolerance in brackets):
+      intrinsic_dimensionality 32.5533 vs 32.55 [0.5];
+      boundary_crispness 0.0362467 vs 0.036 [0.02];
+      skew_top10_share 0.0754 vs 0.075 [0.02];
+      ambiguous_query_rate 0.8915 vs 0.891 [0.02];
+      drift 0.523212/0.551401 vs 0.522/0.549 [0.02];
+      single_node_hnsw.recall_at_10 0.9978 vs 0.997 [0.01];
+      semantic_sharded.recall_at_10 0.932 vs 0.932 [0.01];
+      semantic_sharded.storage_amplification 3.71516 vs 3.715 [0.01].
+
+      drift became checkable in task 013: it is recomputed from update_date
+      in sample.jsonl.zst at the published 2019-01-01 cutoff, with the same
+      seed and the same one-region exact routing the build used. Before that
+      it was the one value this command could not reach.
+
+findings:
+  # What the canonical build says about this corpus. Descriptive, not a
+  # recommendation: these hold for arxiv-150k under the configurations fixed
+  # above, and nothing here is transferable to another corpus.
+  - id: no_crisp_boundaries
+    note: >
+      Boundary crispness 0.036 and ambiguous-query rate 0.891: under k-means
+      with 256 centroids this embedding space has almost no crisp region
+      boundaries. Distances concentrate, consistent with an intrinsic
+      dimensionality of 32.55.
+  - id: semantic_sharded_loses
+    note: >
+      Semantic-sharded reaches recall@10 0.932 only at 3.715x storage, with
+      the closure cap saturated (p50 copies = 4 of a maximum 4). Single-node
+      HNSW reaches 0.997 at 1x. On this fixture the semantic-sharded family
+      loses on both axes at once.
+  - id: no_drift_penalty
+    note: >
+      Drift pair 0.522 before / 0.549 after: routing post-2019 queries against
+      centroids trained only on pre-2019 records carries no penalty on this
+      fixture. The later queries score marginally higher, not lower.
+  - id: loss_is_partitioning
+    note: >
+      Essentially all of the semantic-sharded loss is partitioning, not the
+      index. recall@10 0.9320 against a routing ceiling of 0.9324
+      (characterization.json, build 3) leaves an index loss of 0.0004 - 8 of
+      20,000 neighbour slots. Both round to 0.932 at the precision published
+      above, so the published pair is equal while the underlying measurement
+      is not: the index loss is negligible, not zero.
+  - id: values_survive_a_library_version_change
+    kind: declared            # advisory evidence, not part of the status
+    note: >
+      ADVISORY, AND NOT WHAT `status: verified` RESTS ON. During task 013 the
+      same eight values were recomputed by accident on an unpinned
+      interpreter -- numpy 2.2.6 and faiss 1.14.3 against the pinned 2.5.3
+      and 1.15.0 -- and every one still landed within its published
+      tolerance, the largest gap being drift's 0.0024 against a tolerance of
+      0.02. Only single_node_hnsw.recall_at_10 moved at all between the two
+      runs, 0.9976 unpinned against 0.9978 pinned, which is faiss's HNSW
+      construction differing slightly between versions.
+
+      That is evidence this fixture's published values are not balanced on a
+      particular build of numpy or faiss, which is worth knowing. It is NOT a
+      verification: a value recomputed under different libraries has not been
+      reproduced under the pins the fixture claims, and `fixture verify`
+      reports exactly that outcome -- couldnt_check, with the numeric
+      agreement stated in the detail so a reader sees both facts at once.
+      The status was set only after a run in the pinned environment.
+  - id: digests_are_environment_specific
+    note: >
+      Three builds, three environments: build 1 on the pod template's numpy
+      2.1.2 (RTX 4090), build 2 in an isolated venv honouring requirements.txt
+      exactly (RTX 4090), build 3 in that same pinned environment on an RTX PRO
+      4500 Blackwell. All three produced byte-identical sampling receipts -
+      sample.jsonl.zst 404cb92e... and query_ids.json a0f3236c... in every
+      build - and three distinct vector digests, and so three distinct
+      ground-truth, characterization and projection digests. Every published
+      value agreed at the precision printed. The drift pair is the only value
+      that moves at all: 0.523/0.549, 0.524/0.551, 0.522/0.549 across the three
+      builds, a spread of 0.002 against a tolerance of 0.02. Artifact digests
+      are environment-specific; reproducing the published values within
+      tolerance, not the bytes, is the cross-environment claim this fixture
+      makes.
+  - id: values_reproduce_live
+    note: >
+      Build 3's ground-view export recomputed the geometry from the artifacts
+      the build had just written, independently of the characterization step,
+      and reproduced every published value it could check: boundary crispness
+      0.0363 against 0.036, ambiguous query rate 0.8915 against 0.891,
+      skew_top10_share 0.0754 against 0.075 - each within 0.0005 - and
+      one-region recall@10 0.5473, inside the band implied by the drift pair.
+      This is the first live value reproduction in the project: until now the
+      fixture's own verification checked digests only.
+  - id: closure_replicates_most_of_the_corpus
+    note: >
+      Copies histogram at epsilon = 0.20: 1 copy 3.6%, 2 copies 5.6%, 3 copies
+      6.5%, 4 copies 84.3%. Closure replicates 84% of the corpus all the way to
+      the cap of four regions, which is the mechanism behind the 3.715x storage
+      amplification - not a long tail of awkward vectors but the common case.

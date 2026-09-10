@@ -1,0 +1,30 @@
+{
+  "characterization": {
+    "ambiguous_query_rate": 0.935,
+    "boundary_crispness": 0.5295,
+    "drift_after": 0.277391,
+    "drift_before": 0.290588,
+    "drift_n_after": 115,
+    "drift_n_before": 85,
+    "intrinsic_dimensionality": 22.062073,
+    "skew_top10_share": 0.1
+  },
+  "fixture": "arxiv-smoke",
+  "hot_categories": [
+    "cs.LG"
+  ],
+  "reference_results": {
+    "semantic_sharded": {
+      "p50_copies": 1,
+      "p95_copies": 4,
+      "p99_copies_per_vector": 4,
+      "recall_at_10": 0.6345,
+      "routing_ceiling": 0.6345,
+      "storage_amplification": 1.906
+    },
+    "single_node_hnsw": {
+      "recall_at_10": 1.0
+    }
+  },
+  "version": 1
+}

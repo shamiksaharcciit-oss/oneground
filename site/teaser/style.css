@@ -1,0 +1,730 @@
+/* oneground teaser — style.css
+   ---------------------------------------------------------------------------
+   Design tokens are docs/design/tokens.css, copied verbatim into :root below.
+   They are copied rather than @import-ed because this page has to open from
+   file:// with no requests of any kind, and because site/teaser/ merges as a
+   directory add and must not reach up into the repo at runtime.
+
+   Type: docs/design/tokens.md loads both families from the system only. No
+   webfont is bundled here (site/teaser/fonts/README.md says why), so the two
+   stacks below are the fallbacks tokens.css already defines, and the layout is
+   built to survive them rather than to depend on a face.
+
+   The three outcome colours carry meaning and appear only where an outcome is
+   being stated. The copies ramp is a separate, derived scale; --ochre itself
+   is the accent and never fills a verdict cell.
+*/
+
+:root {
+  --slate:  #1B2432;
+  --panel:  #243040;
+  --ink:    #E7EAEF;
+  --muted:  #8B96A5;
+  --ochre:  #C99A3B;
+
+  --teal:   #4FC1AD;   /* meets */
+  --coral:  #E36C5E;   /* fails */
+  --amber:  #D9A441;   /* couldnt_check */
+
+  --font-ui:   "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* Derived, not tokens: the closure ramp. Ordered cool -> warm so more
+     copies reads as more, and deliberately not any of the outcome colours.
+     Kept in one place because app.js reads these same four values. */
+  --copies-1: #3D7EB8;
+  --copies-2: #7FA3B0;
+  --copies-3: #B79C63;
+  --copies-4: #E0A83A;
+
+  --edge: #33415580;
+  --rule: #2F3D50;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--slate);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.55;
+  overflow-x: hidden;
+  /* Config strings like semantic_sharded[M=32,centroids=256,...] are single
+     unbreakable words wider than a phone. break-word wraps exactly those and
+     leaves ordinary prose alone. */
+  overflow-wrap: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+/* ---------------------------------------------------------------- sections */
+
+section {
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: 3.5rem clamp(1rem, 4vw, 3.5rem) 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+}
+
+/* A flex item defaults to min-width:auto and refuses to shrink below its
+   content, which is how one <pre> of unwrappable text widens the page. */
+section > *, footer > *, .panel > *, figure > * { min-width: 0; max-width: 100%; }
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ochre);
+  margin: 0 0 0.6rem;
+}
+
+h1, h2 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 0 0 0.5rem;
+  line-height: 1.12;
+  text-wrap: balance;
+}
+
+h1 { font-size: clamp(1.7rem, 3.2vw, 2.5rem); max-width: 24ch; }
+h2 { font-size: clamp(1.4rem, 2.8vw, 2.1rem); max-width: 26ch; }
+
+h1 em, h2 em { font-style: normal; color: var(--ochre); }
+
+h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  letter-spacing: 0.01em;
+}
+
+.lede {
+  color: var(--muted);
+  max-width: 58ch;
+  margin: 0;
+  font-size: clamp(0.92rem, 1.05vw, 1rem);
+}
+
+.lede strong { color: var(--ink); font-weight: 500; }
+
+/* A source line: what field, in what file, this number came from. Every
+   figure on the page has one, because a number without its source is the
+   thing this project exists not to publish. */
+.source {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.source a { color: var(--muted); }
+
+a { color: var(--ochre); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ canvas */
+
+.stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 15rem;
+  max-height: 34rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: #161D28;
+  overflow: hidden;
+}
+
+.stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: pan-y;
+}
+
+.stage figcaption {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  background: #161D28C8;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+figure { margin: 0; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+
+/* ------------------------------------------------------- hero: the ground */
+
+.ground-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  gap: 1.25rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 1rem 1.1rem;
+}
+
+.readout { display: flex; flex-direction: column; gap: 0.7rem; }
+
+.slider-row label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+
+.slider-row output {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  color: var(--ochre);
+}
+
+input[type="range"] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--ochre);
+  height: 2rem;               /* a touch target, not a hairline */
+}
+
+.counters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.counter { min-width: 0; }
+
+.counter .value {
+  font-family: var(--font-mono);
+  font-size: clamp(0.95rem, 1.5vw, 1.2rem);
+  color: var(--ink);
+  display: block;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.counter .label {
+  font-size: 0.63rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: block;
+}
+
+.legend { display: flex; flex-direction: column; gap: 0.15rem; }
+
+.legend-row {
+  display: grid;
+  grid-template-columns: 0.8rem 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  font-family: var(--font-mono);
+}
+
+.legend-row .swatch { width: 0.8rem; height: 0.8rem; border-radius: 2px; }
+.legend-row .pct { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.bar {
+  height: 3px;
+  background: var(--rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.bar > i { display: block; height: 100%; }
+
+/* Wide enough that the sentence at the reference epsilon sits on one line;
+   it grows to three at epsilon 0, where it says something longer and the
+   section simply gets taller. min-height keeps that from being a jump. */
+.caption {
+  font-size: clamp(1.05rem, 2.2vw, 1.4rem);
+  line-height: 1.35;
+  margin: 0;
+  max-width: 78ch;
+  min-height: 2.7em;
+  text-wrap: pretty;
+}
+
+.caption b { color: var(--ochre); font-weight: 600; }
+
+.modes { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.modes-row { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+.modes-row h3 { margin: 0; }
+
+button, .chip {
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--ink);
+  background: #2C3A4D;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--ochre); }
+button[aria-pressed="true"] { background: var(--ochre); color: #17202C; border-color: var(--ochre); }
+
+/* --------------------------------------------------- one query, every hop */
+
+.query-grid {
+  display: grid;
+  grid-template-columns: 22rem minmax(0, 1fr);
+  gap: 1.25rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.query-grid > .stage { min-height: 0; }
+
+/* The picker panel is a column: heading, the scrolling list, then the
+   surprise button pinned under it. Only the list scrolls. */
+.query-grid > .panel { display: flex; flex-direction: column; min-height: 0; }
+
+.query-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 5rem;
+  max-height: 15rem;
+  margin: 0.5rem -0.35rem 0;
+  padding: 0 0.35rem;
+}
+
+/* The line and the trace under the picture keep their height; the picture
+   above them gives up space instead. A squeezed flex row was overlapping. */
+.query-readout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  gap: 1.25rem;
+  flex: 0 0 auto;
+  align-items: start;
+}
+
+.query-list button {
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-left: 2px solid var(--rule);
+  border-radius: 0 3px 3px 0;
+  padding: 0.4rem 0.55rem;
+  line-height: 1.3;
+  color: var(--muted);
+  display: block;
+  width: 100%;
+}
+
+.query-list button:hover { color: var(--ink); border-left-color: var(--ochre); }
+
+.query-list button[aria-pressed="true"] {
+  background: #2C3A4D;
+  color: var(--ink);
+  border-left-color: var(--ochre);
+}
+
+.query-list .miss {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  display: block;
+}
+
+/* The trace: score -> route -> neighbours. Steps light in order as the
+   animation reaches them; each one names the field it is reading. */
+.trace { display: flex; flex-direction: column; gap: 0.35rem; margin: 0; padding: 0.7rem 0.85rem; list-style: none; }
+
+.trace li {
+  display: grid;
+  grid-template-columns: 1.3rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+  opacity: 0.32;
+  transition: opacity 220ms ease;
+}
+
+.trace li[data-on="1"] { opacity: 1; }
+
+.trace .n {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--ochre);
+  border: 1px solid var(--rule);
+  border-radius: 50%;
+  width: 1.3rem;
+  height: 1.3rem;
+  display: grid;
+  place-items: center;
+}
+
+.trace li[data-on="1"] .n { border-color: var(--ochre); }
+.trace .what { font-size: 0.8rem; line-height: 1.35; }
+.trace .detail { font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); display: block; }
+
+.verdict-line {
+  font-size: clamp(1rem, 2vw, 1.3rem);
+  margin: 0;
+  text-wrap: balance;
+}
+.verdict-line b { color: var(--ochre); font-weight: 600; }
+
+/* ------------------------------------------------------------- the verdict */
+
+.summary-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+.chip {
+  font-family: var(--font-mono);
+  cursor: default;
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.chip::before { content: ""; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: currentColor; }
+.chip.meets { color: var(--teal); }
+.chip.fails { color: var(--coral); }
+.chip.couldnt_check { color: var(--amber); }
+
+.families { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1rem; }
+
+.family h3 { display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline; }
+.family h3 .fam { font-family: var(--font-mono); font-size: 0.9rem; }
+.family .blurb { color: var(--muted); font-size: 0.78rem; margin: 0 0 0.7rem; }
+
+/* A configuration is one row until you ask for more. The four columns are
+   the same on the header and on every row, so the card reads as a table. */
+.opt-head, .opt > summary {
+  display: grid;
+  grid-template-columns: 0.9rem minmax(0, 1fr) 4.2rem 3.2rem 5.4rem;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.opt-head {
+  font-size: 0.63rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-bottom: 0.3rem;
+}
+
+.opt { border-top: 1px solid var(--rule); }
+
+.opt > summary {
+  cursor: pointer;
+  padding: 0.45rem 0;
+  list-style: none;
+  font-size: 0.76rem;
+}
+.opt > summary::-webkit-details-marker { display: none; }
+.opt > summary:hover .cfg { color: var(--ink); }
+.opt[open] > summary .cfg { color: var(--ink); }
+
+/* The caret is its own column, not a ::before on the config name: the name
+   wraps, and a marker inside a wrapping run ends up on a line of its own. */
+.opt > summary .caret {
+  color: var(--ochre);
+  transition: transform 120ms ease;
+  line-height: 1;
+}
+.opt[open] > summary .caret { transform: rotate(90deg); }
+
+.opt .cfg {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  overflow-wrap: break-word;   /* the params string wraps at its separators */
+  min-width: 0;
+}
+
+.opt > summary .m,
+.opt-head .m {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+}
+.opt-head .m { color: var(--muted); }
+
+.opt > summary .chip {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.66rem;
+  justify-self: end;
+  background: transparent;
+  border-color: transparent;
+}
+
+.cells { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.2rem 0 0.7rem 0.8rem; }
+
+.cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.1rem;
+  font-size: 0.76rem;
+  padding-bottom: 0.3rem;
+}
+.cell .k { color: var(--muted); min-width: 0; }
+.cell .v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.cell.meets .v { color: var(--teal); }
+.cell.fails .v { color: var(--coral); }
+.cell.couldnt_check .v { color: var(--amber); }
+/* Source fields are file paths and config strings with no spaces in them, so
+   they need `anywhere` (not `break-word`) to count as narrow when the grid
+   works out its track sizes -- otherwise one long config string sets the
+   width of the whole card and the page scrolls sideways on a phone. */
+.src {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.cell .src { grid-column: 1 / -1; }
+
+/* The recommendation and the latency panel: two lifted blocks between the
+   summary chips and the family tables. */
+.rec, .settle { display: flex; flex-direction: column; gap: 0.6rem; }
+
+.rec-config { margin: 0; font-size: 1rem; }
+.rec-config .mono { color: var(--teal); overflow-wrap: anywhere; }
+
+.rec-measured {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.8rem;
+  margin: 0.2rem 0;
+}
+
+.rec-num .value {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: clamp(1.3rem, 2.6vw, 1.9rem);
+  color: var(--ink);
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.rec-num .label {
+  display: block;
+  font-size: 0.63rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.15rem;
+}
+
+.runner-up {
+  margin: 0;
+  font-size: 0.85rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 0.6rem;
+}
+.runner-up .mono { color: var(--ink); }
+
+.settle table { margin-top: 0.2rem; }
+.settle td:first-child { color: var(--muted); font-size: 0.78rem; }
+td.nowrap { white-space: nowrap; }
+
+/* Same pairing as the receipt's value rows: the note belongs to the row above
+   it, so the rule goes under the pair. */
+.settle-table tr:not(.dnote) td { border-bottom: none; padding-bottom: 0.1rem; }
+.settle-table .dnote td { padding-top: 0; padding-bottom: 0.5rem; }
+.settle-rule {
+  margin: 0;
+  font-size: clamp(0.95rem, 1.8vw, 1.15rem);
+  color: var(--ink);
+  text-wrap: balance;
+}
+
+.log { display: flex; flex-direction: column; gap: 0.8rem; margin: 0; }
+.log blockquote {
+  margin: 0;
+  padding-left: 0.85rem;
+  border-left: 2px solid var(--ochre);
+  font-size: 0.92rem;
+  max-width: 78ch;
+}
+.log .src { display: block; margin-top: 0.25rem; }
+
+/* ------------------------------------------------------------- the receipt */
+
+.receipt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.76rem; }
+th, td { text-align: left; padding: 0.35rem 0.5rem 0.35rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; }
+td.mono, .mono { font-family: var(--font-mono); overflow-wrap: anywhere; }
+td.same { color: var(--teal); }
+td.differs { color: var(--ochre); }
+td.couldnt_check { color: var(--amber); }
+
+/* A value row and its delta line are one row of the table, so the rule goes
+   under the pair rather than between them. */
+#receipt-values tr:not(.dnote) td { border-bottom: none; padding-bottom: 0.1rem; }
+#receipt-values .dnote td { padding-top: 0; padding-bottom: 0.4rem; }
+#receipt-values td:first-child { padding-right: 0.6rem; }
+
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  background: #161D28;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.9rem 1rem;
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  color: var(--ink);
+}
+pre .c { color: var(--muted); }
+
+/* ------------------------------------------------------------- the promise */
+
+#promise { justify-content: center; align-items: flex-start; }
+
+.promise-text {
+  font-size: clamp(1.2rem, 3vw, 2rem);
+  line-height: 1.35;
+  max-width: 34ch;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.suite {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  margin: 1.6rem 0 0;
+}
+
+footer {
+  padding: 2rem clamp(1rem, 4vw, 3.5rem) 3rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: 84ch;
+}
+
+/* --------------------------------------------------------------- loading */
+
+#boot {
+  position: fixed;
+  inset: 0;
+  background: var(--slate);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+  padding: 2rem;
+}
+#boot[hidden] { display: none; }
+
+.err { color: var(--coral); }
+
+@media (min-width: 901px) {
+  /* Value names are single words with underscores; anywhere-wrapping splits
+     them mid-word, which reads as a typo. There is room not to, above 900px.
+     Not the delta line: it is a colspan cell and so also a first child, and
+     nowrap on it drags the whole table wider than its panel. */
+  #receipt-values tr:not(.dnote) td:first-child { white-space: nowrap; }
+
+  /* Sized from what the viewport has left after the copy, not from a flat
+     fraction of it, so the sections still fit a short window. */
+  .ground-grid, .query-grid {
+    height: clamp(15rem, calc(100svh - 30rem), 30rem);
+    flex: 0 0 auto;
+  }
+  /* The query section carries a trace panel where the hero carries a two-line
+     caption, so it has less room for its picture. */
+  .query-grid { height: clamp(14rem, calc(100svh - 33.5rem), 28rem); }
+  .readout { overflow-y: auto; }
+  .stage { max-height: none; min-height: 0; }
+}
+
+/* ---------------------------------------------------------------- mobile
+   Tested at 390 px. The two side-by-side grids stack, the canvas keeps a
+   fixed share of the viewport rather than fighting the panel for it, and the
+   slider keeps its 2rem touch target. */
+
+@media (max-width: 900px) {
+  .ground-grid, .query-grid, .query-readout { grid-template-columns: minmax(0, 1fr); }
+  .query-list { max-height: 15rem; flex: 0 0 auto; }
+  /* Four columns do not fit a phone: the config name wraps to three lines and
+     the numbers lose their header. Two rows instead, and each number carries
+     its own label since the header row is gone. */
+  .opt-head { display: none; }
+  /* Flex, not grid: fixed tracks on a 390 px card squeezed "recall@10" into a
+     column one character wide. Here the config takes the first line and the
+     numbers wrap onto the second, each carrying its own label. */
+  .opt > summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.15rem 0.75rem;
+  }
+  .opt > summary > .caret { flex: 0 0 auto; }
+  .opt > summary > .cfg { flex: 1 1 8rem; }
+  .opt > summary > .m { flex: 0 0 auto; text-align: left; }
+  .opt > summary > .m:first-of-type { margin-left: 1.35rem; }
+  .opt > summary > .chip { flex: 0 0 auto; }
+  .opt > summary .m::before {
+    content: attr(data-l) " ";
+    color: var(--muted);
+    font-size: 0.66rem;
+  }
+
+  .query-grid > .stage { order: -1; }
+  .stage, .query-grid > .stage { min-height: 42vh; max-height: 52vh; flex: 0 0 auto; }
+  section { min-height: auto; padding-top: 3rem; }
+  .counters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .readout { overflow: visible; }
+}
+
+@media (max-width: 420px) {
+  body { font-size: 15px; }
+  .counter .value { font-size: 1.05rem; }
+  .counters { gap: 0.4rem; }
+}

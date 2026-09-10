@@ -1,0 +1,45 @@
+# Qdrant for `oneground verify --target local`.
+#
+# The image tag is pinned, and the pin is recorded in verify_info.json as a
+# declared fact: "recall 0.98 against Qdrant" means nothing without saying
+# which Qdrant. `latest` would make two runs a month apart incomparable
+# without either of them being wrong.
+#
+# The tag tracks the pinned `qdrant-client` in requirements.txt. The client
+# refuses to vouch for a server more than one minor version away and warns at
+# import time; a pinned client and a pinned server that the vendor calls
+# incompatible is a pin that is not doing its job. Move them together.
+#
+#     docker compose -f oneground/verify/compose/qdrant.yml up -d
+#     docker compose -f oneground/verify/compose/qdrant.yml down -v
+#
+# Storage is a named volume so a container restart does not silently reuse a
+# previous run's collection; `down -v` removes it. oneground's own namespaces
+# are prefixed `oneground-<session>-` and deleted in a finally regardless.
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    container_name: oneground-verify-qdrant
+    ports:
+      - "6333:6333"     # REST
+      - "6334:6334"     # gRPC
+    environment:
+      # Quiet by default; the run's own log is the receipt, not the engine's.
+      QDRANT__LOG_LEVEL: WARN
+      # Single node. Verify measures latency shape on one node in this task;
+      # cluster shapes are task 011 on a pod.
+      QDRANT__CLUSTER__ENABLED: "false"
+    volumes:
+      - oneground-qdrant-storage:/qdrant/storage
+    healthcheck:
+      # Qdrant's image has no curl or wget, so the check uses the TCP port via
+      # bash's /dev/tcp rather than an HTTP client that is not installed.
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/6333' || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  oneground-qdrant-storage:

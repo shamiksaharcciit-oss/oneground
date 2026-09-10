@@ -1,0 +1,217 @@
+"""semantic_sharded — k-means regions, epsilon closure, probe P.
+
+Cut the space into `centroids` k-means regions, give each region its own HNSW
+index, and route a query to its P nearest regions. A vector whose second-
+nearest centroid is within (1+epsilon) of its nearest is *copied* into that
+region too, up to MAX_ASSIGN regions -- the closure that buys recall back at
+the cost of storage.
+
+This is the architecture that sounds obviously right for a semantically
+clustered corpus. On arxiv-150k it loses: 0.932 recall at 3.7x storage against
+0.997 at 1x for a single flat index, because 84% of vectors sit within epsilon
+of four regions and get replicated to the cap.
+
+Extracted from `oneground/fixture/reference.py` in task 008 **with every
+measurement unchanged**: the same closure rule (`within[:, 0] = True`), the
+same per-shard `efConstruction = 200` regardless of config, the same
+`min(30, ntotal)` per-shard depth, the same score-merge with id dedupe, and
+the same ceiling (exact over the union of probed shards). The smoke fixture
+rebuilds byte-identically through it.
+
+Known limits
+------------
+- MAX_ASSIGN is 4. A vector near five regions is copied into four of them, so
+  storage amplification saturates at 4.0 and the closure's cost is understated
+  for very fuzzy corpora.
+- Per-shard search depth defaults to 30 candidates before the merge, and is
+  now settable as `shard_depth`. A query whose ten true neighbours are all in
+  one shard beyond that rank loses them, and the loss is attributed to the
+  index rather than to routing. `oneground simulate` raises it to the largest
+  k it reports, so recall@100 measures the architecture rather than the cap.
+- `efConstruction` is 200 for every shard and is not swept.
+"""
+
+import time
+from collections import defaultdict
+from dataclasses import dataclass
+
+import numpy as np
+
+from ..base import (BuiltIndex, Candidates, Config, Footprint,
+                    estimate_memory_bytes, exact_over, merge_candidates)
+
+NAME = "semantic_sharded"
+
+# The closure cap: how many regions one vector may be copied into.
+MAX_ASSIGN = 4
+# Default per-shard candidate depth before the merge.
+#
+# Task 008 measured that this constant *caps* recall@k: a query never sees more
+# than probe * shard_depth distinct vectors, so recall@100 was bounded at
+# probe * 0.30 and measured the constant rather than the architecture. Task 009
+# made it a Config field so a caller can raise it.
+#
+# The default stays 30 because every published fixture value was measured with
+# it, and `oneground.fixture.reference` builds its Config without the field.
+# `oneground simulate` overrides it to max(30, k_max) and records the value it
+# used in simulate_info.json.
+SHARD_DEPTH = 30
+# Every shard is built at this efConstruction, as the fixture always has.
+EF_CONSTRUCTION = 200
+
+DEFAULT_GRID = {
+    "centroids": (256,),
+    "epsilon": (0.0, 0.1, 0.2),
+    "probe": (1, 2),
+    "M": (32,),
+    "efSearch": (96,),
+}
+
+
+@dataclass
+class SemanticSharded:
+    name: str = NAME
+
+    # -- sweep -------------------------------------------------------------
+    def configs(self, space):
+        grid = {**DEFAULT_GRID, **space.for_family(NAME)}
+        seen, out = set(), []
+        for params in space.included_for(NAME):
+            p = {"centroids": 256, "epsilon": 0.2, "probe": 2, "M": 32,
+                 "efSearch": 96}
+            p.update(params)
+            c = Config.make(NAME, p)
+            if c.label not in seen:
+                seen.add(c.label)
+                out.append(c)
+        for n in grid["centroids"]:
+            for eps in grid["epsilon"]:
+                for p_ in grid["probe"]:
+                    for M in grid["M"]:
+                        for ef in grid["efSearch"]:
+                            c = Config.make(NAME, {
+                                "centroids": int(n), "epsilon": float(eps),
+                                "probe": int(p_), "M": int(M),
+                                "efSearch": int(ef)})
+                            if c.label not in seen:
+                                seen.add(c.label)
+                                out.append(c)
+        return out
+
+    # -- build -------------------------------------------------------------
+    def build(self, vectors, config, seed, context=None):
+        """k-means, closure, one HNSW per region.
+
+        `context["centroids"]` reuses centroids the caller already computed.
+        The fixture builder passes the ones `characterize()` produced, which
+        is both faster (no second 256-way clustering over 150,000 vectors) and
+        exactly what the published reference results were measured with.
+        """
+        import faiss
+        from ...measures.crispness import centroid_dists, kmeans
+
+        t0 = time.time()
+        n_cent = int(config.get("centroids", 256))
+        eps = float(config.get("epsilon", 0.2))
+
+        cents = (context or {}).get("centroids")
+        if cents is None or len(cents) != n_cent:
+            cents = kmeans(vectors, n_cent, seed)
+
+        # --- closure, unchanged from the fixture builder ---
+        d, near = centroid_dists(vectors, cents, MAX_ASSIGN)
+        within = d <= d[:, [0]] * (1 + eps)
+        within[:, 0] = True
+        copies = within.sum(axis=1)
+        members = defaultdict(list)
+        for col in range(MAX_ASSIGN):
+            sel = np.where(within[:, col])[0]
+            for vid, r in zip(sel, near[sel, col]):
+                members[int(r)].append(int(vid))
+
+        shards, ids_of = {}, {}
+        for r, ids in members.items():
+            ids = np.asarray(ids, dtype=np.int64)
+            s = faiss.IndexHNSWFlat(vectors.shape[1],
+                                    int(config.get("M", 32)),
+                                    faiss.METRIC_INNER_PRODUCT)
+            s.hnsw.efConstruction = EF_CONSTRUCTION
+            s.add(vectors[ids])
+            s.hnsw.efSearch = int(config.get("efSearch", 96))
+            shards[r], ids_of[r] = s, ids
+
+        return BuiltIndex(
+            family=NAME, config=config, n_base=len(vectors),
+            dim=vectors.shape[1],
+            state={"shards": shards, "ids_of": ids_of, "centroids": cents,
+                   "copies": copies, "vectors": vectors},
+            build_seconds=time.time() - t0)
+
+    # -- routing -----------------------------------------------------------
+    def _probed(self, built, queries, config):
+        from ...measures.crispness import centroid_dists
+        probe = int(config.get("probe", 2))
+        _, q_r = centroid_dists(queries, built.state["centroids"], probe)
+        return q_r
+
+    # -- search ------------------------------------------------------------
+    def search(self, built, queries, k, config):
+        shards, ids_of = built.state["shards"], built.state["ids_of"]
+        for s in shards.values():
+            s.hnsw.efSearch = int(config.get("efSearch", 96))
+        q_r = self._probed(built, queries, config)
+
+        ids = np.full((len(queries), k), -1, dtype=np.int64)
+        scores = np.full((len(queries), k), -np.inf, dtype=np.float32)
+        for qi in range(len(queries)):
+            cid, csc = [], []
+            for r in q_r[qi]:
+                r = int(r)
+                if r not in shards:
+                    continue
+                n = min(int(config.get("shard_depth", SHARD_DEPTH)),
+                        shards[r].ntotal)
+                sc, loc = shards[r].search(queries[qi:qi + 1], n)
+                cid.append(ids_of[r][loc[0]])
+                csc.append(sc[0])
+            ids[qi], scores[qi] = merge_candidates(cid, csc, k)
+        return Candidates(ids=ids, scores=scores)
+
+    # -- ceiling -----------------------------------------------------------
+    def ceiling(self, built, queries, k):
+        """Exact search over the union of the shards this query probes.
+
+        The upper bound on what any index inside these shards could return.
+        The gap between this and `search` is index loss; the gap between this
+        and 1.0 is routing loss and no index tuning recovers it.
+        """
+        vectors, ids_of = built.state["vectors"], built.state["ids_of"]
+        q_r = self._probed(built, queries, built.config)
+        out = np.full((len(queries), k), -1, dtype=np.int64)
+        for qi in range(len(queries)):
+            reachable = [ids_of[int(r)] for r in q_r[qi] if int(r) in ids_of]
+            if not reachable:
+                continue
+            u = np.unique(np.concatenate(reachable))
+            got, _ = exact_over(vectors, u, queries[qi:qi + 1], k)
+            out[qi] = got[0]
+        return out
+
+    # -- footprint ---------------------------------------------------------
+    def footprint(self, built):
+        copies = built.state["copies"]
+        stored = int(copies.sum())
+        M = int(built.config.get("M", 32))
+        return Footprint(
+            stored_vectors=stored,
+            amplification=float(stored / built.n_base),
+            memory_bytes=estimate_memory_bytes(stored, built.dim, M),
+            fanout=float(built.config.get("probe", 2)),
+            shards=len(built.state["shards"]),
+            copies_p50=int(np.percentile(copies, 50)),
+            copies_p95=int(np.percentile(copies, 95)),
+            copies_p99=int(np.percentile(copies, 99)),
+        )
+
+
+MODEL = SemanticSharded()

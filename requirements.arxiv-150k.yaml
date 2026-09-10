@@ -1,0 +1,162 @@
+# oneground requirements — the arxiv-150k fixture, measured through the
+# product path.
+#
+# This file exists to compare two paths that have never been compared: the
+# fixture builder (corpora/run_arxiv_150k.sh -> oneground.fixture.build) and
+# `oneground characterize`. Both should produce the same five values from the
+# same vectors, because after task 007 they call the same measures.
+#
+# It points at the release asset, which is NOT in the repository — the three
+# large artifacts are published separately and extracted locally:
+#
+#     ~/oneground-assets/arxiv-150k\
+#         vectors.npy         (150000, 768) float32   460,800,128 bytes
+#         queries.npy         (2000, 768)   float32     6,144,128 bytes
+#         sample.jsonl.zst    the source records       49,920,799 bytes
+#
+# base_meta.parquet and queries_meta.parquet are derived from
+# sample.jsonl.zst by tasks/scratch/007-arxiv-metadata.py — a format
+# conversion of the `update_date` column, not a recomputed measurement. The
+# fixture keeps its metadata inside the compressed sample; the product path
+# reads a columnar sidecar, which is what a user would have.
+
+oneground: 1
+
+run:
+  name: arxiv-150k-via-characterize
+  mode: measure
+  # The fixture's own sampling seed. `characterize` uses it for the k-means,
+  # the LID subsample and (were it downsampling) the draw — the same three
+  # places oneground.fixture.build uses spec.sampling.seed.
+  seed: 20260908
+  workdir: ./runs/arxiv-150k-via-characterize
+
+corpus:
+  sample:
+    kind: receipt
+
+    vectors:
+      path: ~/oneground-assets/arxiv-150k/vectors.npy
+      # The builder normalized at embed time (normalize_embeddings=True), so
+      # these are already unit vectors. Saying so avoids a second
+      # normalization pass over 460 MB that would change nothing.
+      normalized: true
+
+    metadata:
+      path: ~/oneground-assets/arxiv-150k/base_meta.parquet
+      timestamp_field: update_date
+      category_field: category
+      # The fixture's drift definition trains the centroids on records before
+      # 2019-01-01. Given explicitly rather than left to the median, because
+      # the point of this run is to compare against a published value that was
+      # measured at this cutoff.
+      timestamp_cutoff: "2019-01-01"
+
+    queries:
+      path: ~/oneground-assets/arxiv-150k/queries.npy
+      count_min: 50
+      source: written
+      metadata:
+        path: ~/oneground-assets/arxiv-150k/queries_meta.parquet
+        timestamp_field: update_date
+
+    sampling:
+      method: stratified
+      stratify_by: update_date
+      full_corpus_size: 2100000
+
+    # The whole corpus: no subsampling, so the comparison is against the same
+    # 150,000 vectors the fixture measured rather than a draw from them.
+    target_sample_size: 150000
+
+# ------------------------------------------------------------------
+# simulate — the architecture sweep (task 008)
+# ------------------------------------------------------------------
+simulate:
+  kind: declared
+  families: [single_node_hnsw, semantic_sharded, hash_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+  # The two configurations the fixture publishes reference_results for. They
+  # are pinned via `include` so they appear whatever the grid below says --
+  # these are the rows that have to match the published values.
+  include:
+    - {family: single_node_hnsw, M: 32, efConstruction: 200, efSearch: 128}
+    - {family: semantic_sharded, centroids: 256, epsilon: 0.2, probe: 2,
+       M: 32, efSearch: 96}
+
+  # The grid from task 008's brief: epsilon in {0, 0.1, 0.2}, probe in {1, 2},
+  # centroids 256. single_node is pinned to the reference config only (its
+  # sweep is cheap but adds nothing this task needs), and hash_sharded to N=3.
+  grid:
+    single_node_hnsw: {M: [32], efSearch: [128]}
+    semantic_sharded:
+      centroids: [256]
+      epsilon: [0.0, 0.1, 0.2]
+      probe: [1, 2]
+      M: [32]
+      efSearch: [96]
+    hash_sharded: {M: [32], efSearch: [96], shards: [3]}
+
+  budget:
+    # A guard, not a plan. 150,000 vectors on a 7.6 GB laptop: six
+    # semantic-sharded configs each rebuild 256 HNSW shards and run 2,000
+    # exact ceiling searches. If this trips, the report says which configs
+    # were not measured rather than pretending the sweep was complete.
+    max_minutes: 45
+
+# ------------------------------------------------------------------
+# constraints -- what the decision is measured against (task 010)
+# ------------------------------------------------------------------
+constraints:
+  kind: declared
+  recall_at_k:
+    k: 10
+    min: 0.95
+  storage_amplification_max: 2.0
+  latency:
+    # Task 011's load profile. Until a matched-environment run exists these
+    # are couldnt_check -- never a simulated number.
+    p95_ms: 40
+    at_qps: 200
+    concurrency: 32
+  monthly_budget: {amount: 1200, currency: EUR}
+
+# ------------------------------------------------------------------
+# verify -- matched environment on a pod (task 011)
+# ------------------------------------------------------------------
+verify:
+  kind: declared
+  target: runpod
+  engines: [qdrant]              # a list; only qdrant has an adapter
+  duration_minutes: 5
+  warmup_seconds: 15
+  # The volume-first ruling. vectors.npy is 460 MB at a path outside the
+  # repository, so it is neither carried by the git bundle nor uploaded --
+  # `corpus_inputs` refuses anything outside the repo on purpose. The pod
+  # reads the corpus from the network volume instead, and this file says so.
+  # The session generator computes its inputs from the named file, so what it
+  # prints is what the pod will actually read.
+  requirements_on_pod: requirements.arxiv-150k.pod.yaml
+  # Confirmed from build 3's log: the volume holds the release tarball, not a
+  # loose directory. The preflight extracts vectors.npy and queries.npy from
+  # it -- not sample.jsonl.zst, which `verify` never reads -- and then checks
+  # both against the manifest below, which is the repo's own record of what
+  # the fixture is. A mismatch means the ground truth and the vectors are from
+  # different builds, and stops the run before it measures anything.
+  pod_corpus_tarball: /workspace/arxiv-150k-large.tgz
+  pod_corpus_manifest: fixtures/arxiv-150k/MANIFEST.sha256
+  engine_params:
+    m: 32
+    ef_construct: 200
+    hnsw_ef: 128
+    # Without this Qdrant leaves a collection under its 20 MB default
+    # unindexed and answers every search with an exact scan (task 009).
+    indexing_threshold: 1
+  cost:
+    prices: oneground/cost/prices.example.yaml
+    error_band: 0.25
+  caps:
+    max_hours: 1.0               # the brief's ceiling; not raised
+    max_usd: 2.00

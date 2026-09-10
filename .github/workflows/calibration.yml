@@ -1,0 +1,248 @@
+# Calibration — the tool measures its own error, on a schedule.
+#
+# Three triggers, three jobs, deliberately not collapsed into one matrix:
+#
+#   pins      the pinned environment changed, so re-check everything now.
+#             Fires on requirements.txt and on any adapter's pinned engine
+#             version. Blocking.
+#   weekly    Monday 06:00 UTC against the current pins. Blocking.
+#   drift     Monthly, against `qdrant:latest` instead of the pin. ADVISORY:
+#             its lines are written with outcome_scope: advisory and it can
+#             never fail the workflow. A moving tag is not the contract; the
+#             pinned run is. This job exists so a breaking upstream change is
+#             visible before a pin bump walks into it.
+#
+# What actually gates, decided in task 012b
+# -----------------------------------------
+# The BLOCKING checks are the three assumptions every recall in this project
+# rests on, run by `calibrate layers`:
+#
+#   corpus_reachability      is every published ground-truth neighbour in the
+#                            corpus we index?              (want 1.0)
+#   metric_agreement         does exact inner product on normalized vectors
+#                            reproduce the published angular ordering? (1.0)
+#   recall_rule_accounting   can ANN-Benchmarks' distance-based knn metric
+#                            diverge from an id-based intersection?  (want ~0)
+#
+# The hnswlib curve is ADVISORY and stays that way. Task 012 measured it
+# contradicted at every point and isolated the cause: faiss and hnswlib are
+# different HNSW implementations, and faiss at efSearch=e reaches the recall
+# hnswlib reached at roughly 1.4e to 1.9e. Gating a release on that would gate
+# this project on another project's implementation. The tolerance is unchanged
+# at 0.02, so the points still read `contradicted` in the history -- which is
+# the honest reading, and the offset is published beside it.
+#
+# So a healthy first run is: three blocking checks green, seven advisory
+# contradictions recorded, workflow green.
+#
+# Rules this file enforces, all of them from the project's own vocabulary:
+#
+#   * `contradicted` on a blocking check fails the workflow and opens an issue
+#     carrying the offending history line in the body. An advisory
+#     contradiction does neither -- it is recorded and visible in
+#     `oneground calibrate show`, and nothing else.
+#   * `couldnt_check` NEVER fails the workflow. It is a gap in the reference,
+#     not a defect in this installation, and it appears in the history as a
+#     gap. `oneground calibrate` exits 0 on it by design (exit 2 only under
+#     --strict, which nothing here passes).
+#   * The bot never writes to master. Appended lines are committed to the
+#     `calibration` branch, which master merges from.
+#
+# Cost note: the GloVe curve downloads a 463 MB HDF5 and builds an HNSW index
+# over 1,183,514 vectors. Both are cached by digest; a cold run is slow and a
+# warm one is not. See docs/VALIDATION.md.
+
+name: calibration
+
+on:
+  push:
+    paths:
+      - 'requirements.txt'
+      - 'oneground/verify/compose/*.yml'      # the adapters' pinned engines
+      - 'oneground/adapters/**'
+      - 'oneground/calibrate/**'
+      - 'fixtures/glove-100-angular.fixture.yaml'
+      - '.github/workflows/calibration.yml'
+  pull_request:
+    paths:
+      - 'requirements.txt'
+      - 'oneground/verify/compose/*.yml'
+      - 'oneground/adapters/**'
+      - 'oneground/calibrate/**'
+  schedule:
+    - cron: '0 6 * * 1'          # weekly, Monday 06:00 UTC  -> job: weekly
+    - cron: '0 7 1 * *'          # monthly, 1st 07:00 UTC    -> job: drift
+  workflow_dispatch:
+
+permissions:
+  contents: write                # to push the calibration branch
+  issues: write                  # to open an issue on a contradiction
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GLOVE_URL: http://ann-benchmarks.com/glove-100-angular.hdf5
+  GLOVE_SHA256: 544af1d5e84e112cd4749571dcfd8ca109818a572f850af75a3a09e093a953c4
+  QDRANT_PIN: qdrant/qdrant:v1.19.1
+
+jobs:
+  # ------------------------------------------------------------------
+  # (a) the pinned environment changed
+  # ------------------------------------------------------------------
+  pins:
+    name: pins changed (blocking)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.19.1
+        ports: ['6333:6333', '6334:6334']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: unit tests
+        run: python -m pytest -q
+      - name: cache the ANN-Benchmarks corpus
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: glove-${{ env.GLOVE_SHA256 }}
+      - name: fetch and check the corpus
+        run: bash .github/scripts/fetch-glove.sh
+      - name: build the calibration fixture
+        run: |
+          python -m oneground.cli calibrate fixture \
+            --source .cache/glove-100-angular.hdf5 --check-metric
+      - name: blocking checks -- the three layers
+        # corpus reachability, metric agreement, recall-rule accounting. Each
+        # has a correct answer known in advance and a real defect in any of
+        # them is large, not marginal. This is the gate.
+        run: |
+          python -m oneground.cli calibrate layers \
+            --fixture glove-100-angular
+      - name: advisory -- the hnswlib curve
+        # Expected to be contradicted at every point, and recorded rather than
+        # gated: it measures a difference between two HNSW implementations,
+        # published as a per-efSearch offset. The fixture spec sets
+        # outcome_scope: advisory, so these lines cannot fail the workflow.
+        # No `|| true`: a crash here should still fail, only a contradiction
+        # should not.
+        run: |
+          python -m oneground.cli calibrate curve \
+            --fixture glove-100-angular --config M=12,efConstruction=500
+      - name: simulator against the pinned engine
+        env:
+          ONEGROUND_QDRANT_URL: http://localhost:6333
+          ONEGROUND_ENVIRONMENT_ID: gha-pins-${{ github.run_id }}
+        run: |
+          python -m oneground.cli calibrate engine requirements.smoke.yaml \
+            --engine qdrant
+      - name: record the appended lines
+        if: always()
+        uses: ./.github/actions/record-calibration
+        with:
+          scope: blocking
+          label: pins
+
+  # ------------------------------------------------------------------
+  # (b) weekly, against the current pins
+  # ------------------------------------------------------------------
+  weekly:
+    name: weekly against pins (blocking)
+    if: github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1'
+    runs-on: ubuntu-latest
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.19.1
+        ports: ['6333:6333', '6334:6334']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: unit tests
+        run: python -m pytest -q
+      - name: cache the ANN-Benchmarks corpus
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: glove-${{ env.GLOVE_SHA256 }}
+      - name: fetch and check the corpus
+        run: bash .github/scripts/fetch-glove.sh
+      - name: build the calibration fixture
+        run: |
+          python -m oneground.cli calibrate fixture \
+            --source .cache/glove-100-angular.hdf5 --check-metric
+      - name: blocking checks -- the three layers
+        run: |
+          python -m oneground.cli calibrate layers \
+            --fixture glove-100-angular
+      - name: advisory -- the hnswlib curve
+        # See the `pins` job: recorded, never gating.
+        run: |
+          python -m oneground.cli calibrate curve \
+            --fixture glove-100-angular --config M=12,efConstruction=500
+      - name: simulator against the pinned engine
+        env:
+          ONEGROUND_QDRANT_URL: http://localhost:6333
+          ONEGROUND_ENVIRONMENT_ID: gha-weekly-${{ github.run_id }}
+        run: |
+          python -m oneground.cli calibrate engine requirements.smoke.yaml \
+            --engine qdrant
+      - name: record the appended lines
+        if: always()
+        uses: ./.github/actions/record-calibration
+        with:
+          scope: blocking
+          label: weekly
+
+  # ------------------------------------------------------------------
+  # (c) monthly, against a moving tag. Advisory, never blocking.
+  # ------------------------------------------------------------------
+  drift:
+    name: monthly against qdrant:latest (advisory)
+    if: github.event_name == 'schedule' && github.event.schedule == '0 7 1 * *'
+    runs-on: ubuntu-latest
+    continue-on-error: true        # belt and braces: this job cannot fail the run
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports: ['6333:6333', '6334:6334']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: what `latest` resolved to today
+        run: |
+          docker image inspect qdrant/qdrant:latest \
+            --format 'qdrant:latest = {{index .RepoDigests 0}}' || true
+      - name: simulator against the moving tag
+        env:
+          ONEGROUND_QDRANT_URL: http://localhost:6333
+          ONEGROUND_ENVIRONMENT_ID: gha-drift-${{ github.run_id }}
+        run: |
+          python -m oneground.cli calibrate engine requirements.smoke.yaml \
+            --engine qdrant --advisory
+      - name: record the appended lines
+        if: always()
+        uses: ./.github/actions/record-calibration
+        with:
+          scope: advisory
+          label: drift

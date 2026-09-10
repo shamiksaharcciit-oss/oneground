@@ -1,0 +1,92 @@
+# oneground — packaging.
+#
+# The build backend is pinned like every other dependency in this project:
+# `pip install -e .` must resolve the same way in a year as it does today.
+[build-system]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oneground"
+version = "0.1.0rc1"        # displayed as 0.1.0-preview
+description = "Measure a retrieval architecture decision on your own vectors, with the receipt attached."
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+authors = [{name = "oneproof"}]
+keywords = ["vector-search", "retrieval", "benchmarking", "rag", "embeddings"]
+
+# Development Status :: 4 - Beta would overstate this. 3 - Alpha is what a
+# preview with three working commands and a charter of planned ones is.
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Topic :: Software Development :: Testing",
+  "Typing :: Typed",
+]
+
+# Runtime dependencies, pinned to the versions every measurement in this
+# repository was produced with. requirements.txt stays the authority for the
+# full transitive closure used by canonical fixture builds; these are the
+# direct ones a user installing the package needs.
+# Exact pins, not ranges. Every package the environment guard checks must be
+# pinned here, or `pip install oneground` produces an installation that cannot
+# reach `verified` on a fixture -- the guard would report couldnt_check on a
+# pin the wheel never fixed. See oneground/environment.PINNED.
+#
+# scikit-learn is here despite no oneground module importing it: it is in
+# PINNED, and `umap-learn` (the [view] extra) requires it without pinning it,
+# so without this line `pip install oneground[view]` could resolve a version
+# that makes every canonical-artifact command refuse.
+dependencies = [
+  "numpy==2.5.3",
+  "faiss-cpu==1.15.0",
+  "scikit-learn==1.9.0",
+  "pyyaml==6.0.3",
+  "zstandard==0.25.0",
+]
+
+[project.optional-dependencies]
+# Embedding text rather than supplying vectors.
+embed = ["sentence-transformers==6.0.1", "torch==2.14.0"]
+# The ground view and the fixture builder's projection.
+# umap-learn requires scikit-learn without pinning it; the core dependency
+# above is what fixes the version pip resolves here.
+view = ["umap-learn==0.5.12", "pyarrow==25.0.1", "matplotlib==3.11.1"]
+# `oneground verify` against a real Qdrant. The adapter talks HTTP, so this is
+# the client and nothing else; the engine itself is a container or a binary
+# the user runs.
+# `oneground verify` against a real Qdrant. The adapter imports
+# qdrant_client, and requirements.txt pins it at 1.19.0; pywin32 comes with it
+# on Windows via portalocker and carries the marker that keeps a Linux install
+# working.
+qdrant = ["qdrant-client==1.19.0", 'pywin32==312; sys_platform == "win32"']
+# `oneground pod`: a RunPod session. stdlib urllib does the API calls -- see
+# oneground/pod/api.py -- so this extra exists to name the capability rather
+# than to add a dependency it does not have.
+pod = []
+# `oneground calibrate`: reading the ANN-Benchmarks HDF5 the published curve
+# is recovered from.
+calibrate = ["h5py==3.16.0"]
+test = ["pytest==9.1.1"]
+
+[project.urls]
+Homepage = "https://github.com/oneproof/oneground"
+Source = "https://github.com/oneproof/oneground"
+Issues = "https://github.com/oneproof/oneground/issues"
+
+[project.scripts]
+oneground = "oneground.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["oneground*"]
+
+[tool.setuptools.package-data]
+oneground = ["py.typed"]

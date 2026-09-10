@@ -1,0 +1,315 @@
+# oneground fixture: glove-100-angular
+# ------------------------------------------------------------------
+# CALIBRATION FIXTURE. Unlike arxiv-150k, this one exists to carry *someone
+# else's* published numbers, so that `oneground calibrate curve` can ask
+# whether this installation reproduces them. Its ground truth is therefore
+# `declared` -- the bytes come from ANN-Benchmarks and we do not recompute
+# them. Recomputing would replace the very thing we are checking ourselves
+# against.
+#
+# It is not a leaderboard and it is not a recommendation corpus. No user's
+# store is ever chosen from it. See docs/VALIDATION.md.
+#
+# House rule, unchanged: every field is either a receipt (re-derivable from
+# the records) or declared (bytes frozen).
+
+fixture:
+  id: glove-100-angular
+  version: 1
+  status: built                # planned | built | verified
+  role: calibration
+  license_notice: >
+    This fixture redistributes no vectors. Its arrays are re-derived on the
+    user's machine from the ANN-Benchmarks HDF5, whose URL and sha256 are
+    recorded below. The underlying GloVe pre-trained word vectors are made
+    available by Stanford NLP under the Open Data Commons Public Domain
+    Dedication and License (PDDL) v1.0; the ANN-Benchmarks harness that
+    packaged them is MIT. Only digests, published reference values and
+    measurements taken here are committed to this repository.
+
+# ------------------------------------------------------------------
+# naming
+# ------------------------------------------------------------------
+# "GloVe-100" is 100 *dimensions*, not 100k vectors. The corpus is the whole
+# 1,183,514-vector train split, because the published ground truth indexes it
+# -- see `corpus.size_rationale`. The fixture is named for the upstream
+# dataset (`glove-100-angular`) so that a reader comparing our numbers to
+# ann-benchmarks.com is looking at the same name on both sides.
+
+source:
+  name: glove-100-angular (ANN-Benchmarks packaging of GloVe twitter.27B, 100d)
+  provider: ANN-Benchmarks (Erik Bernhardsson), MIT
+  url: http://ann-benchmarks.com/glove-100-angular.hdf5
+  retrieved: 2026-09-10
+  bytes: 485413888
+  source_sha256: 544af1d5e84e112cd4749571dcfd8ca109818a572f850af75a3a09e093a953c4
+  upstream_corpus:
+    name: GloVe pre-trained word vectors, Twitter 27B, 100 dimensions
+    provider: Stanford NLP
+    url: https://nlp.stanford.edu/projects/glove/
+    license: PDDL 1.0 (Open Data Commons Public Domain Dedication and License)
+    license_url: https://opendatacommons.org/licenses/pddl/
+    packaged_by: >
+      ann_benchmarks/datasets.py::glove, which downloads
+      glove.twitter.27B.zip, reads glove.twitter.27B.100d.txt and splits it
+      into 1,183,514 train and 10,000 test vectors.
+  fields_used: [train, test, neighbors]
+  kind: declared
+
+corpus:
+  n_base: 1183514
+  dim: 100
+  metric: angular
+  stored_as: >
+    L2-normalized float32. Ranking by cosine similarity is the same ordering
+    as ranking by inner product on unit vectors, so every consumer uses
+    faiss METRIC_INNER_PRODUCT and the published neighbour ordering is
+    preserved. `oneground calibrate fixture --check-metric` measures that
+    agreement rather than assuming it.
+  size_rationale: >
+    The full train split, not a prefix. The published `neighbors` array
+    indexes into all 1,183,514 vectors. Measured on the downloaded file: only
+    0.084673 of published ground-truth neighbours have an index below
+    100,000; no query at all (0 of 10,000) has its entire top-10 below that
+    line; the mean reachable share of a query's top-10 is 0.8617 of ten. A
+    100k prefix therefore caps recall@10 near 0.086 whatever the index does,
+    and every point of a reference curve would be measuring the truncation.
+    `oneground calibrate fixture --subset N` still exists so that arithmetic
+    can be re-run, and `calibrate curve` refuses to run against a truncated
+    corpus rather than reporting the artifact as a recall.
+  kind: declared
+
+queries:
+  count: 10000
+  source: the HDF5's `test` split, unchanged
+  kind: declared
+
+ground_truth:
+  method: >
+    NOT computed by oneground. Taken verbatim from the HDF5's `neighbors`
+    array, which ANN-Benchmarks computed by brute force over the full train
+    split under angular distance.
+  k: 100
+  metric: angular
+  kind: declared
+
+characterization:
+  # Only the one value task 012 asks for. The other four measures in this
+  # project's characterization are defined against a corpus with semantic
+  # regions; a word-vector vocabulary is not that corpus, and running them
+  # here would produce numbers with nothing to mean.
+  intrinsic_dimensionality:
+    estimator: TwoNN                   # Facco, d'Errico, Rodriguez, Laio 2017
+    seed: 20260910
+    n_sample: 20000
+    discard: 0.10
+    value: 44.124813
+    tolerance: 0.5                     # reproduction band between installations
+    reference: null
+    reference_outcome: couldnt_check
+    reference_note: >
+      No published TwoNN estimate for GloVe-100 was found. A published LID
+      value for this exact dataset does exist and is cited below, but it uses
+      a different estimator at a different neighbourhood scale, so it is not a
+      reference for this number. Recorded as couldnt_check rather than
+      compared: a deviation between two estimators would be a statement about
+      estimators, not about this installation. See docs/VALIDATION.md.
+    related_published_value:
+      value: 18.0                      # average; median 17.8
+      estimator: >
+        Maximum-likelihood (Levina-Bickel / Amsaleg) computed from the 100
+        nearest neighbours of every data point, then averaged. An averaged
+        LOCAL estimate at k=100; TwoNN is a global estimate built from the
+        ratio of second- to first-nearest-neighbour distances. The two probe
+        different scales and are not interchangeable.
+      source: >
+        Aumuller, M. and Ceccarello, M. "The Role of Local Intrinsic
+        Dimensionality in Benchmarking Nearest Neighbor Search." SISAP 2019,
+        Table 1 (row: GloVe). arXiv:1907.07387; CEUR-WS Vol-2436, article 3.
+      comparable: false
+  kind: receipt
+
+# ------------------------------------------------------------------
+# reference_curve -- the published numbers this fixture exists to carry
+# ------------------------------------------------------------------
+reference_curve:
+  algorithm: hnswlib
+  k: 10
+  tolerance: 0.02
+
+  # ADVISORY, decided in task 012b. Task 012 measured that this comparison is
+  # contradicted at every point and that the cause is neither our corpus, our
+  # metric convention nor our recall accounting -- all three reproduce
+  # upstream exactly, and they are now the blocking checks (`calibrate
+  # layers`). What is left is that faiss and hnswlib are different HNSW
+  # implementations, and they are: faiss at efSearch=e reaches the recall
+  # hnswlib reached at roughly 1.4e to 1.9e. That difference is real,
+  # one-signed and published below as an offset.
+  #
+  # Gating a release on it would gate this project on another project's
+  # implementation. So this comparison runs, is recorded, and never blocks.
+  # The tolerance is unchanged at 0.02 on purpose: it still marks the points
+  # as contradicted, which is the honest reading. Widening it to make them
+  # pass would have hidden exactly the thing worth publishing.
+  outcome_scope: advisory
+  tolerance_rationale: >
+    Per point, on recall@10. Two independent HNSW implementations built from
+    the same (M, efConstruction) on the same vectors do not produce the same
+    graph: neighbour selection heuristics, tie-breaking, level assignment RNG
+    and insertion order all differ between faiss and hnswlib. 0.02 is meant to
+    absorb that and nothing else. It is not widened to make a point pass; a
+    point outside it is a finding, and task 012's report carries the
+    decomposition rather than a larger number here.
+
+  source:
+    kind: declared
+    # ANN-Benchmarks publishes no results file. Task 012 probed
+    # glove-100-angular_10_angular.csv, res.csv, results.csv and the repo's
+    # results.csv: all 404. The results exist only as JavaScript embedded in
+    # the per-dataset page, so the page IS the results file.
+    url: https://ann-benchmarks.com/glove-100-angular_10_angular.html
+    retrieved: 2026-09-10
+    sha256: 00967aecd518cb6172be4a29f11c85cd16d30d58ae5a6b7462dad73e15566ca5
+    parameter_grid:
+      url: https://raw.githubusercontent.com/erikbern/ann-benchmarks/main/ann_benchmarks/algorithms/hnswlib/config.yml
+      retrieved: 2026-09-10
+      sha256: ff836e262140caae7cbee8825ef454b877f8c58e288ea8e1c50b300b39148521
+      ef_grid: [10, 20, 40, 80, 120, 200, 400, 600, 800]
+      note: >
+        Every hnswlib run group in that config sets efConstruction: 500 and
+        shares this query_args grid. The plotted points do not carry their ef
+        value, so the grid has to come from the config file.
+
+  recovery_method: >
+    The page draws thirteen charts and recomputes the Pareto frontier per
+    chart, because it depends on the y-axis: a point dominated on QPS can
+    survive on build time. `oneground/calibrate/reference.py` takes the union
+    over every chart whose x-axis is plain Recall (the Relative Error and
+    Epsilon-Recall charts use a different x and are excluded). A sweep is
+    accepted only when the number of distinct recovered recall values equals
+    the number of ef values in the grid AND the recalls are strictly
+    increasing -- recall is monotone in ef, so that is a forced one-to-one
+    mapping. An incomplete series yields no reference points at all rather
+    than a plausible-looking alignment.
+
+  recovered:
+    M=4,efC=500: 2 of 9 points
+    M=8,efC=500: 3 of 9 points
+    M=12,efC=500: 9 of 9 points        # the only complete sweep on the page
+    M=16,efC=500: 1 of 9 points
+    M=24,efC=500: 7 of 9 points
+    M=36,efC=500: 6 of 9 points
+    M=48,efC=500: 3 of 9 points
+    M=64,efC=500: 7 of 9 points
+    M=96,efC=500: 8 of 9 points
+
+  configurations:
+    - M: 12
+      efConstruction: 500
+      recovered: complete
+
+      # The known, one-signed difference between this project's faiss HNSW and
+      # the hnswlib run ANN-Benchmarks published, per efSearch:
+      #     implementation_offset = our recall@10 - their recall@10
+      #
+      # Measured on 2026-09-10 on the full 1,183,514-vector corpus with a
+      # DETERMINISTIC build (single-threaded faiss add, task 012b), so it is
+      # reproducible. Declared, not a gate: `calibrate curve` reports how far
+      # a later run's offset sits from these, and still records the raw
+      # comparison against `points` as contradicted at tolerance 0.02.
+      #
+      # Read as: faiss at efSearch=e reaches the recall hnswlib reached at
+      # roughly 1.4e (ef=10) to 1.9e (ef=400). efSearch is not portable
+      # across implementations -- see docs/MODELS.md.
+      implementation_offset:
+        10: 0.06363
+        20: 0.06283
+        40: 0.06322
+        80: 0.05737
+        120: 0.05099
+        200: 0.04471
+        400: 0.03652
+      implementation_offset_info:
+        measured: 2026-09-10
+        deterministic_build: true
+        build_seconds: 2135.5
+        environment: local:windows-amd64
+        build_variation: >
+          The same seven points measured in task 012 with a parallel
+          (non-deterministic) build differ from these by at most 0.00296,
+          which is inside the 0.0047 build-to-build drift task 012 measured
+          and an order of magnitude below the offsets themselves.
+        kind: declared
+
+      points:
+        10: 0.36534
+        20: 0.49515
+        40: 0.60777
+        80: 0.70371
+        120: 0.75057
+        200: 0.79998
+        400: 0.85386
+        600: 0.87883
+        800: 0.89387
+
+    - M: 16
+      efConstruction: 200
+      recovered: none
+      points: {}
+      note: >
+        The configuration task 012's brief asked for. ANN-Benchmarks has no
+        hnswlib run at efConstruction=200 -- all nine of its run groups use
+        500 -- so there is no published point to compare any efSearch against,
+        and every point of this curve is couldnt_check. Kept because the brief
+        named it and because the measured column is still worth having beside
+        the M=12 curve.
+
+  ef_values: [10, 20, 40, 80, 120, 200, 400]
+
+artifacts:
+  directory: fixtures/glove-100-angular/
+  files:
+    - vectors.npy               # (1183514, 100) float32, L2-normalized
+    - queries.npy               # (10000, 100) float32, L2-normalized
+    - ground_truth.npy          # (10000, 100) int64, DECLARED (upstream)
+    - ground_truth_distances.npy  # (10000, 100) float32, DECLARED (upstream)
+    - characterization.json     # TwoNN only
+    - build_info.json           # declared
+    - MANIFEST.sha256
+  not_committed: [vectors.npy, queries.npy, ground_truth.npy,
+                  ground_truth_distances.npy]
+  not_committed_reason: >
+    486 MB in total and re-derivable by anyone from the upstream HDF5, whose
+    digest is recorded above. `oneground fixture verify` reports these
+    couldnt_check in a fresh clone, which is the correct reading: the fixture
+    is incomplete there, not broken.
+
+verification:
+  blocking:
+    command: oneground calibrate layers --fixture glove-100-angular
+    checks: [corpus_reachability, metric_agreement, recall_rule_accounting]
+    passes_when: >
+      Every published ground-truth neighbour is inside the corpus (1.0), exact
+      inner-product search on the normalized vectors reproduces the published
+      angular ordering (1.0), and the k-th/(k+1)-th distance tie rate is small
+      enough that ANN-Benchmarks' distance-based knn metric cannot diverge
+      materially from an id-based intersection. These are the assumptions
+      every recall measured on this fixture rests on; each has a correct
+      answer known in advance, and a real defect in any of them is large, not
+      marginal.
+  advisory:
+    command: oneground calibrate curve --fixture glove-100-angular --config M=12,efConstruction=500
+    passes_when: >
+      Nothing. This comparison is expected to be contradicted at every point
+      and is recorded rather than gated -- see reference_curve.outcome_scope.
+      What it publishes is the per-efSearch offset between this project's
+      faiss HNSW and the hnswlib run ANN-Benchmarks measured.
+  outcomes: [verified, contradicted, couldnt_check]
+
+changelog:
+  - version: 1
+    date: 2026-09-10
+    note: >
+      Created by task 012 as the calibration fixture. Full train split (not a
+      100k prefix) and efConstruction=500 (not 200), both forced by what
+      ANN-Benchmarks actually published; see tasks/012-calibration.report.md.

@@ -1,0 +1,11 @@
+{
+  "dim": 100,
+  "intrinsic_dimensionality": {
+    "discard": 0.1,
+    "estimator": "TwoNN",
+    "n_sample": 20000,
+    "seed": 20260910,
+    "value": 44.124813079833984
+  },
+  "n_base": 1183514
+}

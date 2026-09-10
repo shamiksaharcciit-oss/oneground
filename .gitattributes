@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+MANIFEST.sha256 text eol=lf
+*.npy binary
+*.zst binary

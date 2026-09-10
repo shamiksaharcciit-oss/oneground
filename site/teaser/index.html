@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oneground — the ground, live, on 150,000 real vectors</title>
+<meta name="description" content="Every point is a real vector from the public arXiv-150k fixture. Move the closure band and watch the corpus replicate.">
+<meta name="robots" content="index, follow">
+<!-- No CDN, no webfont, no analytics, no beacon. Two local files and a data
+     directory; nothing on this page makes a request to another origin. -->
+<!-- An empty data: icon, so the browser does not go looking for /favicon.ico
+     and log a 404. A request the page did not ask for is still a request. -->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="boot" role="status">reading 150,000 vectors from the arXiv-150k fixture…</div>
+
+<!-- ====================================================== 1. THE GROUND -->
+<section id="ground" aria-labelledby="ground-h">
+  <header>
+    <p class="eyebrow">oneground · the <em>choose</em> door of oneproof</p>
+    <h1 id="ground-h">This is the ground. <em>Every dot is a real vector.</em></h1>
+    <p class="lede">
+      150,000 arXiv abstracts embedded with bge-base-en-v1.5, cut into 256
+      regions by k-means. Semantic sharding copies a vector into every region
+      within <strong>ε</strong> of its nearest. Move ε and the copies are
+      recounted from four real distances per vector —
+      <strong>not from a lookup table</strong>.
+    </p>
+  </header>
+
+  <div class="ground-grid">
+    <figure class="stage">
+      <canvas id="ground-canvas" aria-label="150,000 base vectors, coloured by how many regions each is copied into"></canvas>
+      <figcaption id="ground-figcaption">
+        2-D placement is UMAP and is illustrative. Regions, distances and copy
+        counts are computed in the full 768 dimensions.
+      </figcaption>
+    </figure>
+
+    <div class="panel readout">
+      <div class="slider-row">
+        <label for="eps">
+          <span>closure band ε</span>
+          <output id="eps-out" for="eps">0.20</output>
+        </label>
+        <input type="range" id="eps" min="0" max="0.40" step="0.01" value="0.20"
+               aria-describedby="ground-caption">
+        <details class="hint">
+          <summary id="eps-hint-summary">what ε does</summary>
+          <p class="src" id="eps-rule">—</p>
+        </details>
+      </div>
+
+      <div class="counters">
+        <div class="counter">
+          <span class="value" id="c-copied">—</span>
+          <span class="label">vectors copied</span>
+        </div>
+        <div class="counter">
+          <span class="value" id="c-amp">—</span>
+          <span class="label">storage</span>
+        </div>
+        <div class="counter">
+          <span class="value" id="c-p99">—</span>
+          <span class="label">p99 copies</span>
+        </div>
+      </div>
+
+      <div>
+        <h3>copies per vector</h3>
+        <div class="legend" id="legend"></div>
+      </div>
+
+      <div class="modes-row">
+        <h3>colour by</h3>
+        <div class="modes">
+          <button type="button" id="mode-copies" aria-pressed="true">copies</button>
+          <button type="button" id="mode-category" aria-pressed="false">arXiv category</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <p class="caption" id="ground-caption">—</p>
+  <p class="source" id="ground-source">—</p>
+</section>
+
+<!-- ============================================ 2. ONE QUERY, EVERY HOP -->
+<section id="query" aria-labelledby="query-h">
+  <header>
+    <p class="eyebrow">one query, every hop</p>
+    <h2 id="query-h">Route it to one region and <em>watch the neighbours you lose.</em></h2>
+    <p class="lede">
+      2,000 held-out queries, each with its exact top-10 neighbours from a
+      brute-force scan of all 150,000 vectors. Follow one: score, route, and
+      see where its neighbours actually live.
+    </p>
+  </header>
+
+  <div class="query-grid">
+    <div class="panel">
+      <h3>12 curated queries</h3>
+      <p class="source">nine worst-recall ambiguous queries, three that route well</p>
+      <div class="query-list" id="query-list" role="group" aria-label="curated queries"></div>
+      <div class="modes" style="margin-top:0.7rem">
+        <button type="button" id="surprise">surprise me →</button>
+      </div>
+      <p class="source" style="margin-top:0.5rem">drawn from all 2,000</p>
+    </div>
+
+    <figure class="stage">
+      <canvas id="query-canvas" aria-label="the same ground, with one query's routed region and true neighbours highlighted"></canvas>
+      <figcaption id="query-figcaption">pick a query</figcaption>
+    </figure>
+  </div>
+
+  <div class="query-readout">
+    <div>
+      <p class="verdict-line" id="query-verdict">—</p>
+      <p class="source" id="query-source">—</p>
+    </div>
+    <ol class="trace panel" id="trace">
+      <li data-step="1"><span class="n">1</span><span class="what">score against 256 centroids<span class="detail" id="t1">—</span></span></li>
+      <li data-step="2"><span class="n">2</span><span class="what">route to the nearest region<span class="detail" id="t2">—</span></span></li>
+      <li data-step="3"><span class="n">3</span><span class="what">the ten true neighbours<span class="detail" id="t3">—</span></span></li>
+      <li data-step="4"><span class="n">4</span><span class="what">what the region actually returns<span class="detail" id="t4">—</span></span></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ===================================================== 3. THE VERDICT -->
+<section id="verdict" aria-labelledby="verdict-h">
+  <header>
+    <p class="eyebrow">the verdict</p>
+    <h2 id="verdict-h">—</h2>
+    <p class="lede" id="verdict-lede">—</p>
+  </header>
+
+  <div class="summary-chips" id="verdict-summary"></div>
+
+  <div class="panel rec" id="recommendation"></div>
+
+  <div class="panel settle" id="settle"></div>
+
+  <p class="source" id="verdict-note">—</p>
+  <div class="families" id="verdict-families"></div>
+
+  <div class="log" id="verdict-log"></div>
+  <p class="source" id="verdict-source">—</p>
+</section>
+
+<!-- ===================================================== 4. THE RECEIPT -->
+<section id="receipt" aria-labelledby="receipt-h">
+  <header>
+    <p class="eyebrow">the receipt</p>
+    <h2 id="receipt-h">Three builds, four environments. <em>Values agree, bytes don't.</em></h2>
+    <p class="lede" id="receipt-lede">—</p>
+  </header>
+
+  <div class="receipt-grid">
+    <div class="panel">
+      <h3>the sampling receipt is identical</h3>
+      <table id="receipt-same"></table>
+      <p class="source">the same records, chosen by the same seeded rule, in every build</p>
+    </div>
+    <div class="panel">
+      <h3>the vectors are not</h3>
+      <table id="receipt-builds"></table>
+      <p class="source">embedding.vectors_sha256 after each canonical build</p>
+    </div>
+    <div class="panel">
+      <h3>the published values agree anyway</h3>
+      <table id="receipt-values"></table>
+      <p class="source" id="receipt-values-source">—</p>
+    </div>
+  </div>
+
+  <div>
+    <h3>check it yourself</h3>
+    <pre id="verify-cmd">—</pre>
+    <p class="source" id="receipt-source">—</p>
+  </div>
+</section>
+
+<!-- ===================================================== 5. THE PROMISE -->
+<section id="promise" aria-labelledby="promise-h">
+  <p class="eyebrow">what is coming</p>
+  <p class="promise-text" id="promise-h">v0.1 — the advisor — public on 23 September 2026: characterize · simulate · verify (Qdrant) · report. Every number carries its receipt. The lab you just used is next.</p>
+  <p class="suite">Prevent · Detect · Prove · Choose</p>
+</section>
+
+<footer>
+  <p>Every figure on this page is measured on the public arXiv-150k fixture (CC0 metadata). The 2-D placement is a projection, declared illustrative in the fixture spec; every number is not.</p>
+  <p class="source">
+    <span id="calibration-line">—</span>
+  </p>
+  <p class="source">
+    Fixture spec: <a href="../../fixtures/arxiv-150k.fixture.yaml"><span class="mono">fixtures/arxiv-150k.fixture.yaml</span></a>
+    · data digests: <a href="data/MANIFEST.sha256"><span class="mono">data/MANIFEST.sha256</span></a>
+    · <span id="footer-gen">—</span>
+  </p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

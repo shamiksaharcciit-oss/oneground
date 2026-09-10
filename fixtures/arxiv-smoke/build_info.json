@@ -1,0 +1,16 @@
+{
+  "built_at": "2026-09-08T21:56:30Z",
+  "cuda_device_name": null,
+  "device": "cpu",
+  "library_versions": {
+    "faiss-cpu": "1.15.0",
+    "numpy": "2.5.3",
+    "sentence-transformers": "6.0.1",
+    "torch": "2.14.0+cpu",
+    "umap-learn": "0.5.12"
+  },
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python_version": "3.12.10",
+  "source_snapshot_sha256": "cc5fc2ef52d68240c4d03b278b10ef174040f41a146062a8395f0581d39ae2a1",
+  "torch_cuda": null
+}

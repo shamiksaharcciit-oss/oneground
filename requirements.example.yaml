@@ -1,0 +1,139 @@
+# oneground requirements file
+# ------------------------------------------------------------------
+# One file drives a run. Every section is either measured from a sample
+# (receipt — re-derivable) or declared by the user (declared — taken as
+# given). The report shows each field's kind next to its value, and any
+# measured field that could not be produced is reported as couldn't-check,
+# never filled in from a declaration.
+#
+# Two ways to use this file:
+#   Tier 1 — provide `corpus.sample` (vectors or text + model). Full report
+#            with verdicts. This is the receipt path.
+#   Tier 2 — omit `corpus.sample`, fill `corpus.declared`. Fixture analogy
+#            and capacity arithmetic only. No verdicts. Declared path.
+# A file may contain both; measured values always win over declared ones.
+
+oneground: 1                       # schema version
+
+run:
+  name: support-tickets-2026q3      # free text, appears in the report
+  mode: auto                        # auto | measure | declare
+  seed: 20260910                    # governs sampling and simulation
+  workdir: ./runs/support-tickets-2026q3
+
+# ------------------------------------------------------------------
+# constraints — what the decision is measured against (declared)
+# ------------------------------------------------------------------
+constraints:
+  kind: declared
+  recall_at_k:
+    k: 10
+    min: 0.90                       # verdict "meets" requires ≥ this
+  latency:
+    p95_ms: 40
+    at_qps: 200
+    concurrency: 32
+  storage_amplification_max: 2.0    # stored copies / base vectors
+  memory_budget_gb: 64              # total across nodes; omit for unbounded
+  monthly_budget: {amount: 600, currency: EUR}
+  growth:
+    horizon_months: 12
+    expected_size_at_horizon: 8000000
+  filtering:                        # omit if no metadata filters
+    fields: [tenant_id, status]
+    typical_selectivity: 0.02       # fraction of corpus a filter keeps
+  updates:
+    rate_per_day: 50000
+    deletes: true
+  deployment:
+    self_hosted: true
+    regions: [eu-west]
+    engines_allowed: [qdrant, pgvector, milvus]   # omit for any adapter
+    engines_excluded: []
+
+# ------------------------------------------------------------------
+# corpus — Tier 1 sample (receipt) and/or Tier 2 description (declared)
+# ------------------------------------------------------------------
+corpus:
+
+  sample:                           # TIER 1 — remove this block for Tier 2
+    kind: receipt
+    # Provide EITHER vectors OR text+model.
+    vectors:
+      path: ./data/sample_vectors.npy        # (n, dim) float32
+      ids_path: ./data/sample_ids.json       # optional, n strings
+      normalized: false                      # tool normalizes if false
+    # text:
+    #   path: ./data/sample.jsonl            # one {id, text, ...} per line
+    #   text_field: text
+    #   model: BAAI/bge-base-en-v1.5         # pinned; weights hashed
+    #   max_seq_length: 512
+    metadata:
+      path: ./data/sample_meta.parquet       # optional; same order/ids as vectors
+      timestamp_field: created_at            # enables drift measurement
+      filter_fields: [tenant_id, status]     # enables filtered-search measurement
+      category_field: product_area           # optional; colors the ground view
+    queries:
+      path: ./data/queries.jsonl             # {id, text} or {id, vector}
+      count_min: 50                          # below this, ambiguity rate is couldn't-check
+      source: logs                           # logs | written | synthetic
+    sampling:
+      # how the sample was drawn from the full corpus — recorded, not enforced
+      method: stratified                     # stratified | random | full
+      stratify_by: created_at
+      full_corpus_size: 2100000
+    target_sample_size: 20000               # tool downsamples if larger
+
+  declared:                         # TIER 2 — fill when there is no sample yet
+    kind: declared
+    size_now: 2100000
+    dimension: 768
+    embedding_model: BAAI/bge-base-en-v1.5
+    corpus_type: support_tickets    # news | papers | tickets | catalog | chat_memory | docs | other
+    text_length: short              # short (<300 chars) | medium | long
+    topics_trend: true              # do hot topics appear and fade
+    time_ordered: true
+    languages: [en, nl]
+    nearest_fixture: auto           # auto | arxiv-150k | stackexchange-200k | none
+
+# ------------------------------------------------------------------
+# simulate — which architecture families to run (declared)
+# ------------------------------------------------------------------
+simulate:
+  kind: declared
+  families: [single_node_hnsw, hash_sharded, semantic_sharded, disk_tiered]
+  node_counts: [1, 3, 5]
+  ground_truth_k: 100
+  report_ceiling: true              # routing ceiling alongside recall
+  report_ratio: true                # 1/Ratio@k alongside recall@k
+  budget:
+    max_configs: 60                 # what-if pruning stops here
+    max_minutes: 30
+
+# ------------------------------------------------------------------
+# verify — timed runs against real engines for the finalists (declared)
+# ------------------------------------------------------------------
+verify:
+  kind: declared
+  enabled: true
+  finalists: 3
+  target: local                     # local | runpod | manual
+  duration_minutes: 12
+  engines_pinned:
+    qdrant: 1.14.0
+    pgvector: 0.8.0
+  cost_model:
+    source: list_prices             # list_prices | provided
+    as_of: 2026-09-10
+    error_band: 0.25                # reported ± on every cost figure
+
+# ------------------------------------------------------------------
+# report — output (declared)
+# ------------------------------------------------------------------
+report:
+  kind: declared
+  formats: [html, json, manifest]
+  include_ground_view: true
+  include_query_traces: 5           # worst-recall queries, traced hop by hop
+  include_decision_log: true
+  publish_receipt: false            # never sends anything anywhere; writes locally

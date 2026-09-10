@@ -1,0 +1,75 @@
+# oneground requirements — arxiv-150k, as the POD reads it.
+#
+# Identical to requirements.arxiv-150k.yaml except for the corpus paths. This
+# file exists because of the volume-first ruling: vectors.npy is 460 MB, and
+# 460 MB does not go up an scp. The pod reads it from the network volume,
+# which is where task 002's build left it.
+#
+# Named from the developer's file via `verify.requirements_on_pod`, so
+# `oneground verify --target runpod` generates the session against THIS file's
+# paths and prints them under "MUST ALREADY BE ON THE POD".
+#
+# The workdir is the same relative path in both files on purpose: the
+# characterize outputs are uploaded to `runs/arxiv-150k-via-characterize/`
+# inside the cloned repo, and the pod must look for them where they landed.
+#
+# UNVERIFIED, and deliberately so. Nothing on this machine can confirm what
+# the volume holds. `corpora/run_verify_pod.sh` stats these two paths before
+# it downloads an engine and, if they are absent, prints what IS on the volume
+# and exits 3 — so a wrong guess here costs seconds of pod time and comes back
+# with the information needed to correct it.
+
+oneground: 1
+
+run:
+  name: arxiv-150k-via-characterize
+  mode: measure
+  seed: 20260908
+  workdir: ./runs/arxiv-150k-via-characterize
+
+corpus:
+  sample:
+    kind: receipt
+
+    vectors:
+      path: /workspace/arxiv-150k/vectors.npy
+      normalized: true             # the builder normalized at embed time
+
+    queries:
+      path: /workspace/arxiv-150k/queries.npy
+      count_min: 50
+      source: written
+
+    target_sample_size: 150000
+
+# `verify --on-pod` reads the corpus and the workdir; it does not simulate.
+# The sweep below is carried so the file stays a valid requirements document
+# and so calibration can find the same reference row the local run used.
+simulate:
+  kind: declared
+  families: [single_node_hnsw, semantic_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+verify:
+  kind: declared
+  target: runpod
+  engines: [qdrant]
+  duration_minutes: 5
+  warmup_seconds: 15
+  engine_params:
+    m: 32
+    ef_construct: 200
+    hnsw_ef: 128
+    indexing_threshold: 1
+
+constraints:
+  kind: declared
+  recall_at_k:
+    k: 10
+    min: 0.95
+  storage_amplification_max: 2.0
+  latency:
+    p95_ms: 40
+    at_qps: 200
+    concurrency: 32

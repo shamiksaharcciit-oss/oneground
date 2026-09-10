@@ -1,0 +1,46 @@
+# oneground node price table -- PROVIDED, DECLARED, NOT FETCHED.
+#
+# kind: declared. Every number here was typed in by a human from a vendor's
+# public page on the date in `as_of`. oneground does not call a pricing API,
+# has no vendor relationship, and will not acquire one: a cost model that
+# phones a vendor is a cost model whose answer you cannot re-derive next year.
+#
+# Prices move. A cost computed from this table is only as current as `as_of`,
+# and every cost oneground reports carries an error band that says so.
+#
+# To use your own numbers, copy this file, edit it, and point
+# `verify.cost.prices` at it. That is the intended path: your negotiated rates
+# are not on any public page.
+
+as_of: 2026-09-11
+kind: declared
+currency: EUR
+source: >-
+  Public list prices, EU regions, typed from vendor pages on the as_of date.
+  On-demand, no committed-use discount, no support plan, no egress.
+note: >-
+  Compute only. Storage, network egress, load balancers, backups and the
+  people who run it are not in these numbers, and a real bill is larger.
+  Nothing here is a quote.
+
+nodes:
+  - id: eu-generic-4vcpu-16gb
+    vcpu: 4
+    memory_gb: 16
+    eur_per_hour: 0.192
+  - id: eu-generic-8vcpu-32gb
+    vcpu: 8
+    memory_gb: 32
+    eur_per_hour: 0.384
+  - id: eu-generic-16vcpu-64gb
+    vcpu: 16
+    memory_gb: 64
+    eur_per_hour: 0.768
+  - id: eu-generic-32vcpu-128gb
+    vcpu: 32
+    memory_gb: 128
+    eur_per_hour: 1.536
+  - id: eu-generic-64vcpu-256gb
+    vcpu: 64
+    memory_gb: 256
+    eur_per_hour: 3.072

@@ -1,0 +1,64 @@
+# oneground requirements — Tier 2, a corpus described rather than sampled.
+#
+# This is the zero-friction entry: you have not exported vectors yet, and you
+# want to know what the shape of the decision looks like before you do.
+#
+# What Tier 2 produces:
+#   - a fixture analogy: a published corpus whose declared character matches
+#     yours, with ITS measured surface shown and labelled as measured on the
+#     fixture, never on your corpus
+#   - capacity arithmetic: nodes, storage and cost from size_now and
+#     dimension, labelled derived-from-declared
+#
+# What Tier 2 never produces: a verdict. Every constraint below comes back
+# couldn't-check, because nothing here was measured on your data. To turn any
+# of them into a measurement, add `corpus.sample` — see the final entry of the
+# report's decision log, which says exactly what that takes.
+
+oneground: 1
+
+run:
+  name: support-tickets-2026q3
+  mode: declare
+  seed: 20260910
+  workdir: ./runs/support-tickets-2026q3
+
+corpus:
+  # No `sample:` block. That is what makes this Tier 2.
+  declared:
+    kind: declared
+    size_now: 2100000
+    dimension: 768
+    embedding_model: BAAI/bge-base-en-v1.5
+    corpus_type: support_tickets     # matched against the fixtures' analogy keys
+    text_length: short               # short | medium | long
+    topics_trend: true               # hot topics appear and fade
+    time_ordered: true
+    languages: [en, nl]
+    nearest_fixture: auto            # auto | <fixture name> | none
+
+simulate:
+  kind: declared
+  families: [single_node_hnsw, hash_sharded, semantic_sharded]
+  node_counts: [1, 3, 5]
+  ground_truth_k: 100
+
+constraints:
+  kind: declared
+  recall_at_k:
+    k: 10
+    min: 0.90
+  storage_amplification_max: 2.0
+  memory_budget_gb: 64
+  latency:
+    p95_ms: 40
+    at_qps: 200
+    concurrency: 32
+  monthly_budget: {amount: 600, currency: EUR}
+
+# The price table the capacity arithmetic costs against. Declared list prices
+# with an error band; the budget verdict would use the upper bound — if a
+# budget verdict were possible here, which it is not.
+cost:
+  prices: oneground/cost/prices.example.yaml
+  error_band: 0.25

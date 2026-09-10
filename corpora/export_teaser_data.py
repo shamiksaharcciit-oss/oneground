@@ -1,0 +1,1108 @@
+#!/usr/bin/env python3
+"""
+oneground teaser export (task T1)
+=================================
+
+Writes the four files the teaser page reads. Everything here is recomputed
+from the fixture's own artifacts using the spec's seeds and the geometry
+functions imported unmodified from `corpora/export_ground_view.py` (which in
+turn imports them from the package). This file defines no geometry of its own.
+
+    site/teaser/data/
+        base.bin            150,000 x (x, y, d1..d4, category, region)
+        centroids.json      256 x (x, y, size)
+        queries.json        2,000 x (placement, routing, true 10-NN, title)
+        values.json         published values, digests, the verdict, receipts
+        MANIFEST.sha256     sha256 of each of the four above
+
+Inputs
+------
+Two directories, because the fixture's large artifacts ship as a release asset
+and are not in the clone:
+
+    --assets   vectors.npy, queries.npy, sample.jsonl.zst   (release asset)
+    --dir      projection.npy, ground_truth.npy, query_ids.json,
+               characterization.json, build_info.json, MANIFEST.sha256,
+               ground_view_*.parquet                        (fixtures/arxiv-150k/)
+    --spec     fixtures/arxiv-150k.fixture.yaml
+    --report   runs/<run>/report.json                       (the verdict)
+
+Every input digest is checked against the fixture MANIFEST before anything is
+read, so the page's receipt panel is describing bytes this export actually saw.
+
+base.bin layout
+---------------
+The brief lists, per base vector: float32 x, y, d1, d2, d3, d4, then uint8
+category and uint8 region. The columns are written **in that order but grouped
+by column** (struct-of-arrays), not interleaved per record:
+
+    [ x     ] 150000 * float32     offset        0
+    [ y     ] 150000 * float32     offset   600000
+    [ d1    ] 150000 * float32     offset  1200000
+    [ d2    ] 150000 * float32     offset  1800000
+    [ d3    ] 150000 * float32     offset  2400000
+    [ d4    ] 150000 * float32     offset  3000000
+    [ cat   ] 150000 * uint8       offset  3600000
+    [ region] 150000 * uint8       offset  3750000
+                                   total    3900000 bytes
+
+A 26-byte interleaved record puts every float32 on an odd byte boundary, so a
+browser could not take a `Float32Array` view over it and would have to copy
+150,000 records out through a `DataView` before the first frame. Grouped by
+column, each column is one zero-copy typed-array view. The content and the
+column order are exactly as the brief specifies; only the grouping differs.
+`values.json:base_bin` carries the layout, so the page reads the offsets from
+data rather than hard-coding them.
+
+Distances are **non-squared** Euclidean: `centroid_dists` takes the sqrt of
+what faiss returns, because the 1.20 and 1.10 ratio definitions in the spec
+mean ratios of actual distances. The closure rule the browser replays is the
+one `export_ground_view.py` uses:
+
+    copies(eps) = #{ j in 1..4 : d_j <= d_1 * (1 + eps) }
+
+capped at four because the spec's semantic_sharded reference configuration
+caps at four. Four is a property of that configuration, not of the corpus.
+
+Usage
+-----
+    python corpora/export_teaser_data.py \\
+        --spec fixtures/arxiv-150k.fixture.yaml \\
+        --dir fixtures/arxiv-150k/ \\
+        --assets ~/oneground-assets/arxiv-150k/ \\
+        --report runs/arxiv-150k-via-characterize/report.json \\
+        --out site/teaser/data/
+
+Requires: pyarrow, faiss, zstandard, pyyaml, numpy (the fixture's own deps).
+"""
+
+import argparse
+import hashlib
+import importlib.util
+import io
+import json
+import os
+import platform
+import sys
+import time
+
+import numpy as np
+import yaml
+
+# --------------------------------------------------------------------------
+# export_ground_view.py, imported unmodified. It carries the geometry
+# constants and the per-query recall function; it in turn imports the
+# estimators from the package via build_fixture.py.
+# --------------------------------------------------------------------------
+_EGV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                    "export_ground_view.py")
+_spec = importlib.util.spec_from_file_location("export_ground_view", _EGV)
+egv = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(egv)
+bf = egv.bf                      # build_fixture, re-exporting oneground.measures
+
+N_CENTROIDS = egv.N_CENTROIDS    # 256
+EPSILON = egv.EPSILON            # 0.20, the spec's reference closure band
+MAX_ASSIGN = egv.MAX_ASSIGN      # 4, the closure cap
+CRISP_RATIO = egv.CRISP_RATIO    # 1.20
+AMBIGUOUS_RATIO = egv.AMBIGUOUS_RATIO   # 1.10
+K_RECALL = egv.K_RECALL          # 10
+
+N_BASE = 150000
+N_QUERIES = 2000
+CURATED_N = 12
+CURATED_WELL_ROUTED = 3          # of the 12; the rest are worst-recall ambiguous
+
+# Which decision-log entries the verdict panel quotes verbatim. Chosen by
+# kind, not by index, so a re-run of the report that reorders the log still
+# quotes the same claims (and this export fails loudly if one is gone).
+QUOTED_LOG_KINDS = ["scope", "indistinguishable", "recommendation"]
+
+# The fourth quoted entry, first match wins. Before the verify landed the only
+# thing to say about latency was that it was unresolved; now that it has been
+# measured in a named environment, the sentence carrying the pod id is the one
+# worth quoting, and `to_resolve` survives as the fallback for a run that has
+# not been verified. Each entry is (kind, substring the text must contain).
+FOURTH_LOG_ENTRY = [
+    ("meets_environment", "latency_p95"),
+    ("to_resolve", None),
+]
+
+# The three canonical builds. Digests are read out of the spec's own git
+# history (the value `embedding.vectors_sha256` held after each build) and out
+# of the finding `digests_are_environment_specific`, which is where the
+# "values agree, bytes don't" claim is published. Build 3's row is asserted
+# against the live spec below, so this table cannot drift from it silently.
+BUILDS = [
+    {
+        "build": 1,
+        "date": "2026-09-08",
+        "environment": "RunPod pod template, numpy 2.1.2",
+        "device": "NVIDIA GeForce RTX 4090",
+        "vectors_sha256": "90ffb2567aba9b8e8ab057391687f61cc3c0958f57b17b617809186d2fe1f573",
+        "queries_sha256": "f1b7b0151db515bee5ba1ce7ae54d949b3f1d1b81912848f037285c5327ccfed",
+        "drift_before": 0.523,
+        "drift_after": 0.549,
+        "source": "fixtures/arxiv-150k.fixture.yaml @ 595ce9f",
+    },
+    {
+        "build": 2,
+        "date": "2026-09-08",
+        "environment": "isolated venv honouring requirements.txt, numpy 2.5.3",
+        "device": "NVIDIA GeForce RTX 4090",
+        "vectors_sha256": "414e1484d94964df6d5d60e64899347096bf0388f241250cac84184236eb5b4e",
+        "queries_sha256": "87718975fe2cc2513abcc28de138a072c8f2d223e09744862b431305626c1b0b",
+        "drift_before": 0.524,
+        "drift_after": 0.551,
+        "source": "fixtures/arxiv-150k.fixture.yaml @ 0ab7567",
+    },
+    {
+        "build": 3,
+        "date": "2026-09-09",
+        "environment": "same pinned venv, numpy 2.5.3",
+        "device": "NVIDIA RTX PRO 4500 Blackwell",
+        "vectors_sha256": "cb973a94ba305a9afe81c98bdc05e51ee3b91023281c33997bc5212fe6db5f5f",
+        "queries_sha256": "16e0f4882b317bfad531f844230f76ad1ef90e62ac365fbe4b986ab2fdde5ebe",
+        "drift_before": 0.522,
+        "drift_after": 0.549,
+        "source": "fixtures/arxiv-150k.fixture.yaml @ b81b3a1 (current)",
+    },
+]
+
+# Files whose digests must match the fixture MANIFEST before this export runs.
+# vectors.npy / queries.npy / sample.jsonl.zst live in --assets, the rest in
+# --dir; the MANIFEST covers all of them.
+CHECK_IN_ASSETS = ["sample.jsonl.zst", "vectors.npy", "queries.npy"]
+CHECK_IN_DIR = ["projection.npy", "ground_truth.npy", "query_ids.json",
+                "characterization.json", "build_info.json",
+                "ground_view_base.parquet", "ground_view_queries.parquet",
+                "ground_view_centroids.parquet"]
+
+OUT_FILES = ["base.bin", "centroids.json", "queries.json", "values.json"]
+
+# A fifth output, derived from exactly those four. Chrome and Edge refuse
+# fetch() and XMLHttpRequest against file:// URLs, so a page opened by
+# double-clicking index.html cannot read its own data directory -- but it can
+# still load a <script src="">. INLINE_FILE is the four outputs gzipped,
+# base64-encoded and assigned to one global, which app.js pulls in only when
+# location.protocol is 'file:'. A hosted visitor never downloads it.
+#
+# gzip, and not plain base64, because base64 alone would take base.bin from
+# 3.9 MB to 5.2 MB and put the file:// load over the brief's 5 MB budget on
+# its own. Gzipped first it lands at 4.4 MB.
+INLINE_FILE = "inline.js"
+
+
+def log(msg):
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 22), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def read_manifest(path):
+    out = {}
+    for line in io.open(path, encoding="utf-8"):
+        line = line.strip()
+        if line:
+            digest, _, name = line.partition("  ")
+            out[name.strip()] = digest
+    return out
+
+
+def check_inputs(manifest, d, assets):
+    """Every input this export reads, digested against the fixture MANIFEST.
+
+    The teaser's receipt panel claims the page was drawn from the published
+    canonical bytes. That claim is only worth printing if it was checked here,
+    so a mismatch stops the export rather than being reported on the page.
+    """
+    rows, bad = [], []
+    for name, where in ([(n, assets) for n in CHECK_IN_ASSETS] +
+                        [(n, d) for n in CHECK_IN_DIR]):
+        path = os.path.join(where, name)
+        if not os.path.exists(path):
+            bad.append(f"{name}: not found at {path}")
+            continue
+        got = sha256_file(path)
+        want = manifest.get(name)
+        ok = (want is not None and got == want)
+        rows.append({"file": name, "sha256": got, "bytes": os.path.getsize(path),
+                     "matches_fixture_manifest": ok})
+        mark = "OK " if ok else "MISMATCH"
+        print(f"  {mark} {name:<32} {got[:16]}...")
+        if not ok:
+            bad.append(f"{name}: manifest {want}, file {got}")
+    if bad:
+        raise SystemExit("input digests do not match the fixture MANIFEST:\n  " +
+                         "\n  ".join(bad))
+    return rows
+
+
+def read_records(path):
+    """sample.jsonl.zst split into (base_recs, query_recs), in row order.
+
+    `oneground.fixture.build` writes every base record first tagged
+    role=base, then every held-out query tagged role=query, and embeds
+    base_recs and q_recs in exactly those orders. So the i-th role=base line
+    is row i of vectors.npy and the i-th role=query line is row i of
+    queries.npy. `main` re-checks the query half against query_ids.json.
+    """
+    import zstandard as zstd
+    base, queries = [], []
+    with open(path, "rb") as f:
+        reader = zstd.ZstdDecompressor().stream_reader(f)
+        for line in io.TextIOWrapper(reader, encoding="utf-8"):
+            r = json.loads(line)
+            (base if r.get("role") == "base" else queries).append(r)
+    return base, queries
+
+
+def copies_at(d_base, eps):
+    """The closure rule of export_ground_view.py, at an arbitrary epsilon.
+
+    within[:, 0] is forced True for the same reason it is there: a vector is
+    always stored in its own nearest region, even if d1 is 0 and the ratio is
+    undefined.
+    """
+    within = d_base <= d_base[:, [0]] * (1 + eps)
+    within[:, 0] = True
+    return within.sum(axis=1)
+
+
+def round_to(x, n):
+    return float(f"{float(x):.{n}g}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--spec", help="fixtures/<id>.fixture.yaml (full export only)")
+    ap.add_argument("--dir", help="fixtures/arxiv-150k/ (full export only)")
+    ap.add_argument("--assets", help="the release asset directory (full export only)")
+    ap.add_argument("--report", required=True, help="runs/<run>/report.json")
+    ap.add_argument("--verify", help="runs/<run>/verify.json; defaults to the "
+                                     "file beside --report")
+    ap.add_argument("--out", required=True, help="site/teaser/data/")
+    ap.add_argument("--report-only", action="store_true",
+                    help="rebuild values.json from --report and --verify and "
+                         "leave the geometry alone. The 460 MB of vectors are "
+                         "never opened and base.bin, queries.json and "
+                         "centroids.json are asserted unchanged.")
+    args = ap.parse_args()
+
+    if args.report_only:
+        return report_only(args)
+
+    missing = [f for f in ("spec", "dir", "assets") if not getattr(args, f)]
+    if missing:
+        raise SystemExit("a full export needs " +
+                         ", ".join("--" + m for m in missing) +
+                         "; for values.json alone use --report-only")
+
+    t0 = time.time()
+    spec = yaml.safe_load(open(args.spec, encoding="utf-8"))
+    d, assets, out = args.dir, args.assets, args.out
+    os.makedirs(out, exist_ok=True)
+
+    seed = spec["sampling"]["seed"]
+    log(f"fixture {spec['fixture']['id']} v{spec['fixture']['version']}  "
+        f"seed {seed}  centroids {N_CENTROIDS}  eps {EPSILON}  cap {MAX_ASSIGN}")
+
+    log("checking every input against the fixture MANIFEST")
+    manifest = read_manifest(os.path.join(d, "MANIFEST.sha256"))
+    input_digests = check_inputs(manifest, d, assets)
+
+    # ---- build 3's published digests must be the ones in the spec ----
+    b3 = BUILDS[-1]
+    for section, field in (("embedding", "vectors_sha256"),
+                           ("queries", "queries_sha256")):
+        if spec[section].get(field) != b3[field]:
+            raise SystemExit(
+                f"BUILDS[build 3].{field} is {b3[field]}, but the spec now "
+                f"publishes {spec[section].get(field)}. The receipt table "
+                "in this file has drifted from the fixture; fix the table.")
+    log("build 3 row agrees with the spec's published digests")
+
+    # ---- load ----
+    log("loading artifacts")
+    base = np.load(os.path.join(assets, "vectors.npy"))
+    queries = np.load(os.path.join(assets, "queries.npy"))
+    proj = np.load(os.path.join(d, "projection.npy"))
+    gt10 = np.load(os.path.join(d, "ground_truth.npy"))[:, :K_RECALL]
+    if base.shape[0] != N_BASE or queries.shape[0] != N_QUERIES:
+        raise SystemExit(f"expected {N_BASE} base / {N_QUERIES} query rows, "
+                         f"got {base.shape[0]} / {queries.shape[0]}")
+    if len(proj) != len(base):
+        raise SystemExit(f"projection has {len(proj):,} rows, vectors has "
+                         f"{len(base):,}")
+    log(f"base {base.shape}  queries {queries.shape}  projection {proj.shape}")
+
+    base_recs, query_recs = read_records(os.path.join(assets, "sample.jsonl.zst"))
+    if len(base_recs) != N_BASE or len(query_recs) != N_QUERIES:
+        raise SystemExit(f"sample.jsonl.zst holds {len(base_recs):,} base and "
+                         f"{len(query_recs):,} query records")
+    q_ids = json.load(open(os.path.join(d, "query_ids.json"), encoding="utf-8"))
+    if [r["id"] for r in query_recs] != list(q_ids):
+        raise SystemExit("the role=query records in sample.jsonl.zst are not in "
+                         "query_ids.json order; query titles would be attached "
+                         "to the wrong query vectors")
+    log("query record order matches query_ids.json")
+
+    # ---- geometry, all in 768-d ----
+    log(f"k-means {N_CENTROIDS} (seed {seed})")
+    cents = bf.kmeans(base, N_CENTROIDS, seed)
+
+    log(f"assigning base vectors to their {MAX_ASSIGN} nearest centroids")
+    d_base, near_base = bf.centroid_dists(base, cents, MAX_ASSIGN)
+    region = near_base[:, 0].astype(np.int32)
+    d1, d2 = d_base[:, 0], d_base[:, 1]
+    ratio = np.divide(d2, d1, out=np.full_like(d2, np.inf), where=d1 > 0)
+
+    log("assigning queries")
+    d_q, near_q = bf.centroid_dists(queries, cents, 2)
+    q_region, q_region2 = near_q[:, 0].astype(np.int32), near_q[:, 1].astype(np.int32)
+    q_ratio = np.divide(d_q[:, 1], d_q[:, 0],
+                        out=np.full_like(d_q[:, 1], np.inf), where=d_q[:, 0] > 0)
+    ambiguous = d_q[:, 1] <= AMBIGUOUS_RATIO * d_q[:, 0]
+
+    log("per-query recall at one-region exact routing")
+    per_query = egv.one_region_recall_per_query(base, queries, region, q_region, gt10)
+
+    # ---- 2-D placement (illustrative; see export_ground_view.py's header) ----
+    log("placing queries and centroids in 2-D")
+    q_xy = proj[gt10].mean(axis=1)
+    sizes = np.bincount(region, minlength=N_CENTROIDS)
+    sums = np.zeros((N_CENTROIDS, 2), dtype=np.float64)
+    np.add.at(sums, region, proj.astype(np.float64))
+    with np.errstate(invalid="ignore"):
+        c_xy = sums / sizes[:, None]
+
+    # ---- cross-check against the pod's ground-view tables -----------------
+    # Those three parquets were computed by export_ground_view.py on the pod
+    # in build 3's environment. This export recomputes the same geometry on
+    # the developer's laptop. Comparing them is the fixture's own claim about
+    # itself -- values reproduce across environments, bytes do not -- checked
+    # rather than asserted.
+    log("cross-checking the recomputed geometry against build 3's tables")
+    cross = cross_check(d, region, ratio, q_region, q_ratio, ambiguous,
+                        per_query, q_xy, c_xy, sizes, d_base)
+
+    # ---- categories ----
+    cats = [egv.top_level(bf.primary_category(r["categories"])) for r in base_recs]
+    cat_names = sorted({c for c in cats if c})
+    if len(cat_names) > 255:
+        raise SystemExit(f"{len(cat_names)} top-level categories will not fit "
+                         "in the uint8 category column")
+    cat_index = {c: i for i, c in enumerate(cat_names)}
+    cat_col = np.array([cat_index.get(c, 255) for c in cats], dtype=np.uint8)
+    log(f"{len(cat_names)} top-level categories")
+
+    # ---- base.bin --------------------------------------------------------
+    log("writing base.bin")
+    columns = [("x", proj[:, 0], "float32"), ("y", proj[:, 1], "float32")]
+    for j in range(MAX_ASSIGN):
+        columns.append((f"d{j + 1}", d_base[:, j], "float32"))
+    columns.append(("category", cat_col, "uint8"))
+    columns.append(("region", region.astype(np.uint8), "uint8"))
+
+    layout, offset = [], 0
+    with open(os.path.join(out, "base.bin"), "wb") as f:
+        for name, col, dtype in columns:
+            buf = np.ascontiguousarray(col, dtype=dtype)
+            if buf.shape != (N_BASE,):
+                raise SystemExit(f"column {name} has shape {buf.shape}")
+            f.write(buf.tobytes())
+            layout.append({"name": name, "dtype": dtype,
+                           "offset": offset, "count": N_BASE})
+            offset += buf.nbytes
+    log(f"base.bin  {offset:,} bytes  ({len(columns)} columns)")
+
+    # region is uint8 and the browser compares it to a routed region id, so
+    # the round trip has to be lossless for all 256 regions.
+    if region.max() > 255 or region.min() < 0:
+        raise SystemExit(f"region ids run {region.min()}..{region.max()}, "
+                         "which does not fit the uint8 column")
+
+    # ---- centroids.json ----
+    log("writing centroids.json")
+    centroids = [{"x": None if not np.isfinite(c_xy[i, 0]) else round_to(c_xy[i, 0], 6),
+                  "y": None if not np.isfinite(c_xy[i, 1]) else round_to(c_xy[i, 1], 6),
+                  "size": int(sizes[i])} for i in range(N_CENTROIDS)]
+    write_json(os.path.join(out, "centroids.json"), centroids)
+
+    # ---- queries.json ----
+    log("writing queries.json")
+    # A true neighbour that sits inside the routed region is necessarily in
+    # that region's exact top 10, because its score already beats every other
+    # vector in the corpus. So recall x 10 must equal the count of true
+    # neighbours inside the region -- which is the number the page states.
+    inside = (region[gt10] == q_region[:, None]).sum(axis=1)
+    disagree = int((np.rint(per_query * K_RECALL).astype(int) != inside).sum())
+    if disagree:
+        raise SystemExit(
+            f"{disagree} queries where recall@10 x 10 disagrees with the count "
+            "of true neighbours inside the routed region. The page's sentence "
+            "'N of 10 true neighbours are outside the region this query routes "
+            "to' would not be the same measurement as the recall beside it.")
+    log("recall@10 x 10 == true neighbours inside the routed region, all 2,000")
+
+    q_rows = []
+    for i in range(N_QUERIES):
+        q_rows.append({
+            "title": query_recs[i]["title"].replace("\n", " ").strip(),
+            "x": round_to(q_xy[i, 0], 6),
+            "y": round_to(q_xy[i, 1], 6),
+            "region": int(q_region[i]),
+            "region2": int(q_region2[i]),
+            # d1 == 0 makes the ratio infinite; JSON has no Infinity, and a
+            # null here reads as "no second region to be ambiguous about".
+            "ratio": (round_to(q_ratio[i], 5) if np.isfinite(q_ratio[i]) else None),
+            "ambiguous": bool(ambiguous[i]),
+            "nn": [int(v) for v in gt10[i]],
+            "recall10_one_region": round_to(per_query[i], 4),
+            "outside": int(K_RECALL - inside[i]),
+        })
+
+    # The 12 curated queries: the worst-recall ambiguous ones, plus three that
+    # route well. Ties broken by index so the picker is the same on every run.
+    amb = [i for i in range(N_QUERIES) if ambiguous[i]]
+    worst = sorted(amb, key=lambda i: (per_query[i], i))[:CURATED_N - CURATED_WELL_ROUTED]
+    best = sorted(range(N_QUERIES), key=lambda i: (-per_query[i], i))[:CURATED_WELL_ROUTED]
+    curated = worst + best
+    if len(set(curated)) != CURATED_N:
+        raise SystemExit("the curated set overlaps; a query is both worst and best")
+    write_json(os.path.join(out, "queries.json"),
+               {"curated": curated, "queries": q_rows})
+
+    # ---- measured now, on this machine ----
+    log("measuring the epsilon sweep")
+    hist_at = {}
+    for eps in [round(e / 100, 2) for e in range(0, 41)]:
+        c = copies_at(d_base, eps)
+        hist_at[f"{eps:.2f}"] = {
+            "hist": [int((c == n).sum()) for n in range(1, MAX_ASSIGN + 1)],
+            "storage_amplification": round_to(c.sum() / N_BASE, 6),
+            "copied": int((c > 1).sum()),
+            "p99": int(np.percentile(c, 99, method="lower")),
+        }
+    at20 = hist_at[f"{EPSILON:.2f}"]
+    measured = {
+        "environment": {
+            "platform": platform.platform(),
+            "python": sys.version.split()[0],
+            "numpy": np.__version__,
+            "faiss": __import__("faiss").__version__,
+            "note": "the fourth environment: the developer laptop this export ran on",
+        },
+        "boundary_crispness": round_to(float((ratio > CRISP_RATIO).mean()), 6),
+        "ambiguous_query_rate": round_to(float(ambiguous.mean()), 6),
+        "skew_top10_share": round_to(float(np.sort(sizes)[-10:].sum() / N_BASE), 6),
+        "one_region_recall_at_10": round_to(float(per_query.mean()), 6),
+        "storage_amplification_at_eps_0_20": at20["storage_amplification"],
+        "copies_histogram_at_eps_0_20": at20["hist"],
+        "empty_regions": int((sizes == 0).sum()),
+        "eps_sweep": hist_at,
+        "cross_check_vs_build3_tables": cross,
+    }
+
+    # ---- the published values, asserted ----
+    failures = assert_published(spec, measured)
+
+    # ---- the verdict, and the verify run behind it ----
+    report = json.load(open(args.report, encoding="utf-8"))
+    verdict = build_verdict(report, args.report)
+    verify = build_verify(args.report, args.verify)
+
+    # ---- values.json ----
+    log("writing values.json")
+    characterization = json.load(open(os.path.join(d, "characterization.json"),
+                                      encoding="utf-8"))
+    build_info = json.load(open(os.path.join(d, "build_info.json"), encoding="utf-8"))
+    values = {
+        "schema": 1,
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "generated_by": "corpora/export_teaser_data.py",
+        "fixture": {
+            "id": spec["fixture"]["id"],
+            "version": spec["fixture"]["version"],
+            "status": spec["fixture"]["status"],
+            "spec_path": os.path.relpath(args.spec).replace("\\", "/"),
+            "license_notice": " ".join(spec["fixture"]["license_notice"].split()),
+            "source": {k: spec["source"][k] for k in
+                       ("name", "provider", "snapshot_date", "snapshot_sha256")},
+            "embedding": {k: spec["embedding"][k] for k in
+                          ("model", "dimension", "normalize", "device",
+                           "library", "library_version")},
+            "counts": {"base": N_BASE, "queries": N_QUERIES,
+                       "centroids": N_CENTROIDS, "k_ground_truth":
+                       spec["ground_truth"]["k"]},
+        },
+        "geometry": {
+            "seed": seed,
+            "n_centroids": N_CENTROIDS,
+            "reference_epsilon": EPSILON,
+            "max_assign": MAX_ASSIGN,
+            "crisp_ratio": CRISP_RATIO,
+            "ambiguous_ratio": AMBIGUOUS_RATIO,
+            "k": K_RECALL,
+            "distance": "non-squared Euclidean to the centroid",
+            "closure_rule": "a vector is copied into region j when d_j <= d_1 * (1 + eps), for the four nearest regions",
+            "cap_note": ("Four is the copy cap of the spec's semantic_sharded "
+                         "reference configuration, not a property of the corpus. "
+                         "base.bin carries four distances because the model "
+                         "stores at most four copies."),
+        },
+        "base_bin": {
+            "path": "base.bin",
+            "rows": N_BASE,
+            "bytes": offset,
+            "layout": "struct-of-arrays; each column is contiguous",
+            "columns": layout,
+        },
+        "published": {
+            "characterization": spec["characterization"],
+            "reference_results": spec["reference_results"],
+            "characterization_json": characterization,
+            "note": ("Published values are the cross-environment contract. A "
+                     "local build reproduces them within tolerance; it does "
+                     "not reproduce the bytes."),
+        },
+        "categories": cat_names,
+        "measured": measured,
+        "receipt": {
+            "build_info": build_info,
+            "fixture_manifest": [{"file": k, "sha256": v} for k, v in manifest.items()],
+            "input_digests": input_digests,
+            "builds": BUILDS,
+            "identical_across_builds": [
+                {"file": "sample.jsonl.zst", "sha256": spec["sampling"]["sample_sha256"],
+                 "source": "fixtures/arxiv-150k.fixture.yaml:sampling.sample_sha256"},
+                {"file": "query_ids.json", "sha256": manifest["query_ids.json"],
+                 "source": "fixtures/arxiv-150k/MANIFEST.sha256"},
+            ],
+            "finding": " ".join(
+                next(f["note"] for f in spec["findings"]
+                     if f["id"] == "digests_are_environment_specific").split()),
+            "verify_command": spec["verification"]["command"],
+        },
+        "findings": [{"id": f["id"], "note": " ".join(f["note"].split())}
+                     for f in spec["findings"]],
+        "verdict": verdict,
+        "verify": verify,
+    }
+    write_json(os.path.join(out, "values.json"), values)
+
+    # ---- the file:// bundle, derived from the four outputs ----
+    log(f"writing {INLINE_FILE} (the file:// path)")
+    write_inline(out)
+
+    # ---- MANIFEST ----
+    lines = []
+    total = 0
+    for name in OUT_FILES + [INLINE_FILE]:
+        p = os.path.join(out, name)
+        lines.append(f"{sha256_file(p)}  {name}\n")
+        if name in OUT_FILES:
+            total += os.path.getsize(p)
+    io.open(os.path.join(out, "MANIFEST.sha256"), "w",
+            encoding="utf-8", newline="\n").writelines(lines)
+
+    inline_bytes = os.path.getsize(os.path.join(out, INLINE_FILE))
+    print("\n================ teaser export summary ================")
+    for name in OUT_FILES:
+        print(f"  {name:<18} {os.path.getsize(os.path.join(out, name)):>10,} bytes")
+    print(f"  {'total (http)':<18} {total:>10,} bytes  ({total / 1e6:.2f} MB)")
+    print(f"  {INLINE_FILE:<18} {inline_bytes:>10,} bytes  "
+          f"({inline_bytes / 1e6:.2f} MB, the file:// path, not both)")
+    print(f"\n  copies at eps {EPSILON}: " + "  ".join(
+        f"{n}:{at20['hist'][n - 1]:,} ({at20['hist'][n - 1] / N_BASE:.3f})"
+        for n in range(1, MAX_ASSIGN + 1)))
+    print(f"  storage amplification  {at20['storage_amplification']:.3f}x")
+    print(f"  vectors copied         {at20['copied']:,}")
+    print(f"  p99 copies             {at20['p99']}")
+    print(f"\nwritten to {out}   ({time.time() - t0:.1f} s)")
+
+    if failures:
+        print("\nTEASER EXPORT FAILED - recomputed geometry disagrees with the "
+              "published values:", file=sys.stderr)
+        for f in failures:
+            print(f"  - {f}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def cross_check(d, region, ratio, q_region, q_ratio, ambiguous, per_query,
+                q_xy, c_xy, sizes, d_base):
+    """This laptop's recomputation against build 3's ground-view parquets.
+
+    Reported, never asserted to be byte-identical: k-means on a different
+    platform and BLAS may land on a different local optimum, and the fixture's
+    published claim is about values, not bytes. Any disagreement is measured
+    and carried into values.json so the page can be honest about it.
+    """
+    import pyarrow.parquet as pq
+    b = pq.read_table(os.path.join(d, "ground_view_base.parquet")).to_pydict()
+    q = pq.read_table(os.path.join(d, "ground_view_queries.parquet")).to_pydict()
+    c = pq.read_table(os.path.join(d, "ground_view_centroids.parquet")).to_pydict()
+
+    pod_region = np.asarray(b["region"], dtype=np.int64)
+    pod_copies = np.asarray(b["copies"], dtype=np.int64)
+    pod_ratio = np.asarray(b["ratio"], dtype=np.float64)
+    here_copies = copies_at(d_base, EPSILON)
+
+    # Region ids are labels: the same partition can come out numbered
+    # differently. Compare the partition, not the labels, by asking whether
+    # two vectors that share a region here shared one there -- via the size
+    # multiset and the best label matching.
+    out = {
+        "note": ("build 3's ground_view_*.parquet were computed on the pod; "
+                 "the rows below recompute the same geometry on this laptop"),
+        "base_rows": int(len(pod_region)),
+        "copies_identical_frac": round_to(float((pod_copies == here_copies).mean()), 6),
+        "storage_amplification_pod": round_to(float(pod_copies.mean()), 6),
+        "storage_amplification_here": round_to(float(here_copies.mean()), 6),
+        "crispness_pod": round_to(float((pod_ratio > CRISP_RATIO).mean()), 6),
+        "crispness_here": round_to(float((np.asarray(ratio) > CRISP_RATIO).mean()), 6),
+        "region_sizes_multiset_identical":
+            bool(np.array_equal(np.sort(np.asarray(c["size"], dtype=np.int64)),
+                                np.sort(sizes.astype(np.int64)))),
+        "query_ambiguous_identical_frac": round_to(
+            float((np.asarray(q["ambiguous"]) == ambiguous).mean()), 6),
+        "query_recall_mean_pod": round_to(
+            float(np.asarray(q["recall10_one_region"], dtype=np.float64).mean()), 6),
+        "query_recall_mean_here": round_to(float(per_query.mean()), 6),
+        "query_recall_identical_frac": round_to(float(
+            (np.abs(np.asarray(q["recall10_one_region"], dtype=np.float64)
+                    - per_query) < 1e-6).mean()), 6),
+        "query_xy_max_abs_delta": round_to(float(np.abs(
+            np.column_stack([q["x"], q["y"]]).astype(np.float64) - q_xy).max()), 6),
+    }
+    for k, v in out.items():
+        if k != "note":
+            print(f"  {k:<38} {v}")
+    return out
+
+
+def assert_published(spec, measured):
+    """The recomputed values against the spec's published ones.
+
+    Same shape as export_ground_view.py's check: never a parameter change, a
+    reported failure. One-region recall has no published field of its own, so
+    the spec's drift pair widened by the drift tolerance is the band, exactly
+    as that script does it.
+    """
+    ch = spec["characterization"]
+    ref = spec["reference_results"]["semantic_sharded"]
+    checks = [
+        ("boundary_crispness", measured["boundary_crispness"],
+         ch["boundary_crispness"]["value"], ch["boundary_crispness"]["tolerance"]),
+        ("ambiguous_query_rate", measured["ambiguous_query_rate"],
+         ch["ambiguous_query_rate"]["value"], ch["ambiguous_query_rate"]["tolerance"]),
+        ("skew_top10_share", measured["skew_top10_share"],
+         ch["skew_top10_share"]["value"], ch["skew_top10_share"]["tolerance"]),
+        ("storage_amplification", measured["storage_amplification_at_eps_0_20"],
+         ref["storage_amplification"], ref["tolerance"]),
+    ]
+    print("\n  recomputed vs the spec's published values")
+    failures = []
+    for label, got, want, tol in checks:
+        delta = abs(got - want)
+        ok = delta <= tol
+        print(f"  {label:<24} {got:.4f}   spec {want}  delta {delta:.4f}  "
+              f"tol {tol}  {'OK' if ok else 'FAIL'}")
+        if not ok:
+            failures.append(f"{label}: recomputed {got:.4f}, spec {want}, "
+                            f"delta {delta:.4f} exceeds tolerance {tol}")
+
+    before, after = ch["drift"]["value_before"], ch["drift"]["value_after"]
+    tol = ch["drift"]["tolerance"]
+    lo, hi = min(before, after) - tol, max(before, after) + tol
+    got = measured["one_region_recall_at_10"]
+    ok = lo <= got <= hi
+    print(f"  {'one_region_recall@10':<24} {got:.4f}   drift band "
+          f"[{lo:.3f}, {hi:.3f}]  {'OK' if ok else 'FAIL'}")
+    if not ok:
+        failures.append(f"one_region_recall@10: {got:.4f} outside the band "
+                        f"[{lo:.3f}, {hi:.3f}] derived from the spec's drift "
+                        f"pair ({before} / {after}) +/- {tol}")
+    return failures
+
+
+def report_only(args):
+    """Rebuild values.json from report.json and verify.json. Nothing else.
+
+    The geometry costs a k-means over 460 MB of vectors and about a minute; a
+    decision that has been re-judged does not need it re-derived. Every block
+    of values.json that came from the fixture -- published, measured, receipt,
+    geometry, base_bin, categories -- is carried over from the file already on
+    disk, and only `verdict` and `verify` are rebuilt.
+
+    `inline.js` is rewritten too. It is not a fifth source: it is the four
+    outputs gzipped for the file:// path, and values.json is one of them. Left
+    stale it would serve the pre-verify decision to anyone who opened the page
+    by double-clicking, so the page would state two different verdicts
+    depending on how it was loaded. `verify_teaser_data.py` checks the bundle
+    against the four files beside it and fails if this is skipped.
+
+    base.bin, queries.json and centroids.json are digested before and after and
+    must be identical; the run stops if any of them moved.
+    """
+    out = args.out
+    t0 = time.time()
+    values_path = os.path.join(out, "values.json")
+    if not os.path.exists(values_path):
+        raise SystemExit(f"{values_path} does not exist; --report-only rebuilds "
+                         "it in place and has nothing to start from. Run a full "
+                         "export first.")
+
+    untouched = ["base.bin", "queries.json", "centroids.json"]
+    before = {n: sha256_file(os.path.join(out, n)) for n in untouched}
+    log("digested the three geometry outputs; they must not move")
+
+    prior = json.load(open(values_path, encoding="utf-8"))
+    report = json.load(open(args.report, encoding="utf-8"))
+
+    values = dict(prior)
+    values["verdict"] = build_verdict(report, args.report)
+    values["verify"] = build_verify(args.report, args.verify)
+    values["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    values["generated_by"] = "corpora/export_teaser_data.py --report-only"
+    values["geometry_from"] = {
+        "generated_at": prior.get("generated_at"),
+        "generated_by": prior.get("generated_by"),
+        "note": ("every block but verdict and verify was carried over from the "
+                 "full export named here; the geometry was not re-derived"),
+    }
+    write_json(values_path, values)
+    log(f"values.json rewritten  ({os.path.getsize(values_path):,} bytes)")
+
+    log(f"writing {INLINE_FILE} (values.json is one of the four it carries)")
+    write_inline(out)
+
+    lines = []
+    for name in OUT_FILES + [INLINE_FILE]:
+        lines.append(f"{sha256_file(os.path.join(out, name))}  {name}\n")
+    io.open(os.path.join(out, "MANIFEST.sha256"), "w",
+            encoding="utf-8", newline="\n").writelines(lines)
+
+    after = {n: sha256_file(os.path.join(out, n)) for n in untouched}
+    moved = [n for n in untouched if before[n] != after[n]]
+
+    print("\n================ report-only export ================")
+    for n in untouched:
+        print(f"  unchanged  {n:<16}  {after[n][:16]}...")
+    for n in ("values.json", INLINE_FILE, "MANIFEST.sha256"):
+        print(f"  rewritten  {n:<16}  {sha256_file(os.path.join(out, n))[:16]}..."
+              f"  {os.path.getsize(os.path.join(out, n)):>10,} bytes")
+    v = values["verdict"]
+    print(f"\n  summary          {v['summary']}")
+    print(f"  recommendation   {v['recommendation']}")
+    print(f"  quoted log kinds {[e['kind'] for e in v['decision_log_quoted']]}")
+    print(f"\nwritten to {out}   ({time.time() - t0:.1f} s)")
+
+    if moved:
+        raise SystemExit(
+            "--report-only changed a geometry output, which it must never do: "
+            + ", ".join(f"{n} {before[n][:12]}... -> {after[n][:12]}..."
+                        for n in moved))
+    return 0
+
+
+def build_verify(report_path, verify_path):
+    """The verify run behind the decision, for the page to show.
+
+    Everything here is copied out of verify.json (a receipt: measurements) and
+    verify_info.json (declared: what the engine reported about itself). Nothing
+    is recomputed and nothing is rounded -- the page does its own formatting,
+    so the numbers it prints and the numbers here are the same numbers.
+    """
+    run_dir = os.path.dirname(os.path.abspath(report_path))
+    vp = verify_path or os.path.join(run_dir, "verify.json")
+    ip = os.path.join(os.path.dirname(os.path.abspath(vp)), "verify_info.json")
+    for path in (vp, ip):
+        if not os.path.exists(path):
+            raise SystemExit(
+                f"{path} not found. The page states a verified decision, so the "
+                "verify receipt has to sit beside the report it came from; pass "
+                "--verify explicitly if it lives elsewhere.")
+    v = json.load(open(vp, encoding="utf-8"))
+    info = json.load(open(ip, encoding="utf-8"))
+    report = json.load(open(report_path, encoding="utf-8"))
+
+    # A latency number is only meaningful with the machine it was taken on.
+    # If these two disagree the page would hang a measurement on the wrong pod.
+    if v.get("environment_id") != report["environment"].get("environment_id"):
+        raise SystemExit(
+            f"verify.json names environment {v.get('environment_id')} and "
+            f"report.json names {report['environment'].get('environment_id')}; "
+            "the page would attribute a measurement to the wrong machine.")
+
+    seq = v["searches"]["k=10"]
+    seq_lat = seq["latency_measured_but_not_attributable"]
+    loaded = v["searches"]["k=10_under_load"]
+    loaded_lat = loaded["latency_shape_single_client"]
+    load = v["load"]
+    facts = info.get("engine_facts", {})
+
+    return {
+        "source": os.path.relpath(vp).replace("\\", "/"),
+        "info_source": os.path.relpath(ip).replace("\\", "/"),
+        "kind": info.get("kind"),
+        "run_at": info["run_at"],
+        "date": info["run_at"][:10],
+        "target": info["target"],
+        "platform": info["platform"],
+        "environment_id": v["environment_id"],
+        "engine": v["engine"],
+        "engine_version": v["engine_version"],
+        "namespace": facts.get("namespace"),
+        "index_type": facts.get("index_type"),
+        "index_params": facts.get("index_params"),
+        "metric": facts.get("metric"),
+        "shards": facts.get("shards"),
+        "replicas": facts.get("replicas"),
+        "n_base": v["n_base"],
+        "n_queries": v["n_queries"],
+        "dimension": v["dimension"],
+        "elapsed_seconds": v["elapsed_seconds"],
+        "recall_at_10_measured": seq["recall_at_10"],
+        "calibration": dict(v["calibration"],
+                            error_recall=v["calibration_error_recall"]),
+        "ingest": {k: v["ingest"][k] for k in
+                   ("n_vectors", "batches", "seconds", "vectors_per_second")},
+        "index": v["index"],
+        "latency": {
+            "rtt_baseline": v["rtt_baseline_ms"],
+            "sequential": {
+                "p50_ms": seq_lat["p50_ms"],
+                "p95_ms": seq_lat["p95_ms"],
+                "p99_ms": seq_lat["p99_ms"],
+                "n_queries": seq_lat["n_queries"],
+                "concurrency": seq_lat["concurrency"],
+                "rtt_share_of_p95": seq["rtt_share_of_p95"],
+                "outcome": seq["latency_shape_single_client"],
+            },
+            "under_load": {
+                "p50_ms": loaded_lat["p50_ms"],
+                "p95_ms": loaded_lat["p95_ms"],
+                "p99_ms": loaded_lat["p99_ms"],
+                "max_ms": loaded_lat["max_ms"],
+                "mean_ms": loaded_lat["mean_ms"],
+                "n_queries": loaded_lat["n_queries"],
+                "concurrency": loaded_lat["concurrency"],
+                "rtt_share_of_p95": loaded["rtt_share_of_p95"],
+                "recall_at_10": loaded["recall_at_10"],
+            },
+            "note": load["note"],
+        },
+        "qps": {
+            "target": load["target_qps"],
+            "achieved": load["achieved_qps"],
+            "completed": load["completed"],
+            # target x duration: what the run was offered. Derived once here so
+            # the page states the number rather than doing arithmetic of its own.
+            "offered": int(round(load["target_qps"] * load["duration_seconds"])),
+            "offered_basis": "target_qps x duration_seconds",
+            "concurrency": load["concurrency"],
+            "duration_seconds": load["duration_seconds"],
+            "warmup_seconds_excluded": load["warmup_seconds_excluded"],
+            "errors": load["errors"],
+            "error_rate": load["error_rate"],
+        },
+    }
+
+
+# The repository root, for turning absolute paths back into the repo-relative
+# ones every other source field on the page uses.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def public_price_table(table):
+    """The price table, with the machine it was read on taken out of it.
+
+    `price_table.path` is where `prices.example.yaml` happened to sit on the
+    machine that ran `oneground report` -- an absolute path through somebody's
+    home directory. It reaches this page, and a published page has no business
+    naming a developer's filesystem. The useful half of the field is *which*
+    price table, so it becomes the repo-relative path, which is the shape every
+    other source string on this page already has.
+
+    A path outside the repository is reduced to its basename: still says which
+    file, still says nothing about where it lives. `path_note` records that the
+    field was rewritten, so the page never claims this is what report.json
+    said.
+    """
+    if not table:
+        return table
+    out = dict(table)
+    raw = out.get("path")
+    if not raw:
+        return out
+    native = raw.replace("\\", os.sep).replace("/", os.sep)
+    try:
+        inside = os.path.commonpath([os.path.abspath(native), REPO_ROOT]) == REPO_ROOT
+    except ValueError:          # different drives on Windows
+        inside = False
+    out["path"] = (os.path.relpath(native, REPO_ROOT).replace(os.sep, "/")
+                   if inside else os.path.basename(native))
+    out["path_note"] = ("rewritten by the teaser export: report.json records an "
+                        "absolute path on the machine that produced it")
+    return out
+
+
+def build_verdict(report, report_path):
+    """Task 010's decision, copied out of report.json without re-deriving it.
+
+    Nothing is recomputed here and nothing is rounded: every option keeps its
+    per-constraint outcome, value, threshold and source field, because the
+    page shows the source beside every verdict cell.
+    """
+    log_entries = report["decision_log"]
+    quoted = []
+    for kind in QUOTED_LOG_KINDS:
+        hits = [e for e in log_entries if e["kind"] == kind]
+        if not hits:
+            raise SystemExit(
+                f"report.json has no decision_log entry of kind '{kind}'. The "
+                "verdict panel quotes four entries by kind; the report has "
+                "changed shape and the panel would quote something else.")
+        quoted.append(hits[0])
+
+    # The fourth, first match wins: the sentence naming the environment a
+    # latency verdict was reached in, and `to_resolve` for a run with no
+    # verify behind it. Still four or nothing.
+    for kind, needle in FOURTH_LOG_ENTRY:
+        hits = [e for e in log_entries if e["kind"] == kind
+                and (needle is None or needle in e["text"])]
+        if hits:
+            quoted.append(hits[0])
+            break
+    else:
+        raise SystemExit(
+            "report.json has no decision_log entry matching any of " +
+            ", ".join(f"{k}" + (f" containing '{n}'" if n else "")
+                      for k, n in FOURTH_LOG_ENTRY) +
+            ". The verdict panel quotes four entries and will not quote three.")
+
+    families = {}
+    for o in report["options"]:
+        families.setdefault(o["family"], []).append({
+            "config": o["config"],
+            "params": o["params"],
+            "outcome": o["judgement"]["outcome"],
+            "indistinguishable_from": o["judgement"]["indistinguishable_from"],
+            "constraints": o["judgement"]["constraints"],
+            "measurement": {k: o["measurement"][k] for k in
+                            ("recall_at_10", "storage_amplification",
+                             "stored_vectors", "p99_copies_per_vector",
+                             "est_memory_bytes") if k in o["measurement"]},
+        })
+
+    recommended, runner_up = None, None
+    by_config = {o["config"]: o for o in report["options"]}
+    rec = report.get("recommendation")
+    if rec:
+        if rec not in by_config:
+            raise SystemExit(
+                f"report.json recommends {rec}, which is not one of its own "
+                "options; the page would name a configuration that was never "
+                "judged.")
+        o = by_config[rec]
+        recommended = {
+            "config": o["config"],
+            "family": o["family"],
+            "params": o["params"],
+            "outcome": o["judgement"]["outcome"],
+            "constraints": o["judgement"]["constraints"],
+            "measurement": o["measurement"],
+            # The budget verdict travels with its cost and its error band, and
+            # with the fact that the verdict was taken on the upper bound. A
+            # cost with no band is a guess wearing a number's clothes.
+            "cost": dict(report.get("costs", {}).get(o["config"], {}),
+                         budget=report["constraints"].get("monthly_budget"),
+                         source=f"report.json:costs[{o['config']}]"),
+        }
+        # The option this one could not be separated from on recall. It is the
+        # runner-up precisely because the separation happened elsewhere, so it
+        # carries the constraints that could not be checked for it.
+        others = o["judgement"].get("indistinguishable_from") or []
+        if others and others[0] in by_config:
+            r = by_config[others[0]]
+            runner_up = {
+                "config": r["config"],
+                "family": r["family"],
+                "outcome": r["judgement"]["outcome"],
+                "couldnt_check": [
+                    {"constraint": c["constraint"], "reason": c["reason"],
+                     "source": c["source"]}
+                    for c in r["judgement"]["constraints"]
+                    if c["outcome"] == "couldnt_check"],
+                "measurement": {k: r["measurement"][k] for k in
+                                ("recall_at_10", "storage_amplification")
+                                if k in r["measurement"]},
+            }
+
+    return {
+        "run": report["run"],
+        "generated_at": report["generated_at"],
+        "source": os.path.relpath(report_path).replace("\\", "/"),
+        "schema": report["schema"],
+        "constraints": report["constraints"],
+        "summary": report["summary"],
+        "recommendation": report["recommendation"],
+        "calibration": report["calibration"],
+        "environment": report["environment"],
+        "families": [{"family": f, "options": opts} for f, opts in families.items()],
+        "recommended": recommended,
+        "runner_up": runner_up,
+        "price_table": public_price_table(report.get("price_table")),
+        "decision_log_quoted": quoted,
+        "decision_log_total": len(report["decision_log"]),
+    }
+
+
+def write_inline(out):
+    """The four outputs, gzipped and base64-encoded into one script.
+
+    Carries each source file's sha256 alongside its payload so the page can
+    say which bytes it is showing, and so `verify_teaser_data.py` can check
+    that the bundle really is the four files beside it and not a stale copy.
+    """
+    import base64
+    import gzip
+
+    payload = {}
+    for name in OUT_FILES:
+        raw = open(os.path.join(out, name), "rb").read()
+        payload[name] = {
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "bytes": len(raw),
+            "gzip_b64": base64.b64encode(gzip.compress(raw, 9)).decode("ascii"),
+        }
+    body = ("/* Generated by corpora/export_teaser_data.py. Do not edit.\n"
+            "   The four files in this directory, gzipped and base64'd, for the\n"
+            "   file:// path only -- Chrome and Edge will not fetch() a file:// URL,\n"
+            "   but they will load a script. app.js reads this only when\n"
+            "   location.protocol === 'file:'. */\n"
+            "window.__ONEGROUND_TEASER__ = " +
+            json.dumps({"format": "gzip+base64", "files": payload},
+                       separators=(",", ":")) + ";\n")
+    io.open(os.path.join(out, INLINE_FILE), "w",
+            encoding="utf-8", newline="\n").write(body)
+
+
+def write_json(path, obj):
+    # allow_nan=False on purpose: Python would happily write Infinity and NaN,
+    # which JSON.parse rejects, and the page would fail at load rather than
+    # here where the offending field can be named.
+    io.open(path, "w", encoding="utf-8", newline="\n").write(
+        json.dumps(obj, ensure_ascii=False, separators=(",", ":"),
+                   sort_keys=False, allow_nan=False) + "\n")
+
+
+if __name__ == "__main__":
+    main()

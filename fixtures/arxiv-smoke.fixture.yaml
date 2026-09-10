@@ -1,0 +1,166 @@
+# oneground fixture: arxiv-smoke
+# ------------------------------------------------------------------
+# PIPELINE TEST FIXTURE. A small copy of the arxiv-150k spec, built from a
+# synthetic source (corpora/make_synthetic_source.py) so the build and verify
+# path can be exercised end to end without the real arXiv snapshot. It is not
+# a public corpus, its values are not published values, and it is never used
+# to choose a store for a real corpus. Seeds, thresholds and tolerances are
+# inherited from arxiv-150k unchanged.
+#
+# House rule: every field below is either a receipt (re-derivable from the
+# records) or declared (bytes frozen). Values marked TO_BE_FILLED are set by
+# the first canonical build and never edited by hand afterwards.
+
+fixture:
+  id: arxiv-smoke
+  version: 1
+  status: planned            # planned | built | verified
+  license_notice: >
+    This fixture contains no arXiv data. It is built from machine-generated
+    synthetic records in the arXiv snapshot's format (see
+    corpora/make_synthetic_source.py) and exists only to test the build and
+    verify pipeline. Its text carries no third-party rights and its values
+    describe the generator, not arXiv. The arxiv-150k fixture, which does
+    redistribute a sampled subset of CC0 1.0 arXiv metadata, carries that
+    notice instead.
+
+source:
+  name: synthetic arXiv-format source
+  provider: corpora/make_synthetic_source.py (machine-generated, not arXiv)
+  snapshot_date: TO_BE_FILLED          # date of the metadata dump used
+  snapshot_sha256: TO_BE_FILLED        # digest of the raw dump file
+  fields_used: [id, title, abstract, categories, update_date]
+  kind: declared                       # upstream bytes are frozen, not re-derivable by us
+
+sampling:
+  target_size: 2000
+  rule: >
+    Stratified by year of update_date across 2007–2025 in proportion to each
+    year's volume, then uniform within year. No category balancing: the real
+    skew (cs.LG / cs.CL growth) is a feature of the fixture, not noise.
+  seed: 20260908
+  exclusions:
+    - abstracts shorter than 200 characters
+    - records with missing categories or update_date
+    - withdrawn papers (abstract begins with "This paper has been withdrawn")
+  text_template: "{title}. {abstract}"
+  sample_sha256: TO_BE_FILLED          # digest of sampled records file
+  kind: receipt
+
+embedding:
+  model: BAAI/bge-base-en-v1.5
+  weights_sha256: TO_BE_FILLED         # digest of pinned model weights
+  library: sentence-transformers
+  library_version: TO_BE_FILLED
+  max_seq_length: 512
+  normalize: true                      # unit vectors; inner product == cosine
+  dtype: float32
+  dimension: 768
+  batch_size: 128
+  device: cpu                          # canonical build is CPU for reproducibility
+  vectors_sha256: TO_BE_FILLED
+  kind: receipt
+
+queries:
+  count: 200
+  rule: >
+    Held out from the sample before ground truth: 100 drawn uniformly,
+    100 drawn from the top 5% categories by volume (query skew mirrors
+    corpus skew). Query text is the title only, embedded with the same model,
+    so queries are shorter than documents — as in real search.
+  seed: 20260909
+  queries_sha256: TO_BE_FILLED
+  kind: receipt
+
+ground_truth:
+  method: exact k-NN, brute force (faiss IndexFlatIP)
+  k: 100
+  metric: inner_product
+  base_excludes_queries: true
+  ground_truth_sha256: TO_BE_FILLED
+  kind: receipt
+
+characterization:
+  # Published values. A local build must reproduce each within tolerance.
+  # All are computed on the fixture vectors against the ground truth above.
+  intrinsic_dimensionality:
+    estimator: TwoNN
+    value: TO_BE_FILLED
+    tolerance: 0.5
+  boundary_crispness:
+    definition: >
+      Fraction of base vectors whose second-nearest centroid distance exceeds
+      1.20 x their nearest centroid distance, under k-means with 256 centroids
+      (seed 20260908, 20 iterations). Higher is crisper.
+    value: TO_BE_FILLED
+    tolerance: 0.02
+  ambiguous_query_rate:
+    definition: fraction of queries with d2 <= 1.10 * d1 against the same centroids
+    value: TO_BE_FILLED
+    tolerance: 0.02
+  skew_top10_share:
+    definition: share of base vectors in the 10 largest centroid regions
+    value: TO_BE_FILLED
+    tolerance: 0.02
+  drift:
+    definition: >
+      Centroids trained on records with update_date before 2019-01-01;
+      recall@10 at one-region routing measured separately on queries whose
+      source paper is before / after that date. Reported as the pair.
+    value_before: TO_BE_FILLED
+    value_after: TO_BE_FILLED
+    tolerance: 0.02
+  kind: receipt
+
+reference_results:
+  # Baseline numbers from the canonical build, for verifying an installation.
+  # Not a leaderboard. Configurations are fixed here on purpose.
+  single_node_hnsw:
+    params: {M: 32, efConstruction: 200, efSearch: 128}
+    recall_at_10: TO_BE_FILLED
+    tolerance: 0.01
+  semantic_sharded:
+    params: {centroids: 256, epsilon: 0.20, probe: 2, M: 32, efSearch: 96}
+    recall_at_10: TO_BE_FILLED
+    routing_ceiling: TO_BE_FILLED
+    storage_amplification: TO_BE_FILLED
+    p99_copies_per_vector: TO_BE_FILLED
+    tolerance: 0.01
+  kind: receipt
+
+projection:
+  # For the learner interface and the hero image only. Not a measurement.
+  method: UMAP
+  params: {n_neighbors: 30, min_dist: 0.08, metric: cosine, seed: 20260908}
+  color_by: top-level arXiv category
+  note: >
+    The projection is illustrative. Regions and closure bands drawn on it
+    are computed in the full 768-d space, then mapped onto the projection.
+  kind: declared
+
+artifacts:
+  directory: fixtures/arxiv-smoke/
+  files:
+    - sample.jsonl.zst          # id, title, abstract, categories, update_date
+    - vectors.npy               # (2000, 768) float32, normalized
+    - queries.npy               # (200, 768) float32, normalized
+    - query_ids.json            # source record ids for the held-out queries
+    - ground_truth.npy          # (200, 100) int64
+    - characterization.json     # measurement only; versions in build_info.json
+    - build_info.json           # declared
+    - projection.npy            # (2000, 2) float32, UMAP
+    - MANIFEST.sha256           # digests of every file above
+
+verification:
+  command: oneground fixture verify arxiv-smoke
+  passes_when: >
+    Every artifact digest matches MANIFEST.sha256, and every characterization
+    and reference_results value reproduces within its stated tolerance from a
+    local rebuild of ground truth and the two reference configurations.
+  outcomes: [verified, contradicted, couldnt_check]
+  note: couldnt_check is reported when a dependency version differs from the pinned one; it is never rounded up to verified.
+
+changelog:
+  - version: 1
+    date: 2026-09-08
+    note: Derived from arxiv-150k v1 for pipeline testing. Synthetic source; not published values.

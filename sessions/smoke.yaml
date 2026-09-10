@@ -1,0 +1,67 @@
+# Smoke session — the whole pod path, end to end, for pennies.
+#
+# This runs the *smoke* fixture (2,000 synthetic documents) rather than the
+# canonical 150k build, so that every step of `oneground pod` — deploy, bundle
+# sync, local-disk venv, nohup launch, DONE detection, fetch, extract,
+# terminate — is exercised against a real pod at a cost measured in cents.
+#
+# It is the session to run first after any change to oneground/pod/.
+#
+# The build's inputs are both committed, which matters: the repo reaches the
+# pod as a git bundle, and a bundle carries commits, not the working tree.
+#   fixtures/arxiv-smoke.fixture.yaml        6.8 KB
+#   tasks/scratch/001-synthetic-source.json  2.7 MB  (seeded, regenerable)
+
+gpu:
+  # Same preference order as the canonical build. Only RTX PRO 4500 and
+  # RTX PRO 6000 are actually offered in EU-RO-1, which is where the vecbench
+  # volume lives; the other two are here for if the volume ever moves.
+  - RTX PRO 4500
+  - RTX PRO 6000
+  - RTX 6000 Ada
+  - RTX 4090
+
+volume: vecbench            # by name; datacenter derived from it
+volume_mount_path: /workspace
+
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+disk_gb: 20
+
+env:
+  HF_HOME: /workspace/hf    # model cache on the volume, so a re-run skips
+                            # re-downloading bge-base-en-v1.5
+
+setup: corpora/POD_SETUP.md
+run: >-
+  SPEC=fixtures/arxiv-smoke.fixture.yaml
+  SOURCE=tasks/scratch/001-synthetic-source.json
+  TARBALL=/workspace/smoke-small.tgz
+  TARBALL_LARGE=/workspace/smoke-large.tgz
+  bash corpora/run_arxiv_150k.sh
+
+# TARBALL_LARGE is set even though the brief did not name it. Left unset, the
+# run script defaults it to /workspace/arxiv-150k-large.tgz and would write
+# 2,000 smoke vectors into a file named for the 150k release asset, on the same
+# volume that holds the real one. That is a name collision waiting to be
+# mistaken for the release asset; the smoke run keeps its own name.
+#
+# SKIP_PROJECTION is deliberately left unset: the ground-view export needs
+# projection.npy, and the run fails at that step without it.
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-session.log
+done_marker: DONE
+
+outputs:
+  # Only the small tarball is fetched. smoke-large.tgz stays on the volume:
+  # it is the vectors/queries/sample trio, it is not needed on the laptop, and
+  # pulling it would add nothing this session is trying to prove.
+  - {remote: /workspace/smoke-small.tgz, local: ./, extract: true}
+
+caps:
+  # 30 minutes is generous for a run that should take ~10: the venv install is
+  # the long pole (torch + CUDA wheels), not the 2,000-document build. At
+  # $0.34/hr the worst case is $0.17, well inside max_usd.
+  max_hours: 0.5
+  max_concurrent: 1
+  max_usd: 0.50
