@@ -72,6 +72,34 @@ fi
 QDRANT_VERSION="${QDRANT_VERSION:-v1.19.1}"
 QDRANT_URL="https://github.com/qdrant/qdrant/releases/download/${QDRANT_VERSION}/qdrant-x86_64-unknown-linux-gnu.tar.gz"
 ENGINES="${ONEGROUND_ENGINES:-qdrant}"
+
+# Postgres + pgvector, pinned to the same versions the local compose file
+# runs, so a pod row and a laptop row measure the same engine.
+#
+# WHY apt AND NOT THE UBUNTU ARCHIVE. Ubuntu 24.04's own universe ships
+# postgresql-16-pgvector 0.6.0. The compose file pins 0.8.6. Installing from
+# the Ubuntu archive would have produced a pod row measured against a
+# different pgvector than every local row, and nothing in the receipt would
+# have said so -- the extension version is what `describe()` reports, and it
+# would simply have read 0.6.0 in one place and 0.8.6 in another. Resolved
+# against the PGDG index before the first pod ran (task 015):
+#
+#     apt.postgresql.org  noble-pgdg  postgresql-16          16.15-1.pgdg24.04+2
+#     apt.postgresql.org  noble-pgdg  postgresql-16-pgvector 0.8.6-1.pgdg24.04+1
+#     ubuntu noble        universe    postgresql-16-pgvector 0.6.0
+#
+# WHY apt AND NOT THE BINARY TARBALL. The EDB tarball ships no extensions, so
+# pgvector would have to be compiled against it on the pod -- a build
+# toolchain and a compile inside a billed session, to arrive at the same
+# binaries apt installs in about a minute. No Docker either way: this is a
+# package install into the pod's own filesystem, which is what the brief asks
+# for.
+PG_MAJOR="${PG_MAJOR:-16}"
+PG_VERSION_PIN="${PG_VERSION_PIN:-16.15-1.pgdg24.04+2}"
+PGVECTOR_VERSION_PIN="${PGVECTOR_VERSION_PIN:-0.8.6-1.pgdg24.04+1}"
+PG_PORT="${PG_PORT:-55432}"
+PG_USER="${PG_USER:-oneground}"
+PG_DB="${PG_DB:-oneground}"
 REQ="${ONEGROUND_REQUIREMENTS:-requirements.arxiv-150k.yaml}"
 OUT_TARBALL="${OUT_TARBALL:-/workspace/verify-out.tgz}"
 
@@ -269,6 +297,55 @@ ONEGROUND_PREFLIGHT
 echo "--------------------------------------------------------------"
 
 # ------------------------------------------------------------- engine setup
+#
+# Engines are started TOGETHER and measured SEQUENTIALLY. Starting both up
+# front costs a little idle memory and buys a much simpler failure mode: if
+# the second engine cannot be installed, the run fails before any measurement
+# rather than half way through, with one engine's numbers already written and
+# the other's missing.
+#
+# They still never serve queries at the same time -- `oneground verify` walks
+# the engine list in order -- so neither number carries the other's load. See
+# docs/VERIFY.md on what "matched" does and does not guarantee.
+
+has_engine() { case ",$ENGINES," in *,"$1",*) return 0 ;; *) return 1 ;; esac; }
+
+if has_engine pgvector; then
+    echo "--------------------------------------------------------------"
+    echo "installing postgresql-$PG_MAJOR + pgvector from apt.postgresql.org"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends         ca-certificates curl gnupg lsb-release >/dev/null
+    install -d /usr/share/postgresql-common/pgdg
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main"         > /etc/apt/sources.list.d/pgdg.list
+    apt-get update -qq
+    # Pinned exactly. An unpinned install would drift the moment PGDG
+    # publishes a point release, and the pod row would stop being comparable
+    # to the local one without anything saying so.
+    apt-get install -y -qq --no-install-recommends         "postgresql-$PG_MAJOR=$PG_VERSION_PIN"         "postgresql-$PG_MAJOR-pgvector=$PGVECTOR_VERSION_PIN" >/dev/null
+    PGBIN="/usr/lib/postgresql/$PG_MAJOR/bin"
+    "$PGBIN/postgres" --version
+
+    # Storage on the container disk, not the network volume, for the same
+    # reason Qdrant's is: an engine's storage on a network mount measures the
+    # mount. Task 006 measured a 30-minute venv install for that reason.
+    PGDATA=/root/pgdata
+    rm -rf "$PGDATA"
+    mkdir -p "$PGDATA"
+    chown -R postgres:postgres "$PGDATA"
+    su postgres -c "$PGBIN/initdb -D $PGDATA --data-checksums -A trust"         >/workspace/pg-initdb.log 2>&1
+    # maintenance_work_mem matters: pgvector spills the HNSW build to disk
+    # when it is too small, which makes index build time depend on a setting
+    # nobody recorded. Same value as the local compose file.
+    su postgres -c "$PGBIN/pg_ctl -D $PGDATA -l /workspace/postgres.log -o         '-p $PG_PORT -c maintenance_work_mem=512MB -c shared_buffers=256MB          -c max_parallel_workers_per_gather=0' -w start"
+    su postgres -c "$PGBIN/createuser -p $PG_PORT -s $PG_USER" || true
+    su postgres -c "$PGBIN/createdb -p $PG_PORT -O $PG_USER $PG_DB" || true
+    su postgres -c "$PGBIN/psql -p $PG_PORT -d $PG_DB -c         'CREATE EXTENSION IF NOT EXISTS vector'"
+    su postgres -c "$PGBIN/psql -p $PG_PORT -d $PG_DB -tAc         \"SELECT 'pgvector ' || extversion FROM pg_extension WHERE extname='vector'\""
+fi
+
+if has_engine qdrant; then
 ENGINE_DIR=/workspace/engines/qdrant
 mkdir -p "$ENGINE_DIR"
 if [ ! -x "$ENGINE_DIR/qdrant" ]; then
@@ -311,6 +388,9 @@ curl -fsS http://localhost:6333/ >/dev/null 2>&1 || {
     tail -40 /workspace/qdrant.log >&2
     exit 1
 }
+else
+    echo "qdrant not in ENGINES ($ENGINES); skipping its setup"
+fi
 
 # ------------------------------------------------------------------- verify
 # The RTT baseline is measured first, inside `oneground verify`, and lands at
