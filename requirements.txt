@@ -87,3 +87,9 @@ urllib3==2.7.0
 # the only thing that reads it -- the fixture's own artifacts are .npy, so
 # nothing else in the package imports h5py.
 h5py==3.16.0
+#
+# pgvector adapter (task 015). psycopg 3 with the binary build, so no libpq
+# has to be present on the machine. `tzdata` is its Windows transitive.
+psycopg==3.3.5
+psycopg-binary==3.3.5
+tzdata==2026.3

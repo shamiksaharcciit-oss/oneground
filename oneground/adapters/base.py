@@ -188,6 +188,42 @@ class VectorEngine(Protocol):
     def delete_namespace(self, ns: str) -> None:
         ...
 
+    def namespace_exists(self, ns: str) -> bool:
+        """Whether `ns` exists. Required, not duck-typed.
+
+        The conformance suite has to prove a namespace was deleted, and an
+        engine that cannot answer this cannot be checked -- falling back to
+        "describe() raised, so it must be gone" cannot tell a deleted
+        namespace from an unreachable engine.
+        """
+        ...
+
+    def wait_for_index(self, ns: str, timeout: float = 600.0,
+                       poll: float = 0.5) -> Tuple[int, int, float]:
+        """Block until the index is usable. `(indexed, points, seconds)`.
+
+        **Required for every engine**, promoted from an optional method in
+        task 015. It was duck-typed while Qdrant was the only adapter, and
+        pgvector showed why that was wrong: the two engines are unready in
+        completely different ways, and an adapter that simply does not
+        implement this would have its unreadiness silently skipped.
+
+            Qdrant    indexes in the background. `status: green` means "no
+                      operations pending", not "indexed"; only
+                      `indexed_vectors_count` answers the question.
+            pgvector  `CREATE INDEX` is synchronous, so the index usually
+                      exists by the time anyone asks -- but an interrupted
+                      build leaves it `indisvalid = false`, Postgres refuses
+                      to use it, and every query becomes a sequential scan
+                      that returns exact answers and measures nothing.
+
+        Both failures produce the same symptom: recall that looks perfect
+        because the index was never consulted. An engine that is genuinely
+        always ready returns `(points, points, 0.0)` and says so in its
+        ADAPTER.md; that is a claim it has to make, not a method it may omit.
+        """
+        ...
+
 
 class managed_namespace:
     """Create a namespace and delete it in a `finally`, whatever happens.

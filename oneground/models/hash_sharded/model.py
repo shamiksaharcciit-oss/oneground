@@ -47,7 +47,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..base import (BuiltIndex, Candidates, Config, Footprint,
-                    estimate_memory_bytes, exact_over, merge_candidates)
+                    estimate_memory_bytes, exact_over, merge_candidates,
+                    resolve_deterministic, single_threaded_faiss)
 
 NAME = "hash_sharded"
 
@@ -104,31 +105,42 @@ class HashSharded:
         return out
 
     # -- build -------------------------------------------------------------
-    def build(self, vectors, config, seed, context=None):
+    def build(self, vectors, config, seed, context=None, deterministic=None):
+        """One HNSW per shard.
+
+        `deterministic` (default True) adds single-threaded, for the reason
+        task 012 measured on `single_node_hnsw`: faiss links an HNSW graph
+        under OpenMP, so a parallel add depends on thread scheduling and two
+        builds from identical inputs return different neighbours. The shard
+        assignment was already seeded and deterministic; the graphs inside the
+        shards were not.
+        """
         import faiss
         t0 = time.time()
+        det = resolve_deterministic(config, deterministic)
         n_shards = int(config.get("shards", 3))
         ids = (context or {}).get("ids")
         assign = assign_shards(len(vectors), n_shards, seed, ids)
 
         shards, ids_of = {}, {}
-        for r in range(n_shards):
-            member = np.where(assign == r)[0].astype(np.int64)
-            if len(member) == 0:
-                continue
-            s = faiss.IndexHNSWFlat(vectors.shape[1],
-                                    int(config.get("M", 32)),
-                                    faiss.METRIC_INNER_PRODUCT)
-            s.hnsw.efConstruction = EF_CONSTRUCTION
-            s.add(vectors[member])
-            s.hnsw.efSearch = int(config.get("efSearch", 96))
-            shards[r], ids_of[r] = s, member
+        with single_threaded_faiss(det):
+            for r in range(n_shards):
+                member = np.where(assign == r)[0].astype(np.int64)
+                if len(member) == 0:
+                    continue
+                s = faiss.IndexHNSWFlat(vectors.shape[1],
+                                        int(config.get("M", 32)),
+                                        faiss.METRIC_INNER_PRODUCT)
+                s.hnsw.efConstruction = EF_CONSTRUCTION
+                s.add(vectors[member])
+                s.hnsw.efSearch = int(config.get("efSearch", 96))
+                shards[r], ids_of[r] = s, member
 
         return BuiltIndex(
             family=NAME, config=config, n_base=len(vectors),
             dim=vectors.shape[1],
             state={"shards": shards, "ids_of": ids_of, "assign": assign,
-                   "vectors": vectors},
+                   "vectors": vectors, "deterministic": det},
             build_seconds=time.time() - t0)
 
     # -- search ------------------------------------------------------------

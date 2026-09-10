@@ -15,17 +15,29 @@ Seven checks, in the order a real run exercises them:
     g  the namespace is deleted even when the body raises
 
 **Where it runs.** Always against the in-process `stub`, so the protocol is
-checked on every machine with no Docker and no network. Against live Qdrant
-only when `ONEGROUND_QDRANT_URL` is set — otherwise those tests **skip**, and
-a skip is reported as a skip. Nothing here fakes a pass for an engine that was
-never contacted, and the suite prints which engines it actually reached.
+checked on every machine with no Docker and no network. Against a live engine
+only when its URL variable is set -- `ONEGROUND_QDRANT_URL`,
+`ONEGROUND_PGVECTOR_URL` -- otherwise those tests **skip**, and a skip is
+reported as a skip. Nothing here fakes a pass for an engine that was never
+contacted, and the suite prints which engines it actually reached.
+
+**`wait_for_index` is required, not probed.** Task 015 promoted it (and
+`namespace_exists`) from duck-typed optional methods to protocol methods,
+because pgvector is unready in a completely different way from Qdrant -- a
+background build that has not caught up, versus an index row left
+`indisvalid = false` by an interrupted build -- and both produce the same
+symptom: recall that looks perfect because the index was never consulted. An
+adapter that simply did not implement the method would have had its
+unreadiness skipped silently, which is the one failure this check exists to
+prevent.
 
 **A stub pass is not an engine pass.** The stub is exact, so recall is 1.0 by
 construction and it can never surface an approximate-index bug. It proves the
 protocol; only a live engine proves the engine.
 
     pytest oneground/adapters/conformance.py                  # stub only
-    ONEGROUND_QDRANT_URL=http://localhost:6333 pytest ...     # stub + Qdrant
+    ONEGROUND_QDRANT_URL=http://localhost:6333 pytest ...     # + Qdrant
+    ONEGROUND_PGVECTOR_URL=postgresql://... pytest ...        # + pgvector
 """
 
 import os
@@ -58,6 +70,11 @@ GENEROUS_EF = 512
 SEED = 20260911
 
 QDRANT_URL_ENV = "ONEGROUND_QDRANT_URL"
+PGVECTOR_URL_ENV = "ONEGROUND_PGVECTOR_URL"
+
+# Every live engine and the variable that points at it. Adding an engine here
+# is the only wiring a new adapter needs in this file.
+LIVE_ENGINES = (("qdrant", QDRANT_URL_ENV), ("pgvector", PGVECTOR_URL_ENV))
 
 
 def _corpus(seed=SEED):
@@ -85,14 +102,19 @@ def available_engines():
     suite passed" means nothing without it.
     """
     out = [("stub", lambda: get("stub")(), "in-process")]
-    url = os.environ.get(QDRANT_URL_ENV)
-    if url:
-        out.append(("qdrant", lambda: get("qdrant")(), url))
+    for engine_name, var in LIVE_ENGINES:
+        url = os.environ.get(var)
+        if url:
+            out.append((engine_name,
+                        (lambda n=engine_name: get(n)()), url))
     return out
 
 
 def _endpoint_for(name):
-    return os.environ.get(QDRANT_URL_ENV, "") if name == "qdrant" else "memory://"
+    for engine_name, var in LIVE_ENGINES:
+        if name == engine_name:
+            return os.environ.get(var, "")
+    return "memory://"
 
 
 def _connect(name, factory):
@@ -146,16 +168,22 @@ def run_conformance(name, factory, endpoint_desc, verbose=True):
         say(f"(b) upserted {N_VECTORS} at "
             f"{stats.vectors_per_second:,.0f}/s")
 
-        # Wait for the graph before measuring, or (c) measures a linear scan.
-        waiter = getattr(engine, "wait_for_index", None)
-        if callable(waiter):
-            indexed, points, secs = waiter(namespace)
-            results["indexed_vectors"] = indexed
-            results["index_seconds"] = secs
-            assert indexed >= points, (
-                f"only {indexed}/{points} vectors indexed after {secs:.1f}s; "
-                "measuring here would measure an exact scan, not the index")
-            say(f"    indexed {indexed}/{points} in {secs:.1f}s")
+        # Wait for the index before measuring, or (c) measures a linear scan.
+        # Required, not probed: an adapter without this method fails here
+        # rather than having its unreadiness skipped.
+        assert callable(getattr(engine, "wait_for_index", None)), (
+            f"{name}: wait_for_index is a required protocol method. An engine "
+            "that is always ready returns (points, points, 0.0) and says so "
+            "in its ADAPTER.md -- it does not omit the method.")
+        indexed, points, secs = engine.wait_for_index(namespace)
+        results["indexed_vectors"] = indexed
+        results["index_seconds"] = secs
+        assert points == N_VECTORS, (
+            f"wait_for_index reports {points} points, upserted {N_VECTORS}")
+        assert indexed >= points, (
+            f"only {indexed}/{points} vectors indexed after {secs:.1f}s; "
+            "measuring here would measure an exact scan, not the index")
+        say(f"    indexed {indexed}/{points} in {secs:.1f}s")
 
         # (c) recall with a generous ef
         cand = engine.search(namespace, q, K, {"hnsw_ef": GENEROUS_EF})
@@ -215,14 +243,18 @@ def run_conformance(name, factory, endpoint_desc, verbose=True):
 
 
 def _exists(engine, ns):
+    """Required, not probed.
+
+    The old fallback -- call describe() and treat any exception as "gone" --
+    could not tell a deleted namespace from an unreachable engine, so check
+    (f) would have passed against a database that had simply fallen over.
+    """
     checker = getattr(engine, "namespace_exists", None)
-    if callable(checker):
-        return checker(ns)
-    try:                                              # pragma: no cover
-        engine.describe(ns)
-        return True
-    except Exception:                                 # noqa: BLE001
-        return False
+    assert callable(checker), (
+        f"{getattr(engine, 'name', engine)}: namespace_exists is a required "
+        "protocol method; the conformance suite has to be able to prove a "
+        "namespace was deleted")
+    return checker(ns)
 
 
 # --------------------------------------------------------------------------
@@ -242,6 +274,38 @@ def test_qdrant_conformance_live():
             pytest.skip(f"{QDRANT_URL_ENV} not set; live Qdrant not contacted")
         return
     run_conformance("qdrant", lambda: get("qdrant")(), url, verbose=False)
+
+
+def test_pgvector_conformance_live():
+    """Runs only when ONEGROUND_PGVECTOR_URL is set. Never faked."""
+    url = os.environ.get(PGVECTOR_URL_ENV)
+    if not url:
+        if pytest is not None:
+            pytest.skip(f"{PGVECTOR_URL_ENV} not set; live pgvector not "
+                        "contacted")
+        return
+    run_conformance("pgvector", lambda: get("pgvector")(), url, verbose=False)
+
+
+def test_every_registered_adapter_implements_the_whole_protocol():
+    """The protocol is a list of methods, and this is what makes it one.
+
+    Written after task 015 promoted `wait_for_index` and `namespace_exists`
+    from duck-typed optional methods: an adapter that omits a required method
+    should fail here, on any machine, rather than only in whichever live check
+    happened to call it.
+    """
+    from oneground.adapters import engines as registered
+
+    required = ("connect", "create_namespace", "upsert", "search", "describe",
+                "scroll", "delete_namespace", "namespace_exists",
+                "wait_for_index")
+    for engine_name in registered():
+        adapter = get(engine_name)()
+        missing = [m for m in required
+                   if not callable(getattr(adapter, m, None))]
+        assert not missing, f"{engine_name} is missing {', '.join(missing)}"
+        assert getattr(adapter, "name", None) == engine_name
 
 
 def test_namespace_prefix_is_enforced():

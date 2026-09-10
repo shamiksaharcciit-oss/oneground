@@ -85,6 +85,21 @@ class StubEngine:
         self._ns.pop(ns, None)
         self.deleted_namespaces.append(ns)
 
+    def wait_for_index(self, ns, timeout=600.0, poll=0.5):
+        """Always ready: there is no index. `(points, points, 0.0)`.
+
+        Required by the protocol from task 015, and the stub is the case the
+        protocol note describes -- an engine that is genuinely always ready
+        says so, rather than omitting the method and having its readiness go
+        unchecked. The stub searches exactly, so there is no graph to wait
+        for and no state in which its answers would be a scan pretending to
+        be an index.
+        """
+        self._maybe_fail("wait_for_index")
+        store = self._need(ns)
+        n = len(store["ids"])
+        return n, n, 0.0
+
     def namespace_exists(self, ns):
         return ns in self._ns
 
