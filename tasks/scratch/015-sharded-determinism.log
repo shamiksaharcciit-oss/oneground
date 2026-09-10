@@ -1,0 +1,59 @@
+
+===== hash_sharded on arxiv-smoke: (2000, 768) =====
+  config hash_sharded[M=32,efSearch=96,shards=3]
+  parallel            0.64s
+  deterministic       0.74s   ratio 1.15x
+  two deterministic builds -> byte-identical ids: True
+  shard membership identical: True (3 shards)
+  two PARALLEL builds -> byte-identical ids: True (differing 0.000000)
+
+===== semantic_sharded on arxiv-smoke: (2000, 768) =====
+  config semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]
+  parallel            0.23s
+  deterministic       0.24s   ratio 1.03x
+  two deterministic builds -> byte-identical ids: True
+  shard membership identical: True (256 shards)
+  two PARALLEL builds -> byte-identical ids: True (differing 0.000000)
+
+===== hash_sharded on synthetic-20k: (20000, 256) =====
+  config hash_sharded[M=32,efSearch=96,shards=3]
+  parallel            3.03s
+  deterministic       8.62s   ratio 2.84x
+  two deterministic builds -> byte-identical ids: True
+  shard membership identical: True (3 shards)
+  two PARALLEL builds -> byte-identical ids: True (differing 0.000000)
+
+===== semantic_sharded on synthetic-20k: (20000, 256) =====
+  config semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]
+  parallel            6.94s
+  deterministic      11.21s   ratio 1.62x
+  two deterministic builds -> byte-identical ids: True
+  shard membership identical: True (256 shards)
+  two PARALLEL builds -> byte-identical ids: True (differing 0.000000)
+
+===== hash_sharded on glove-200k: (200000, 100) =====
+  config hash_sharded[M=32,efSearch=96,shards=3]
+  parallel          144.11s
+  deterministic     315.22s   ratio 2.19x
+  two deterministic builds -> byte-identical ids: True
+  shard membership identical: True (3 shards)
+  two PARALLEL builds -> byte-identical ids: False (differing 0.050500)
+
+===== semantic_sharded on glove-200k: (200000, 100) =====
+  config semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]
+  parallel           87.35s
+  deterministic     223.10s   ratio 2.55x
+  two deterministic builds -> byte-identical ids: True
+  shard membership identical: True (256 shards)
+  two PARALLEL builds -> byte-identical ids: False (differing 0.003500)
+
+===== summary =====
+  family             corpus                 n   parallel    determ.   ratio  det-identical  par-identical
+  hash_sharded       arxiv-smoke         2000      0.64s      0.74s   1.15x  True           True
+  semantic_sharded   arxiv-smoke         2000      0.23s      0.24s   1.03x  True           True
+  hash_sharded       synthetic-20k      20000      3.03s      8.62s   2.84x  True           True
+  semantic_sharded   synthetic-20k      20000      6.94s     11.21s   1.62x  True           True
+  hash_sharded       glove-200k        200000    144.11s    315.22s   2.19x  True           False
+  semantic_sharded   glove-200k        200000     87.35s    223.10s   2.55x  True           False
+
+  wrote tasks/scratch/015-sharded-determinism.json

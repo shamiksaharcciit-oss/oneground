@@ -57,7 +57,10 @@ verify:
   # Task 011: the matched-environment target. `local` stays available and is
   # what task 009 used; on this laptop it cannot attribute latency.
   target: runpod
-  engines: [qdrant]
+  # Both engines, measured SEQUENTIALLY on one host (task 015). They never run
+  # at the same time, so neither number carries contention from the other --
+  # and neither says anything about how either behaves while the other runs.
+  engines: [qdrant, pgvector]
   duration_minutes: 1            # smoke proves the path; arXiv measures
   warmup_seconds: 10
   cost:
@@ -66,7 +69,11 @@ verify:
   # Kept so `--target local` still works unchanged.
   local_target: local                      # local | existing
   engine: qdrant
-  endpoint: http://localhost:6333    # the compose file's port
+  # One endpoint per engine. `endpoint` (singular) still works for a
+  # single-engine run; with two engines the map is what decides.
+  endpoints:
+    qdrant: http://localhost:6333
+    pgvector: postgresql://oneground:oneground@localhost:55432/oneground
   metric: inner_product              # vectors are normalized; ranks as cosine
   ks: [10, 100]
 
@@ -80,7 +87,14 @@ verify:
     # Without this the collection is under Qdrant's 20 MB default and no HNSW
     # graph is ever built -- the searches would be exact scans reported as
     # index recall. Measured in task 009; see oneground/adapters/qdrant/ADAPTER.md.
+    # pgvector ignores it: it has no equivalent knob, because CREATE INDEX is
+    # synchronous and there is no "not indexed yet" state to fall out of.
     indexing_threshold: 1
+    # Read by pgvector as the HNSW build parameter; Qdrant takes the same
+    # value from ef_construct above. One params block serves both engines,
+    # which is what makes the two rows comparable rather than two different
+    # indexes measured side by side.
+    ef_construction: 200
 
 # ------------------------------------------------------------------
 # constraints -- what the decision is measured against (task 010)

@@ -129,8 +129,12 @@ def decision_log(options, not_run_rows, recommended, constraints,
                 where = (f" Measured in environment {env_id}."
                          if env_id and v.constraint in ("latency_p95", "qps")
                          else "")
+                # With two engines an unqualified "fails latency_p95" appears
+                # twice with different numbers and no way to tell them apart.
+                on = f" on {v.engine}" if v.engine else ""
                 add("fails",
-                    f"{opt.config} fails {v.constraint}: {v.reason}.{where}",
+                    f"{opt.config} fails {v.constraint}{on}: "
+                    f"{v.reason}.{where}",
                     source=v.source)
 
     # Latency and throughput verdicts name the environment they came from,
@@ -139,8 +143,9 @@ def decision_log(options, not_run_rows, recommended, constraints,
     for opt in options:
         for v in opt.verdicts:
             if v.constraint in ("latency_p95", "qps") and v.outcome == vd.MEETS:
+                on = f" on {v.engine}" if v.engine else ""
                 add("meets_environment",
-                    f"{opt.config} meets {v.constraint} in environment "
+                    f"{opt.config} meets {v.constraint}{on} in environment "
                     f"{env_id or 'unrecorded'}: {v.reason}.",
                     source=v.source)
 
@@ -180,6 +185,11 @@ def decision_log(options, not_run_rows, recommended, constraints,
             + " -- indistinguishable on recall is not indistinguishable "
               "overall.",
             source=f"simulate.json:rows[*].recall_at_{k}")
+
+    # Two engines, one environment, one configuration: the comparison the
+    # same-environment and same-configuration rules exist to make safe.
+    for entry in compare_engines(options, env_id):
+        add(entry["kind"], entry["text"], source=entry["source"])
 
     if recommended is None:
         add("recommendation",
@@ -553,6 +563,75 @@ def _judged_constraint_names(options, constraints):
     return seen or _constraint_names(constraints)
 
 
+def compare_engines(options, env_id):
+    """Which engine met a constraint at a better number, where two were
+    measured on the same configuration in the same environment.
+
+    This is the comparison task 015 exists to make possible, and it is
+    deliberately narrow. It fires only when:
+
+      * the same simulated configuration was verified on more than one
+        engine -- the same-configuration rule from task 011, so the two rows
+        describe the same architecture rather than two different indexes;
+      * both rows come from the same `environment_id` -- the same-environment
+        rule from task 011, so the numbers are comparable at all;
+      * both engines produced an actual value for the constraint, not a
+        `couldnt_check`.
+
+    Anything else produces a sentence saying why no comparison was made,
+    rather than silence. A missing comparison and an unfavourable one look
+    identical if only the favourable ones are printed.
+    """
+    out = []
+    for opt in options:
+        scoped = [v for v in opt.verdicts if v.engine is not None]
+        if len({v.engine for v in scoped}) < 2:
+            continue
+        for constraint in dict.fromkeys(v.constraint for v in scoped):
+            group = [v for v in scoped if v.constraint == constraint]
+            usable = [v for v in group
+                      if v.outcome != COULDNT_CHECK and v.value is not None]
+            if len(usable) < 2:
+                unchecked = [f"{v.engine} ({v.outcome})" for v in group]
+                out.append({
+                    "kind": "no_engine_comparison",
+                    "text": (
+                        f"{opt.config}: {constraint} was not compared across "
+                        f"engines because fewer than two engines produced a "
+                        f"value -- {', '.join(unchecked)}. A comparison here "
+                        f"would be between a number and an absence"),
+                    "source": "verify.json:engines[*]"})
+                continue
+            lower_is_better = constraint in ("latency_p95",)
+            best = (min(usable, key=lambda v: float(v.value))
+                    if lower_is_better
+                    else max(usable, key=lambda v: float(v.value)))
+            others = "; ".join(
+                f"{v.engine} {float(v.value):.2f}" for v in usable
+                if v is not best)
+            out.append({
+                "kind": "engine_comparison",
+                "text": (
+                    f"{opt.config}: on {constraint}, {best.engine} is the "
+                    f"better of {len(usable)} engines measured in environment "
+                    f"{env_id or 'unrecorded'} -- {best.engine} "
+                    f"{float(best.value):.2f} against {others}. Both were "
+                    f"measured on the same sample, on the same host, "
+                    f"sequentially, and both carry {best.outcome} against the "
+                    f"constraint"),
+                "source": "verify.json:engines[*]"})
+        if opt.engines_meeting:
+            out.append({
+                "kind": "engines_meeting",
+                "text": (
+                    f"{opt.config} meets every engine-scoped constraint on: "
+                    f"{', '.join(opt.engines_meeting)}. Deploying it means "
+                    f"choosing one of those; the others were measured and did "
+                    f"not clear"),
+                "source": "report.json:options[*].judgement.engines_meeting"})
+    return out
+
+
 def _calibration_footer(verify_info, recommended, history_path=None):
     """What this report's numbers were last calibrated against.
 
@@ -571,7 +650,16 @@ def _calibration_footer(verify_info, recommended, history_path=None):
     from ..calibrate import history as H
 
     path = history_path or H.DEFAULT_PATH
-    engine = (verify_info or {}).get("engine")
+    # verify_info holds a list of engines from task 015; the pre-015 shape
+    # had one at the top level. Every engine verified in the run is cited,
+    # because a report that names one of two engines is worse than one that
+    # names neither -- the reader cannot tell which half is missing.
+    info_engines = [b.get("engine")
+                    for b in ((verify_info or {}).get("engines") or [])
+                    if isinstance(b, dict) and b.get("engine")]
+    if not info_engines and (verify_info or {}).get("engine"):
+        info_engines = [(verify_info or {}).get("engine")]
+    engine = info_engines[0] if info_engines else None
     family = None
     if recommended is not None:
         family = str(getattr(recommended, "config", "")).split("[")[0] or None
@@ -601,13 +689,17 @@ def _calibration_footer(verify_info, recommended, history_path=None):
             f"on this installation")
         return out
 
-    if engine:
-        ln = H.latest_for_engine(engine, lines)
-        out["engine_line"] = ln
-        if ln is None:
-            out["statements"].append(f"no calibration line for {engine}")
-        else:
-            out["statements"].append(_cite(ln, f"engine {engine}"))
+    if info_engines:
+        out["engines"] = list(info_engines)
+        out["engine_lines"] = {}
+        for name in info_engines:
+            ln = H.latest_for_engine(name, lines)
+            out["engine_lines"][name] = ln
+            if ln is None:
+                out["statements"].append(f"no calibration line for {name}")
+            else:
+                out["statements"].append(_cite(ln, f"engine {name}"))
+        out["engine_line"] = out["engine_lines"].get(engine)
     else:
         out["statements"].append(
             "no engine was verified in this run, so there is no engine "
@@ -906,8 +998,14 @@ def _summary(report, options, not_run_rows, recommended, workdir, elapsed):
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))
     for o in options:
-        bits = " ".join(f"{v.constraint}={v.outcome}" for v in o.verdicts)
+        bits = " ".join(
+            f"{v.constraint}{'@' + str(v.engine) if v.engine else ''}"
+            f"={v.outcome}" for v in o.verdicts)
         print(f"  {o.config:<56} {o.outcome:<14} {bits}")
+        if o.engines_meeting:
+            print(f"  {'':<56} {'':<14} "
+                  f"-> meets every engine-scoped constraint on: "
+                  f"{', '.join(o.engines_meeting)}")
     for r in not_run_rows:
         print(f"  {r['family']:<56} {'not_run':<14} {r['reason'][:60]}")
     print()

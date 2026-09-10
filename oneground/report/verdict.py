@@ -57,12 +57,16 @@ class Verdict:
     value: Any = None
     threshold: Any = None
     kind: str = "receipt"
+    # Which engine produced the measurement behind this verdict, where one
+    # did. Task 015: with two engines verified in the same environment, a
+    # latency verdict without an engine name is not a fact anyone can use.
+    engine: Any = None
 
     def as_dict(self):
         return {"constraint": self.constraint, "outcome": self.outcome,
                 "reason": self.reason, "source": self.source,
                 "value": self.value, "threshold": self.threshold,
-                "kind": self.kind}
+                "kind": self.kind, "engine": self.engine}
 
 
 @dataclass
@@ -81,6 +85,7 @@ class Option:
     verdicts: List[Verdict] = field(default_factory=list)
     outcome: str = COULDNT_CHECK
     indistinguishable_from: List[str] = field(default_factory=list)
+    engines_meeting: List[str] = field(default_factory=list)
 
     def as_dict(self):
         return {
@@ -92,6 +97,7 @@ class Option:
                 "outcome": self.outcome,
                 "constraints": [v.as_dict() for v in self.verdicts],
                 "indistinguishable_from": list(self.indistinguishable_from),
+                "engines_meeting": list(self.engines_meeting),
             },
         }
 
@@ -247,8 +253,43 @@ def verified_config_mismatch(sim_row, verify_info):
     return None
 
 
+def engine_blocks(verify_data):
+    """[(engine_name, block)] for either verify.json shape.
+
+    Task 015 made verify.json hold `engines`, a list, with no engine promoted
+    to the top level -- a format with a primary engine and an also-ran would
+    be picking a favourite. Files written before that are a single flat block,
+    and are read as a one-engine list so nothing that already exists has to be
+    rewritten to be readable.
+    """
+    if not verify_data:
+        return []
+    blocks = verify_data.get("engines")
+    if isinstance(blocks, list):
+        out = []
+        for b in blocks:
+            if isinstance(b, dict):
+                merged = dict(b)
+                # environment_id lives at the top of the multi-engine file.
+                merged.setdefault("environment_id",
+                                  verify_data.get("environment_id"))
+                out.append((b.get("engine"), merged))
+        return out
+    return [(verify_data.get("engine"), verify_data)]
+
+
+def engine_info_blocks(verify_info):
+    """[(engine_name, info_block)] for either verify_info.json shape."""
+    if not verify_info:
+        return []
+    blocks = verify_info.get("engines")
+    if isinstance(blocks, list):
+        return [(b.get("engine"), b) for b in blocks if isinstance(b, dict)]
+    return [(verify_info.get("engine"), verify_info)]
+
+
 def latency_p95(sim_row, verify_data, constraints, verify_env=None,
-                verify_info=None):
+                verify_info=None, engine=None):
     """p95 latency against `constraints.latency.p95_ms`.
 
     **Only from `verify.json`, and only from a same-environment run.** There
@@ -287,7 +328,7 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             "latency_p95", COULDNT_CHECK,
             "no verify run in this workdir. Latency is never taken from "
             "simulation; run `oneground verify` against a real engine.",
-            source="verify.json (absent)", threshold=cap, kind="declared")
+            source="verify.json (absent)", threshold=cap, kind="declared", engine=engine)
 
     # A measurement belongs to the configuration that produced it. Checked
     # before any row is read, so a mismatch is never reported as a latency
@@ -298,7 +339,7 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             "latency_p95", COULDNT_CHECK,
             f"this configuration was not the one verified -- {mismatch}",
             source="verify_info.json:engine_facts.index_params",
-            threshold=cap, kind="declared")
+            threshold=cap, kind="declared", engine=engine)
 
     searches = verify_data.get("searches") or {}
     row = searches.get(row_key)
@@ -318,11 +359,11 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
                 f"{measured}, and no {row_key}. Run `oneground verify` with "
                 "verify.target: runpod and a load phase; the sequential row "
                 "is not a substitute, because it measures a different thing.",
-                source="verify.json:searches", threshold=cap, kind="declared")
+                source="verify.json:searches", threshold=cap, kind="declared", engine=engine)
         return Verdict(
             "latency_p95", COULDNT_CHECK,
             f"the verify run measured {measured}, not {row_key}",
-            source="verify.json:searches", threshold=cap, kind="declared")
+            source="verify.json:searches", threshold=cap, kind="declared", engine=engine)
 
     shape = row.get("latency_shape_single_client")
     if isinstance(shape, str):
@@ -333,7 +374,7 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             f"{shape}",
             source=f"verify.json:searches[{row_key}]."
                    "latency_shape_single_client",
-            threshold=cap, kind="declared")
+            threshold=cap, kind="declared", engine=engine)
 
     want_env = c.get("environment")
     if want_env and verify_env and str(want_env) != str(verify_env):
@@ -341,7 +382,7 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             "latency_p95", COULDNT_CHECK,
             f"measured on {verify_env}, constraint targets {want_env}",
             source="verify_info.json:environment", threshold=cap,
-            kind="declared")
+            kind="declared", engine=engine)
 
     # Same-environment rule. Two rows measured on different pods are two
     # different machines with two different neighbours, and comparing their
@@ -356,7 +397,7 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             f"targets {want_eid}. Latency rows from different environments "
             "are never compared: they are different machines.",
             source="verify.json:environment_id", threshold=cap,
-            kind="declared")
+            kind="declared", engine=engine)
 
     conc = int(shape.get("concurrency", 1) or 1)
     want_conc = c.get("concurrency")
@@ -369,7 +410,7 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             "number.",
             source=f"verify.json:searches[{row_key}]."
                    "latency_shape_single_client.concurrency",
-            threshold=cap, kind="declared")
+            threshold=cap, kind="declared", engine=engine)
 
     got = float(shape["p95_ms"])
     outcome = MEETS if got <= cap else FAILS
@@ -384,11 +425,11 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
         f"(from {row_key}: {how})",
         source=f"verify.json:searches[{row_key}]."
                "latency_shape_single_client.p95_ms",
-        value=got, threshold=cap)
+        value=got, threshold=cap, engine=engine)
 
 
 def qps_target(sim_row, verify_data, constraints, verify_env=None,
-               verify_info=None):
+               verify_info=None, engine=None):
     """Achieved QPS against `constraints.latency.at_qps`.
 
     Only from a load phase. A sequential single-client run has no throughput
@@ -403,14 +444,14 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
         return Verdict("qps", COULDNT_CHECK,
                        "no verify run in this workdir",
                        source="verify.json (absent)", threshold=target,
-                       kind="declared")
+                       kind="declared", engine=engine)
     mismatch = verified_config_mismatch(sim_row, verify_info)
     if mismatch:
         return Verdict(
             "qps", COULDNT_CHECK,
             f"this configuration was not the one verified -- {mismatch}",
             source="verify_info.json:engine_facts.index_params",
-            threshold=target, kind="declared")
+            threshold=target, kind="declared", engine=engine)
 
     load = verify_data.get("load")
     if not load:
@@ -421,7 +462,7 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
             "`oneground verify` with verify.target: runpod, which puts the "
             "load generator and the engine in the same environment.",
             source="verify.json:load (absent)", threshold=target,
-            kind="declared")
+            kind="declared", engine=engine)
 
     want_eid = c.get("environment_id")
     got_eid = verify_data.get("environment_id")
@@ -430,7 +471,7 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
                        f"measured in environment {got_eid or 'unrecorded'}, "
                        f"constraint targets {want_eid}",
                        source="verify.json:environment_id", threshold=target,
-                       kind="declared")
+                       kind="declared", engine=engine)
 
     got = float(load.get("achieved_qps", 0.0))
     conc = load.get("concurrency")
@@ -442,7 +483,7 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
             f"{want_conc}. Throughput at one concurrency does not transfer "
             "to another.",
             source="verify.json:load.concurrency", threshold=target,
-            kind="declared")
+            kind="declared", engine=engine)
 
     eid = f" (environment {got_eid})" if got_eid else ""
     offered = float(load.get("target_qps") or 0.0)
@@ -490,7 +531,8 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
             "this is a sustain check -- a throttled run cannot exceed what "
             "it was offered, so it is not a measurement of the engine's "
             "ceiling. See qps_max",
-            source="verify.json:load.completed", value=got, threshold=target)
+            source="verify.json:load.completed", value=got,
+            threshold=target, engine=engine)
 
     # Unthrottled (target_qps 0): achieved really is a ceiling measurement,
     # and the plain comparison is the right one.
@@ -500,7 +542,8 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
         f"{got!r} qps achieved {'>=' if outcome == MEETS else '<'} "
         f"{target!r} target at concurrency {conc}{eid} (unthrottled: the "
         "generator offered no rate limit, so this is a ceiling)",
-        source="verify.json:load.achieved_qps", value=got, threshold=target)
+        source="verify.json:load.achieved_qps", value=got,
+        threshold=target, engine=engine)
 
 
 # --------------------------------------------------------------------- qps_max
@@ -582,22 +625,80 @@ def monthly_budget(sim_row, constraints, cost_model=None):
 # per-option and cross-option
 # --------------------------------------------------------------------------
 
+def collapse_by_constraint(verdicts):
+    """One outcome per constraint, folding the per-engine verdicts together.
+
+    A constraint measured on two engines has two verdicts, and the option's
+    outcome cannot simply take the worst of them. An architecture whose p95
+    clears the budget on Qdrant and misses it on pgvector is not "out" -- it
+    is deployable, on Qdrant, and the reader needs to be told which. So for a
+    constraint with per-engine verdicts:
+
+        meets          at least one engine meets it
+        fails          every engine that could be checked fails it
+        couldnt_check  no engine could be checked
+
+    The permissive direction is deliberate and it is only safe because the
+    decision log names the engine every time: "meets on qdrant" is a fact,
+    "meets" alone would not be. `engines_meeting` on the Option carries the
+    same information to report.json.
+    """
+    by_name = {}
+    for v in verdicts:
+        by_name.setdefault(v.constraint, []).append(v)
+    out = {}
+    for name, group in by_name.items():
+        if any(v.outcome == MEETS for v in group):
+            out[name] = MEETS
+        elif all(v.outcome == FAILS for v in group):
+            out[name] = FAILS
+        else:
+            out[name] = COULDNT_CHECK
+    return out
+
+
 def overall(verdicts):
-    """`fails` if any fails; `meets` if all meet; else `couldnt_check`.
+    """`fails` if any constraint fails; `meets` if all meet; else
+    `couldnt_check`.
 
     Note the order: a single failure decides, even if other constraints could
     not be checked. An option that provably breaks a constraint is not
     "unknown" -- it is out.
+
+    Judged per *constraint*, not per verdict, because a constraint may have
+    one verdict per engine -- see `collapse_by_constraint`.
     """
     if not verdicts:
         # No constraints were asked for, so nothing has been judged. Calling
         # that `meets` would be a verdict with no evidence behind it.
         return COULDNT_CHECK
-    if any(v.outcome == FAILS for v in verdicts):
+    outcomes = collapse_by_constraint(verdicts).values()
+    if any(o == FAILS for o in outcomes):
         return FAILS
-    if all(v.outcome == MEETS for v in verdicts):
+    if all(o == MEETS for o in outcomes):
         return MEETS
     return COULDNT_CHECK
+
+
+def engines_meeting(verdicts):
+    """Engines that meet every engine-scoped constraint they were judged on.
+
+    The answer to "so which one do I deploy?" when an architecture was
+    verified on more than one engine. An engine that failed any engine-scoped
+    constraint is not in the list; one whose verdicts were all couldnt_check
+    is not either, because could-not-check is not a pass.
+    """
+    scoped = [v for v in verdicts if v.engine is not None]
+    if not scoped:
+        return []
+    names = []
+    for name in dict.fromkeys(v.engine for v in scoped):
+        mine = [v for v in scoped if v.engine == name]
+        if any(v.outcome == FAILS for v in mine):
+            continue
+        if any(v.outcome == MEETS for v in mine):
+            names.append(name)
+    return names
 
 
 def judge_option(sim_row, verify_data, constraints, verify_env=None,
@@ -611,13 +712,26 @@ def judge_option(sim_row, verify_data, constraints, verify_env=None,
         recall_floor(sim_row, constraints),
         storage_amplification(sim_row, constraints),
         memory_budget(sim_row, constraints),
-        latency_p95(sim_row, verify_data, constraints, verify_env,
-                    verify_info),
-        qps_target(sim_row, verify_data, constraints, verify_env,
-                   verify_info),
-        (monthly_budget_from_cost(sim_row, constraints, costs) if costs
-         else monthly_budget(sim_row, constraints)),
     ]
+
+    # One latency and one qps verdict PER ENGINE. An architecture measured on
+    # two engines has two latency facts, not one, and collapsing them would
+    # either hide a failure or invent a pass. Which engine to deploy on is
+    # then a choice the reader makes with both numbers in front of them.
+    blocks = engine_blocks(verify_data)
+    infos = dict(engine_info_blocks(verify_info))
+    if not blocks:
+        blocks = [(None, None)]
+    for engine_name, block in blocks:
+        info = infos.get(engine_name, verify_info if len(infos) <= 1 else None)
+        candidates.append(latency_p95(sim_row, block, constraints, verify_env,
+                                      info, engine=engine_name))
+        candidates.append(qps_target(sim_row, block, constraints, verify_env,
+                                     info, engine=engine_name))
+
+    candidates.append(
+        monthly_budget_from_cost(sim_row, constraints, costs) if costs
+        else monthly_budget(sim_row, constraints))
     verdicts = [v for v in candidates if v is not None]
 
     measurement = {k: v for k, v in sim_row.items()
@@ -628,6 +742,7 @@ def judge_option(sim_row, verify_data, constraints, verify_env=None,
                  measurement=measurement,
                  verdicts=verdicts)
     opt.outcome = overall(verdicts)
+    opt.engines_meeting = engines_meeting(verdicts)
     return opt
 
 

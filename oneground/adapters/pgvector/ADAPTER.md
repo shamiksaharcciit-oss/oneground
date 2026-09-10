@@ -93,6 +93,39 @@ apart.
 Verified rather than assumed: `EXPLAIN (ANALYZE)` on the conformance corpus
 reports `Index Scan using "..._hnsw"`, not `Seq Scan`.
 
+### 3b. `ORDER BY` must repeat the expression, and the obvious fix is a trap
+
+The query sends the vector **twice** — once in the `SELECT` for the distance
+and once in the `ORDER BY`. At 768 dimensions that is roughly 9 KB of text
+literal, sent twice per query, and it is the single largest avoidable-looking
+cost in this adapter.
+
+The obvious fix is to order by the output alias:
+
+```sql
+SELECT id, embedding <#> $1::vector AS d FROM t ORDER BY d LIMIT $2
+```
+
+**It is faster and it is wrong.** Measured on arxiv-smoke (2,000 × 768):
+
+| form | p50 | p95 | plan |
+|---|---|---|---|
+| expression repeated | 91.20 ms | 360.46 ms | `Index Scan using ..._hnsw` |
+| `ORDER BY d` (alias) | 69.69 ms | 120.49 ms | **`Sort`** |
+
+Ordering by the alias makes Postgres materialise every row, sort it, and take
+the top k. On 2,000 rows that is faster than walking an HNSW graph and the
+answers are *exact*, so recall goes **up**. Every signal a careless reader
+would check says the change was an improvement. It has simply stopped
+measuring the index.
+
+This is the third form of the same trap in this project: Qdrant's
+`indexing_threshold` (task 009), the operator/opclass mismatch above, and this.
+All three produce fast, exact, perfect-recall answers from a code path that
+never touches the index. `EXPLAIN` is the only thing that tells them apart,
+which is why it is in the conformance evidence rather than in someone's
+memory.
+
 ### 4. Scores are distances; the adapter converts them back
 
 The protocol carries inner-product-like scores where larger is better. `<#>`

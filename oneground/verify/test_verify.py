@@ -33,6 +33,22 @@ from oneground.verify import (NOISE_FRACTION, latency_shape,  # noqa: E402
 SEED = 20260911
 
 
+
+def _block(verify_json, engine=None):
+    """The one engine's block out of verify.json.
+
+    Task 015 made verify.json hold `engines`, a list, with no engine promoted
+    to the top level: a format with a primary engine and an also-ran would be
+    picking a favourite. These tests run one engine, so they take the one
+    block -- and say so, rather than reaching for keys that moved.
+    """
+    blocks = verify_json["engines"]
+    assert isinstance(blocks, list) and blocks, verify_json
+    if engine is None:
+        assert len(blocks) == 1, [b.get("engine") for b in blocks]
+        return blocks[0]
+    return next(b for b in blocks if b.get("engine") == engine)
+
 def _quiet(msg):
     pass
 
@@ -142,7 +158,8 @@ def test_verify_reports_recall_ingest_and_a_baseline_synthetic():
     with tempfile.TemporaryDirectory() as tmp:
         req = _prepared(tmp)
         wd, _ = _capture(verify.run, req, log_fn=_quiet)
-        d = json.load(open(os.path.join(wd, "verify.json"), encoding="utf-8"))
+        d = _block(json.load(open(os.path.join(wd, "verify.json"),
+                                  encoding="utf-8")))
         assert d["mode"] == "local"
         assert d["ingest"]["vectors_per_second"] > 0
         assert "rtt_baseline_ms" in d
@@ -157,7 +174,8 @@ def test_engine_facts_are_labelled_declared_synthetic():
         wd, _ = _capture(verify.run, req, log_fn=_quiet)
         info = json.load(open(os.path.join(wd, "verify_info.json"),
                               encoding="utf-8"))
-        facts = info["engine_facts"]
+        assert len(info["engines"]) == 1, info["engines"]
+        facts = info["engines"][0]["engine_facts"]
         assert facts["kind"] == "declared", facts
         assert "not something oneground measured" in facts["note"]
         assert info["kind"]["verify_info.json"] == "declared"
@@ -167,7 +185,8 @@ def test_calibration_error_is_simulated_minus_measured_synthetic():
     with tempfile.TemporaryDirectory() as tmp:
         req = _prepared(tmp)
         wd, _ = _capture(verify.run, req, log_fn=_quiet)
-        d = json.load(open(os.path.join(wd, "verify.json"), encoding="utf-8"))
+        d = _block(json.load(open(os.path.join(wd, "verify.json"),
+                                  encoding="utf-8")))
         c = d["calibration"]
         assert d["calibration_error_recall"] == (
             c["simulated_recall_at_10"] - c["measured_recall_at_10"])
@@ -178,7 +197,8 @@ def test_calibration_is_couldnt_check_without_a_simulate_run_synthetic():
     with tempfile.TemporaryDirectory() as tmp:
         req = _prepared(tmp, with_simulate=False)
         wd, _ = _capture(verify.run, req, log_fn=_quiet)
-        d = json.load(open(os.path.join(wd, "verify.json"), encoding="utf-8"))
+        d = _block(json.load(open(os.path.join(wd, "verify.json"),
+                                  encoding="utf-8")))
         cal = d["calibration_error_recall"]
         assert isinstance(cal, str) and cal.startswith("couldnt_check")
         assert "simulate.json" in cal
@@ -216,8 +236,8 @@ def test_recall_is_reported_even_when_latency_is_couldnt_check_synthetic():
             "endpoint": "memory://", "ks": [10],
             "engine_params": {"m": 32, "hnsw_ef": 128}})
         wd, _ = _capture(verify.run, req, log_fn=_quiet)
-        row = json.load(open(os.path.join(wd, "verify.json"),
-                             encoding="utf-8"))["searches"]["k=10"]
+        row = _block(json.load(open(os.path.join(wd, "verify.json"),
+                                    encoding="utf-8")))["searches"]["k=10"]
         assert row["recall_at_10"] == 1.0
 
 
@@ -247,7 +267,8 @@ def test_latency_is_never_presented_as_throughput_synthetic():
     with tempfile.TemporaryDirectory() as tmp:
         req = _prepared(tmp)
         wd, text = _capture(verify.run, req, log_fn=_quiet)
-        d = json.load(open(os.path.join(wd, "verify.json"), encoding="utf-8"))
+        d = _block(json.load(open(os.path.join(wd, "verify.json"),
+                                  encoding="utf-8")))
         shape = d["searches"]["k=10"]["latency_shape_single_client"]
         if isinstance(shape, dict):
             assert shape["concurrency"] == 1
