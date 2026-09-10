@@ -60,3 +60,7 @@ build/
 # taken with. A report names the script a number came from; the script is not
 # part of what ships.
 tasks/scratch/
+
+# The CI-only corpus and requirements the calibration workflow generates.
+# Re-derivable from .github/scripts/make_ci_corpus.py and its seed.
+.ci/

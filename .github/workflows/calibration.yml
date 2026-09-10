@@ -136,12 +136,27 @@ jobs:
         run: |
           python -m oneground.cli calibrate curve \
             --fixture glove-100-angular --config M=12,efConstruction=500
+      # `requirements.smoke.yaml` cannot be used here: its corpus is
+      # fixtures/arxiv-smoke/vectors.npy, which .gitignore excludes, so a
+      # fresh checkout has that fixture's queries and ground truth but not its
+      # vectors. This step could never have passed on CI; run #1 is the first
+      # time anyone read the error. The engine check asks whether our
+      # simulator and a real engine agree with each other on one sample, and
+      # a small clustered synthetic corpus answers that in seconds.
+      - name: a corpus for the engine check
+        run: python .github/scripts/make_ci_corpus.py
+
+      - name: characterize and simulate it
+        run: |
+          python -m oneground.cli characterize .ci/requirements.ci.yaml
+          python -m oneground.cli simulate     .ci/requirements.ci.yaml
+
       - name: simulator against the pinned engine
         env:
           ONEGROUND_QDRANT_URL: http://localhost:6333
           ONEGROUND_ENVIRONMENT_ID: gha-pins-${{ github.run_id }}
         run: |
-          python -m oneground.cli calibrate engine requirements.smoke.yaml \
+          python -m oneground.cli calibrate engine .ci/requirements.ci.yaml \
             --engine qdrant
       - name: record the appended lines
         if: always()
@@ -193,12 +208,21 @@ jobs:
         run: |
           python -m oneground.cli calibrate curve \
             --fixture glove-100-angular --config M=12,efConstruction=500
+      # See the note on the same step in the `pins` job above.
+      - name: a corpus for the engine check
+        run: python .github/scripts/make_ci_corpus.py
+
+      - name: characterize and simulate it
+        run: |
+          python -m oneground.cli characterize .ci/requirements.ci.yaml
+          python -m oneground.cli simulate     .ci/requirements.ci.yaml
+
       - name: simulator against the pinned engine
         env:
           ONEGROUND_QDRANT_URL: http://localhost:6333
           ONEGROUND_ENVIRONMENT_ID: gha-weekly-${{ github.run_id }}
         run: |
-          python -m oneground.cli calibrate engine requirements.smoke.yaml \
+          python -m oneground.cli calibrate engine .ci/requirements.ci.yaml \
             --engine qdrant
       - name: record the appended lines
         if: always()
@@ -238,7 +262,7 @@ jobs:
           ONEGROUND_QDRANT_URL: http://localhost:6333
           ONEGROUND_ENVIRONMENT_ID: gha-drift-${{ github.run_id }}
         run: |
-          python -m oneground.cli calibrate engine requirements.smoke.yaml \
+          python -m oneground.cli calibrate engine .ci/requirements.ci.yaml \
             --engine qdrant --advisory
       - name: record the appended lines
         if: always()

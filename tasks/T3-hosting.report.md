@@ -7,7 +7,7 @@
 | `main` is the public single-commit branch at `27173ae` | yes — `27173ae oneground 0.1.0-preview`, with `b719603 brief: T3 hosting` on top. |
 | pushed to `github.com/shamiksaharcciit-oss/oneground` | yes — `origin` points there and `remotes/origin/main` exists. |
 | Pages currently serves the README through Jekyll | yes, and `check_hosted.py` measured it: the host's `index.html` is a different file from this repository's, and `app.js`, `style.css` and the whole of `data/` are 404. |
-| `site/teaser/` is launch-ready (T2b) | yes, and MASTER's hostname fix and final re-export landed: `DESKTOP-HAGOPQC` is gone from `values.json`, `verify_teaser_data.py` passes on the committed tree. |
+| `site/teaser/` is launch-ready (T2b) | yes, and MASTER's hostname fix and final re-export landed: `<hostname>` is gone from `values.json`, `verify_teaser_data.py` passes on the committed tree. |
 | branch model per `docs/RELEASE.md` §6 | read: `main` is the sole history, `archive/private-history` is never merged in either direction. Worked on `main`. Not pushed. |
 | `docs/HOSTING.md` | absent, as expected — created. |
 | `.github/workflows/` | exists, with `calibration.yml`. Added `pages.yml` beside it. |
@@ -271,7 +271,7 @@ committed `values.json`, only `generated_at`, `generated_by` and
 `geometry_from` moved.
 
 **Passed.** No developer identifier reached the shipped data
-(`tasks/scratch/T2b-scan-identifiers.py`): `polo2` 0, `DESKTOP-` 0, including
+(`tasks/scratch/T2b-scan-identifiers.py`): `<developer>` 0, `DESKTOP-` 0, including
 inside the compressed bundle.
 
 **Couldn't check.**

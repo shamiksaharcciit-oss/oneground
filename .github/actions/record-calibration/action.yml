@@ -77,32 +77,16 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        python - <<'PY' >> "$GITHUB_OUTPUT"
-        import json, os
-        path = "${{ inputs.history }}"
-        scope = "${{ inputs.scope }}"
-        bad = []
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                d = json.loads(line)
-                if d.get("outcome") != "contradicted":
-                    continue
-                if d.get("outcome_scope", "blocking") != "blocking":
-                    continue
-                bad.append(d)
-        # Only this run's lines matter; earlier contradictions are history and
-        # have their own issues already.
-        bad = bad[-int("${{ steps.diff.outputs.appended }}" or 0):] if bad else []
-        print(f"count={len(bad)}")
-        if bad and scope == "blocking":
-            body = "\n".join(json.dumps(d, indent=2, sort_keys=True) for d in bad)
-            print("body<<ONEGROUND_EOF")
-            print(body)
-            print("ONEGROUND_EOF")
-        PY
+        # The rule lives in a script so it can be tested. It used to be a
+        # heredoc here, and its bug -- filtering the whole history for
+        # blocking contradictions and then slicing the last N of *those*,
+        # where N counted appended lines -- failed run #1 on seven
+        # contradictions the run had not produced. See
+        # .github/scripts/test_count_contradictions.py.
+        python "${{ github.action_path }}/../../scripts/count_contradictions.py" \
+          --history "${{ inputs.history }}" \
+          --appended "${{ steps.diff.outputs.appended }}" \
+          --github-output "$GITHUB_OUTPUT"
 
     - name: open an issue carrying the line
       if: inputs.scope == 'blocking' && steps.bad.outputs.count != '0'
