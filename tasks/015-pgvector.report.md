@@ -861,6 +861,18 @@ is a different machine. Script:
 
 ## Observed, not done
 
+**Task 014's identifier guards check what will be written, never what was
+already committed.** Rebasing onto `main` surfaced this. `test_environment.py`
+asserts on `env.stamp()`, on `history.environment_id()`, and — via the AST —
+on modules reaching for `platform.node()`. All three are about the *next*
+write. Nothing scans the bytes already in `calibration/history.jsonl`, in
+`tasks/*.md`, or anywhere else in the tree. This branch carried four
+occurrences of a hostname and an absolute home-directory path through a
+543-test green suite; they were found by grepping, not by a test. A guard that
+walks the tracked tree for `_machine_identifiers()` would have caught them,
+and would catch the next branch that forks from before a redaction. Not done —
+014 is not my task and this is not in the 015 brief.
+
 **A nondeterministic native crash in the determinism harness.** *(Recorded at
 the developer's instruction, not chased in this task.)* Two runs of
 `tasks/scratch/015-sharded-determinism.py` died with Windows exception
@@ -921,9 +933,18 @@ New:
     oneground/adapters/pgvector/ADAPTER.md     eight quirks, each with its measurement
     oneground/adapters/pgvector/__init__.py
     oneground/verify/compose/pgvector.yml      pinned image + digest, host port 55432
+On disk and named by this report wherever a number came from one, but **not
+tracked** — `main`'s .gitignore keeps the working in `archive/private-history`
+and ships the briefs and reports only. They are on `pre-rebase-015-backup`
+(`a808a90`) for whoever maintains that branch:
+
     tasks/scratch/015-sharded-determinism.py   the step-1 measurement
     tasks/scratch/015-sharded-determinism.json/.log
     tasks/scratch/015-arxiv-150k-fixture-verify.log
+    tasks/scratch/015-backfill-runtime-settings.py
+    tasks/scratch/015-apt-measure.sh
+    tasks/scratch/015-workdir-digests.py
+    tasks/scratch/015-{report,test}-patch.py
 
 Changed:
 
@@ -951,6 +972,30 @@ Changed:
     docs/ADAPTERS.md                      pgvector; the three index-skip traps
     docs/VERIFY.md                        two-engine procedure; what matched is not
     calibration/history.jsonl             appended only
+
+### Rebased onto main
+
+`main` is not a descendant of the branch this work forked from. It is a
+rewritten public history rooted at `27173ae oneground 0.1.0-preview`, and
+`git merge-base main task-015` exits 1 — no common ancestor. The old history
+is kept at `archive/private-history` (`5baa40b`), and the fork point,
+`8b359c6 brief: 015 pgvector`, is on it. So a plain `git rebase main` would
+have replayed all 72 commits, not this task's 11. The rebase was
+`git rebase --onto main 8b359c6 task-015`.
+
+Two conflicts, both `calibration/history.jsonl`, both the same cause: `main`'s
+copy of the shared lines has task 014's redaction and this branch's does not.
+Compared as JSON rather than as text, **no measured field differed on any
+shared line** — only `environment` and `source`. Resolved by taking `main`'s
+lines verbatim and appending this branch's new ones, with 014's substitution
+applied to the one line that needed it. The two pod-run lines needed nothing.
+
+Verified after: all 11 commits replayed; every file this task created is
+byte-identical to its pre-rebase blob; no file lost its 015 changes to `main`'s
+version; all 10 of `main`'s VERIFY.md headings survive alongside the new one;
+543 passed, 1 skipped (462 before — `main` brought 81).
+
+Pre-rebase head `a808a90` is kept at `pre-rebase-015-backup`. **Not pushed.**
 
 ## Blocked on developer
 
