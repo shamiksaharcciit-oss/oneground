@@ -129,6 +129,13 @@ class EngineFacts:
     shards: Optional[int] = None
     replicas: Optional[int] = None
     nodes: Optional[int] = None
+    # The engine's own runtime configuration, read back from the engine.
+    # Task 015: "recall 0.9984 on pgvector" is not a portable claim without
+    # shared_buffers and work_mem beside it, any more than it is without the
+    # version. Every value here is DECLARED -- the engine's answer about
+    # itself, not something oneground measured -- and a value the engine
+    # would not give is absent rather than guessed.
+    runtime_settings: Dict[str, Any] = field(default_factory=dict)
     raw: Dict[str, Any] = field(default_factory=dict)
     kind: str = DECLARED
 
@@ -145,6 +152,11 @@ class EngineFacts:
             "shards": self.shards,
             "replicas": self.replicas,
             "nodes": self.nodes,
+            "runtime_settings": dict(self.runtime_settings),
+            # `raw` was dropped here until task 015, which made the field
+            # decorative: it exists so a later reader can check a claim this
+            # dataclass did not anticipate, and it never reached a receipt.
+            "raw": dict(self.raw),
             "kind": self.kind,
             "note": ("every field here is what the engine reported about "
                      "itself, not something oneground measured"),
@@ -179,6 +191,13 @@ class VectorEngine(Protocol):
         ...
 
     def describe(self, ns: str) -> EngineFacts:
+        """Facts about a namespace, including `runtime_settings`.
+
+        An adapter reports the engine settings that can move a measurement --
+        memory, concurrency, and any search-time parameter the engine holds
+        as session or server state rather than on the index. An engine with
+        no such settings returns an empty dict and says so in its ADAPTER.md.
+        """
         ...
 
     def scroll(self, ns: str, limit: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -186,6 +205,42 @@ class VectorEngine(Protocol):
         ...
 
     def delete_namespace(self, ns: str) -> None:
+        ...
+
+    def namespace_exists(self, ns: str) -> bool:
+        """Whether `ns` exists. Required, not duck-typed.
+
+        The conformance suite has to prove a namespace was deleted, and an
+        engine that cannot answer this cannot be checked -- falling back to
+        "describe() raised, so it must be gone" cannot tell a deleted
+        namespace from an unreachable engine.
+        """
+        ...
+
+    def wait_for_index(self, ns: str, timeout: float = 600.0,
+                       poll: float = 0.5) -> Tuple[int, int, float]:
+        """Block until the index is usable. `(indexed, points, seconds)`.
+
+        **Required for every engine**, promoted from an optional method in
+        task 015. It was duck-typed while Qdrant was the only adapter, and
+        pgvector showed why that was wrong: the two engines are unready in
+        completely different ways, and an adapter that simply does not
+        implement this would have its unreadiness silently skipped.
+
+            Qdrant    indexes in the background. `status: green` means "no
+                      operations pending", not "indexed"; only
+                      `indexed_vectors_count` answers the question.
+            pgvector  `CREATE INDEX` is synchronous, so the index usually
+                      exists by the time anyone asks -- but an interrupted
+                      build leaves it `indisvalid = false`, Postgres refuses
+                      to use it, and every query becomes a sequential scan
+                      that returns exact answers and measures nothing.
+
+        Both failures produce the same symptom: recall that looks perfect
+        because the index was never consulted. An engine that is genuinely
+        always ready returns `(points, points, 0.0)` and says so in its
+        ADAPTER.md; that is a claim it has to make, not a method it may omit.
+        """
         ...
 
 

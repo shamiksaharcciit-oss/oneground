@@ -54,12 +54,29 @@ simulate:
 verify:
   kind: declared
   target: runpod
-  engines: [qdrant]
+  # Both engines, measured SEQUENTIALLY on one pod (task 015). Same corpus,
+  # same queries, same index parameters, same concurrency, same duration --
+  # and never at the same time, so neither number carries the other's load.
+  # docs/VERIFY.md says what "matched" does and does not guarantee.
+  engines: [qdrant, pgvector]
+  # Where each engine listens ON THE POD. Written out rather than left to a
+  # default, because a default that is right today is a silent breakage the
+  # day it changes -- and this file is the one the pod actually reads.
+  # Postgres is started with `-A trust` on the pod, so the password in the URL
+  # is never checked; it is there because libpq wants a well-formed URL, and
+  # it is not a secret in any sense.
+  pod_endpoints:
+    qdrant: http://localhost:6333
+    pgvector: postgresql://oneground:oneground@localhost:55432/oneground
   duration_minutes: 5
   warmup_seconds: 15
+  # One params block for both engines: `m` and the ef_construction value mean
+  # the same thing in each, which is what makes the two rows comparable
+  # rather than two different indexes measured side by side.
   engine_params:
     m: 32
-    ef_construct: 200
+    ef_construct: 200            # Qdrant's spelling
+    ef_construction: 200         # pgvector's spelling, same value
     hnsw_ef: 128
     indexing_threshold: 1
 

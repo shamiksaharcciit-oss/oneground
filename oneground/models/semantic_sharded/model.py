@@ -38,7 +38,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..base import (BuiltIndex, Candidates, Config, Footprint,
-                    estimate_memory_bytes, exact_over, merge_candidates)
+                    estimate_memory_bytes, exact_over, merge_candidates,
+                    resolve_deterministic, single_threaded_faiss)
 
 NAME = "semantic_sharded"
 
@@ -99,52 +100,67 @@ class SemanticSharded:
         return out
 
     # -- build -------------------------------------------------------------
-    def build(self, vectors, config, seed, context=None):
+    def build(self, vectors, config, seed, context=None, deterministic=None):
         """k-means, closure, one HNSW per region.
 
         `context["centroids"]` reuses centroids the caller already computed.
         The fixture builder passes the ones `characterize()` produced, which
         is both faster (no second 256-way clustering over 150,000 vectors) and
         exactly what the published reference results were measured with.
+
+        `deterministic` (default True) runs the whole build single-threaded --
+        not only the HNSW adds. k-means is seeded, but its centroid update is
+        a floating-point sum over points, and OpenMP does not fix the order in
+        which those partial sums combine. A centroid that differs in the last
+        bit can move a point across a region boundary, which changes shard
+        membership, which changes every graph built from it. Seeding is not
+        sufficient for either half; one thread is.
         """
         import faiss
         from ...measures.crispness import centroid_dists, kmeans
 
         t0 = time.time()
+        det = resolve_deterministic(config, deterministic)
         n_cent = int(config.get("centroids", 256))
         eps = float(config.get("epsilon", 0.2))
 
-        cents = (context or {}).get("centroids")
-        if cents is None or len(cents) != n_cent:
-            cents = kmeans(vectors, n_cent, seed)
+        with single_threaded_faiss(det):
+            cents = (context or {}).get("centroids")
+            if cents is None or len(cents) != n_cent:
+                cents = kmeans(vectors, n_cent, seed)
 
-        # --- closure, unchanged from the fixture builder ---
-        d, near = centroid_dists(vectors, cents, MAX_ASSIGN)
-        within = d <= d[:, [0]] * (1 + eps)
-        within[:, 0] = True
-        copies = within.sum(axis=1)
-        members = defaultdict(list)
-        for col in range(MAX_ASSIGN):
-            sel = np.where(within[:, col])[0]
-            for vid, r in zip(sel, near[sel, col]):
-                members[int(r)].append(int(vid))
+            # --- closure, unchanged from the fixture builder ---
+            d, near = centroid_dists(vectors, cents, MAX_ASSIGN)
+            within = d <= d[:, [0]] * (1 + eps)
+            within[:, 0] = True
+            copies = within.sum(axis=1)
+            members = defaultdict(list)
+            for col in range(MAX_ASSIGN):
+                sel = np.where(within[:, col])[0]
+                for vid, r in zip(sel, near[sel, col]):
+                    members[int(r)].append(int(vid))
 
-        shards, ids_of = {}, {}
-        for r, ids in members.items():
-            ids = np.asarray(ids, dtype=np.int64)
-            s = faiss.IndexHNSWFlat(vectors.shape[1],
-                                    int(config.get("M", 32)),
-                                    faiss.METRIC_INNER_PRODUCT)
-            s.hnsw.efConstruction = EF_CONSTRUCTION
-            s.add(vectors[ids])
-            s.hnsw.efSearch = int(config.get("efSearch", 96))
-            shards[r], ids_of[r] = s, ids
+            shards, ids_of = {}, {}
+            # Sorted so the regions are built in a fixed order. `members` is a
+            # defaultdict filled in numpy-scan order, which is already stable,
+            # but relying on that would make determinism depend on an
+            # implementation detail of the loop above rather than on a choice.
+            for r in sorted(members):
+                ids = np.asarray(members[r], dtype=np.int64)
+                s = faiss.IndexHNSWFlat(vectors.shape[1],
+                                        int(config.get("M", 32)),
+                                        faiss.METRIC_INNER_PRODUCT)
+                s.hnsw.efConstruction = EF_CONSTRUCTION
+                s.add(vectors[ids])
+                s.hnsw.efSearch = int(config.get("efSearch", 96))
+                shards[r], ids_of[r] = s, ids
 
         return BuiltIndex(
             family=NAME, config=config, n_base=len(vectors),
             dim=vectors.shape[1],
             state={"shards": shards, "ids_of": ids_of, "centroids": cents,
-                   "copies": copies, "vectors": vectors},
+                   "copies": copies, "vectors": vectors,
+                   "deterministic": det},
             build_seconds=time.time() - t0)
 
     # -- routing -----------------------------------------------------------

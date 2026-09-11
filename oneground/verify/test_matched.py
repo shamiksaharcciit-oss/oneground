@@ -842,12 +842,18 @@ def test_a_session_with_no_manifest_says_couldnt_check_not_ok():
         assert "couldnt-check" in p.stdout, p.stdout
 
 
+ARXIV_SESSION = "sessions/verify-arxiv-150k-two-engines.yaml"
+
+
 def test_the_arxiv_session_declares_a_tarball_and_a_manifest():
-    """Not synthetic: this is the session about to be run."""
+    """Not synthetic: this is the session about to be run.
+
+    Renamed in task 015 from verify-arxiv-150k-via-characterize: the session
+    is now named for what it does rather than for the workdir it came from,
+    because it will be read months later beside task 011's single-engine one.
+    """
     import yaml
-    spec = yaml.safe_load(
-        open("sessions/verify-arxiv-150k-via-characterize.yaml",
-             encoding="utf-8"))
+    spec = yaml.safe_load(open(ARXIV_SESSION, encoding="utf-8"))
     env = spec["env"]
     assert env["ONEGROUND_CORPUS_TARBALL"] == "/workspace/arxiv-150k-large.tgz"
     assert env["ONEGROUND_CORPUS_MANIFEST"] == \
@@ -856,6 +862,10 @@ def test_the_arxiv_session_declares_a_tarball_and_a_manifest():
     assert env["ONEGROUND_CONCURRENCY"] == "32"
     assert env["ONEGROUND_TARGET_QPS"] == "200"
     assert env["ONEGROUND_DURATION_MIN"] == "5"
+    # Two engines, in order, measured sequentially on one pod. This is the
+    # whole point of the session, and it is the one field that would silently
+    # halve the run if it were wrong.
+    assert env["ONEGROUND_ENGINES"] == "qdrant,pgvector"
     # The manifest has to reach the pod, and it does so only if git carries it.
     from oneground.verify import runpod as rp
     carried, why = rp.git_carries("fixtures/arxiv-150k/MANIFEST.sha256")
@@ -1177,14 +1187,33 @@ def test_the_real_arxiv_workdir_gives_one_option_the_measurement_needs_local_run
                           encoding="utf-8"))
     c = {"latency": {"p95_ms": 40, "at_qps": 200, "concurrency": 32},
          "recall_at_k": {"k": 10, "min": 0.95}}
-    settled = [r["config"] for r in sim["rows"]
-               if vd.latency_p95(r, data, c, "runpod", info).outcome == MEETS]
-    assert settled == [
-        "single_node_hnsw[M=32,efConstruction=200,efSearch=128]"], settled
-    # And it is the configuration the engine reported building.
-    ip = info["engine_facts"]["index_params"]
-    assert ip["m"] == 32 and ip["ef_construct"] == 200, ip
-    assert info["engine_params"]["hnsw_ef"] == 128, info["engine_params"]
+
+    # The rule is about which option may CARRY a measurement, not about which
+    # way the measurement then goes. Asserting MEETS conflated the two, and
+    # task 015's pod run made that visible: the same configuration measured
+    # 38.22 ms on one pod and 42.82 ms on another, so an assertion on MEETS
+    # against a 40 ms threshold was testing the machine, not the rule.
+    built = "single_node_hnsw[M=32,efConstruction=200,efSearch=128]"
+    for engine, block in vd.engine_blocks(data):
+        einfo = dict(vd.engine_info_blocks(info)).get(engine)
+        settled = [r["config"] for r in sim["rows"]
+                   if vd.latency_p95(r, block, c, "runpod", einfo,
+                                     engine=engine).outcome != CC]
+        assert settled == [built], (engine, settled)
+
+    # And it is the configuration each engine reported building.
+    for engine, einfo in vd.engine_info_blocks(info):
+        ip = (einfo.get("engine_facts") or {}).get("index_params") or {}
+        m = ip.get("m")
+        efc = ip.get("ef_construct", ip.get("ef_construction"))
+        assert m == 32 and efc == 200, (engine, ip)
+        assert einfo["engine_params"]["hnsw_ef"] == 128, einfo["engine_params"]
+
+    # Task 015: both engines ran, in one environment, sequentially.
+    assert data.get("engines_measured") == ["qdrant", "pgvector"], data.get(
+        "engines_measured")
+    assert data.get("sequential") is True
+    assert data.get("environment_id")
 
 
 def _main():

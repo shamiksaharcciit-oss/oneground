@@ -44,8 +44,8 @@ import time
 import numpy as np
 
 from .. import intake
-from ..adapters import (AdapterError, get as get_engine, managed_namespace,
-                        namespace_for)
+from ..adapters import (AdapterError, engines as registered_engines,
+                        get as get_engine, managed_namespace, namespace_for)
 from ..receipts import (library_versions, round_floats, sha256_file,
                         write_json_stable, write_manifest)
 from ..sample import loaders
@@ -62,6 +62,50 @@ SIMULATE_FILES = ["simulate.json", "simulate_info.json"]
 COMPOSE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "compose", "qdrant.yml")
 LOCAL_ENDPOINT = "http://localhost:6333"
+
+# One compose file and one default endpoint per engine. Adding an engine is
+# two lines here and an adapter; nothing else in this module names an engine.
+_COMPOSE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "compose")
+COMPOSE_FILES = {
+    "qdrant": os.path.join(_COMPOSE_DIR, "qdrant.yml"),
+    "pgvector": os.path.join(_COMPOSE_DIR, "pgvector.yml"),
+}
+CONTAINERS = {
+    "qdrant": "oneground-verify-qdrant",
+    "pgvector": "oneground-verify-pgvector",
+}
+DEFAULT_ENDPOINTS = {
+    "qdrant": LOCAL_ENDPOINT,
+    "pgvector": "postgresql://oneground:oneground@localhost:55432/oneground",
+}
+
+
+def compose_file_for(engine):
+    try:
+        return COMPOSE_FILES[str(engine)]
+    except KeyError:
+        raise VerifyError(
+            f"no compose file for engine {engine!r}; this build has "
+            f"{', '.join(sorted(COMPOSE_FILES))}") from None
+
+
+def endpoint_for(cfg, engine, override=None):
+    """Where this engine listens.
+
+    `verify.endpoints` maps engine -> endpoint for a multi-engine run;
+    `verify.endpoint` remains the single-engine form. A default per engine
+    exists so a two-engine local run needs no endpoint block at all.
+    """
+    if override:
+        return str(override)
+    per = (cfg.get("endpoints") or {})
+    if engine in per:
+        return str(per[engine])
+    if cfg.get("endpoint") and len(
+            list(cfg.get("engines") or [cfg.get("engine", "qdrant")])) == 1:
+        return str(cfg["endpoint"])
+    return DEFAULT_ENDPOINTS.get(str(engine), "")
 
 # The pod image for a matched-environment run. A CPU-capable image with
 # python3.12 and curl is all this needs: the engine runs from its own release
@@ -87,42 +131,44 @@ def log(msg):
 # the local target
 # --------------------------------------------------------------------------
 
-def compose_image():
-    """The pinned tag from the compose file, for the receipt."""
+def compose_image(engine="qdrant"):
+    """The pinned tag from an engine's compose file, for the receipt."""
     try:
-        with open(COMPOSE_FILE, encoding="utf-8") as f:
+        with open(compose_file_for(engine), encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("image:"):
                     return line.split("image:", 1)[1].strip()
-    except OSError:
+    except (OSError, VerifyError):
         pass
     return None
 
 
-def compose_up(log_fn=log, timeout=120):
-    log_fn(f"docker compose up ({compose_image()})")
-    subprocess.run(["docker", "compose", "-f", COMPOSE_FILE, "up", "-d"],
+def compose_up(log_fn=log, timeout=120, engine="qdrant"):
+    path = compose_file_for(engine)
+    log_fn(f"docker compose up {engine} ({compose_image(engine)})")
+    subprocess.run(["docker", "compose", "-f", path, "up", "-d"],
                    check=True, capture_output=True, text=True,
                    encoding="utf-8", errors="replace")
     deadline = time.time() + timeout
     while time.time() < deadline:
         p = subprocess.run(["docker", "inspect", "--format",
                             "{{.State.Health.Status}}",
-                            "oneground-verify-qdrant"],
+                            CONTAINERS.get(engine, "")],
                            capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         if "healthy" in (p.stdout or ""):
-            log_fn("  container healthy")
+            log_fn(f"  {engine} container healthy")
             return True
         time.sleep(2)
-    raise VerifyError("the qdrant container did not become healthy in "
+    raise VerifyError(f"the {engine} container did not become healthy in "
                       f"{timeout}s")
 
 
-def compose_down(log_fn=log):
-    log_fn("docker compose down -v")
-    subprocess.run(["docker", "compose", "-f", COMPOSE_FILE, "down", "-v"],
+def compose_down(log_fn=log, engine="qdrant"):
+    log_fn(f"docker compose down -v {engine}")
+    subprocess.run(["docker", "compose", "-f", compose_file_for(engine),
+                    "down", "-v"],
                    capture_output=True, text=True, encoding="utf-8",
                    errors="replace")
 
@@ -260,7 +306,8 @@ def environment_id():
 
 
 def run(requirements_path, up=False, down=False, on_pod=False,
-        target_override=None, endpoint_override=None, log_fn=log):
+        target_override=None, endpoint_override=None, engines_override=None,
+        log_fn=log):
     """`target_override` and `endpoint_override` exist for
     `oneground calibrate engine`, which has to run locally against a
     Docker or already-running Qdrant whatever the requirements file says
@@ -277,7 +324,12 @@ def run(requirements_path, up=False, down=False, on_pod=False,
 
     cfg = req.data.get("verify") or {}
     target = str(target_override or cfg.get("target", "local")).lower()
-    engine_name = str(cfg.get("engine", "qdrant"))
+    # `engines` is the list form and `engine` the single form; a run measures
+    # them SEQUENTIALLY, never concurrently, so the engines never contend for
+    # the machine they are being compared on. See docs/VERIFY.md.
+    engine_names = [str(e) for e in (engines_override or cfg.get("engines")
+                                     or [cfg.get("engine", "qdrant")])]
+    engine_name = engine_names[0]
     engine_params = dict(cfg.get("engine_params") or
                          {"m": 32, "ef_construct": 200, "hnsw_ef": 128,
                           "indexing_threshold": 1})
@@ -295,10 +347,7 @@ def run(requirements_path, up=False, down=False, on_pod=False,
         endpoint = str(cfg.get("pod_endpoint") or LOCAL_ENDPOINT)
         target = "runpod"
     elif target == "local":
-        endpoint = str(endpoint_override or cfg.get("endpoint")
-                       or LOCAL_ENDPOINT)
-        if up:
-            compose_up(log_fn)
+        endpoint = endpoint_for(cfg, engine_name, endpoint_override)
     if target in ("existing", "existing_collection"):
         endpoint = str(cfg.get("endpoint") or "")
         if not endpoint:
@@ -311,39 +360,108 @@ def run(requirements_path, up=False, down=False, on_pod=False,
             "supported. This build has 'local', 'runpod' and 'existing'.")
 
     session_id = time.strftime("%Y%m%d-%H%M%S")
-    log_fn(f"verify '{req.name}'  target={target}  engine={engine_name}  "
-           f"endpoint={endpoint}")
+    env_id = environment_id()
+    log_fn(f"verify '{req.name}'  target={target}  "
+           f"engines={', '.join(engine_names)}  environment={env_id}")
 
-    try:
-        if target in ("existing", "existing_collection"):
-            result = _verify_existing(req, cfg, workdir, engine_name, endpoint,
-                                      session_id, ks, engine_params, log_fn)
-        else:
-            result = _verify_local(req, cfg, workdir, engine_name, endpoint,
-                                   session_id, ks, engine_params, metric,
-                                   log_fn)
-    finally:
-        if down:
-            compose_down(log_fn)
+    blocks = []
+    for name in engine_names:
+        ep = endpoint_for(cfg, name, endpoint_override
+                          if name == engine_name else None)
+        if target == "runpod" or on_pod:
+            ep = str((cfg.get("pod_endpoints") or {}).get(name)
+                     or cfg.get("pod_endpoint") or ep)
+        log_fn("")
+        log_fn(f"--- {name} at {ep} "
+               f"({len(blocks) + 1} of {len(engine_names)}) ---")
+        t_engine = time.time()
+        started = False
+        try:
+            if up and target == "local":
+                compose_up(log_fn, engine=name)
+                started = True
+            if target in ("existing", "existing_collection"):
+                block = _verify_existing(req, cfg, workdir, name, ep,
+                                         session_id, ks, engine_params, log_fn)
+            else:
+                block = _verify_local(req, cfg, workdir, name, ep,
+                                      session_id, ks, engine_params, metric,
+                                      log_fn)
+        finally:
+            # Each engine is torn down before the next one starts, so two
+            # engines are never resident at once on the machine that is
+            # measuring them.
+            if down and started:
+                compose_down(log_fn, engine=name)
+        block["endpoint"] = ep
+        block["compose_image"] = (compose_image(name) if target == "local"
+                                  else None)
+        block["environment_id"] = env_id
+        block["elapsed_seconds"] = time.time() - t_engine
+        blocks.append(block)
 
-    result["elapsed_seconds"] = time.time() - t0
-    _write(req, workdir, result, requirements_path, engine_name, endpoint,
-           target, engine_params, log_fn)
+    result = _combine(blocks, env_id, target, time.time() - t0)
+    _write(req, workdir, result, requirements_path, engine_names, target,
+           engine_params, log_fn)
     _summary(req, result, workdir)
     return workdir
+
+
+def _combine(blocks, env_id, target, elapsed):
+    """One verify.json for one or many engines.
+
+    The per-engine results live in `engines`, a list, and no engine is
+    promoted to the top level -- a shape with a primary engine and an
+    also-ran would be picking a favourite in the file format. `environment_id`
+    is at the top because it is the one thing every block shares, and it is
+    what the same-environment rule turns on: these engines were measured on
+    the same machine, one after the other.
+    """
+    return {
+        "schema_engines": 1,
+        "environment_id": env_id,
+        "target": target,
+        "engines": blocks,
+        "engines_measured": [b.get("engine") for b in blocks],
+        "sequential": True,
+        "sequential_note": (
+            "engines were measured one after the other on the same host, "
+            "never concurrently. They therefore never contend with each "
+            "other -- and equally, this says nothing about how either "
+            "behaves while the other is running."),
+        "elapsed_seconds": elapsed,
+    }
 
 
 def _prepare_runpod(req, cfg, workdir, requirements_path, log_fn):
     """Generate the session spec for a matched-environment run. Creates
     nothing; prints what the developer has to run."""
     engines = list(cfg.get("engines") or [cfg.get("engine", "qdrant")])
-    for name in engines:
-        if name != "qdrant":
-            raise VerifyError(
-                f"{requirements_path}: verify.engines names {name!r}, and "
-                "the only adapter in this build is qdrant. The code path "
-                "handles a list so a second engine needs no change here, but "
-                "the adapter has to exist first.")
+    # Refuse an engine with no adapter, by asking the registry rather than by
+    # naming the engines this build happens to have. The previous form
+    # hard-coded "the only adapter in this build is qdrant" and would have
+    # gone on refusing pgvector after the adapter existed -- a guard that
+    # knows a list of names is a guard that is wrong the day the list changes.
+    known = set(registered_engines())
+    unknown = [n for n in engines if n not in known]
+    if unknown:
+        raise VerifyError(
+            f"{requirements_path}: verify.engines names "
+            f"{', '.join(repr(n) for n in unknown)}, and this build has no "
+            f"adapter for {'them' if len(unknown) > 1 else 'it'}. Registered: "
+            f"{', '.join(sorted(known))}. See docs/ADAPTERS.md.")
+    # A pod session must also know where each engine will listen, or the run
+    # reaches the pod and fails there, having already been paid for.
+    missing_endpoints = [
+        n for n in engines
+        if not ((cfg.get("pod_endpoints") or {}).get(n)
+                or cfg.get("pod_endpoint")
+                or DEFAULT_ENDPOINTS.get(n))]
+    if missing_endpoints:
+        raise VerifyError(
+            f"{requirements_path}: no pod endpoint for "
+            f"{', '.join(missing_endpoints)}. Set verify.pod_endpoints so the "
+            "pod-side run knows where to reach each engine.")
     image = str(cfg.get("image") or POD_IMAGE)
     path = runpod_target.write_session(req, workdir, cfg, engines, image,
                                        path=cfg.get("session_path"),
@@ -630,9 +748,19 @@ def _verify_existing(req, cfg, workdir, engine_name, endpoint, session_id, ks,
     return out
 
 
-def _write(req, workdir, result, requirements_path, engine_name, endpoint,
+def _write(req, workdir, result, requirements_path, engine_names,
            target, engine_params, log_fn):
-    measurement = {k: v for k, v in result.items() if k != "engine_facts"}
+    """verify.json holds the measurements; verify_info.json the declarations.
+
+    Both are per-engine now. `engine_facts` is stripped out of every block in
+    verify.json and lives only in verify_info.json, because it is the engine's
+    claim about itself rather than anything oneground measured -- the same
+    split the single-engine form had, applied blockwise.
+    """
+    measurement = dict(result)
+    measurement["engines"] = [
+        {k: v for k, v in b.items() if k != "engine_facts"}
+        for b in result.get("engines", [])]
     measurement["run"] = req.name
     measurement["schema"] = intake.SCHEMA_VERSION
     write_json_stable(os.path.join(workdir, "verify.json"),
@@ -644,17 +772,21 @@ def _write(req, workdir, result, requirements_path, engine_name, endpoint,
                  "verify_info.json": "declared"},
         "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "target": target,
-        "engine": engine_name,
-        "endpoint": endpoint,
-        "engine_params": engine_params,
-        "engine_facts": result.get("engine_facts"),
-        "compose_image": compose_image() if target == "local" else None,
+        "environment_id": result.get("environment_id"),
+        "engines": [
+            {"engine": b.get("engine"),
+             "engine_version": b.get("engine_version"),
+             "endpoint": b.get("endpoint"),
+             "engine_params": engine_params,
+             "engine_facts": b.get("engine_facts"),
+             "compose_image": b.get("compose_image")}
+            for b in result.get("engines", [])],
         "library_versions": versions,
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "requirements_file": {"path": os.path.abspath(requirements_path),
                               "sha256": sha256_file(requirements_path)},
-        "note": ("engine_facts is what the engine reported about itself. "
+        "note": ("engine_facts is what each engine reported about itself. "
                  "Nothing in this file was measured by oneground."),
     }
     write_json_stable(os.path.join(workdir, "verify_info.json"), info)
@@ -665,6 +797,55 @@ def _write(req, workdir, result, requirements_path, engine_name, endpoint,
 
 
 def _summary(req, result, workdir):
+    """One block per engine, then what the run as a whole established.
+
+    A flat single-engine result -- the shape verify.json had before task 015,
+    and the shape `_verify_local` still returns -- is read as a list of one,
+    so a caller holding one block does not have to wrap it.
+    """
+    blocks = result.get("engines")
+    if not isinstance(blocks, list):
+        blocks = [result] if result.get("engine") else []
+    for block in blocks:
+        _summary_engine(req, block, workdir)
+
+    if len(blocks) > 1:
+        print()
+        print("=" * 78)
+        print(f"  {len(blocks)} engines, one environment: "
+              f"{result.get('environment_id')}")
+        print("=" * 78)
+        hdr = (f"  {'engine':<12} {'recall@10':>10} {'rtt/query':>10} "
+               f"{'p95 ms':>9} {'ingest/s':>10}")
+        print(hdr)
+        print("  " + "-" * (len(hdr) - 2))
+        for b in blocks:
+            row = (b.get("searches") or {}).get("k=10") or {}
+            shape = row.get("latency_shape_single_client")
+            p95 = (shape.get("p95_ms") if isinstance(shape, dict) else None)
+            rtt = (b.get("rtt_baseline_ms") or {}).get("p95_ms")
+            ratio = (f"{rtt / p95:.0%}" if (rtt and p95) else "-")
+            ing = (b.get("ingest") or {}).get("vectors_per_second")
+            print(f"  {str(b.get('engine')):<12} "
+                  f"{row.get('recall_at_10', float('nan')):>10.4f} "
+                  f"{ratio:>10} "
+                  f"{(f'{p95:.2f}' if p95 else '-'):>9} "
+                  f"{(f'{ing:,.0f}' if ing else '-'):>10}")
+        print()
+        print("  Measured SEQUENTIALLY on one host: the engines never ran at "
+              "the same time,")
+        print("  so neither number includes contention from the other -- and "
+              "neither says")
+        print("  anything about how either behaves while the other is "
+              "running.")
+        print("  rtt/query over 20% means latency is not attributable to the "
+              "engine.")
+    print()
+    print(f"  verify.json + verify_info.json in {workdir}")
+    print()
+
+
+def _summary_engine(req, result, workdir):
     print()
     print("=" * 78)
     print(f"verify -- {req.name}   {result['engine']} "
@@ -743,10 +924,7 @@ def _summary(req, result, workdir):
         print()
         print(f"  scope            {result['recall_scope']}")
     print()
-    print(f"  measured in {result['elapsed_seconds'] / 60:.1f} min. Every "
-          "number here is a measurement of")
+    print(f"  measured in {result.get('elapsed_seconds', 0) / 60:.1f} min. "
+          "Every number here is a measurement of")
     print("  this engine on this sample. Nothing is scored against your "
           "constraints.")
-    print()
-    print(f"  verify.json + verify_info.json in {workdir}")
-    print()

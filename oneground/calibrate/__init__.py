@@ -392,6 +392,26 @@ def _faiss_version():
 # engine
 # --------------------------------------------------------------------------
 
+def _engine_block(doc, engine):
+    """One engine's block out of verify.json or verify_info.json.
+
+    Task 015 made both files hold `engines`, a list, with no engine promoted
+    to the top level. Files written before that are a single flat block and
+    are read as themselves, so an older workdir still calibrates.
+    """
+    blocks = doc.get("engines")
+    if not isinstance(blocks, list):
+        return doc
+    for b in blocks:
+        if isinstance(b, dict) and b.get("engine") == engine:
+            merged = dict(b)
+            merged.setdefault("environment_id", doc.get("environment_id"))
+            return merged
+    raise CalibrateError(
+        f"the run measured {[b.get('engine') for b in blocks]}, not "
+        f"{engine!r}; there is no block to calibrate against")
+
+
 def run_engine(requirements, engine="qdrant", workdir=None, append=True,
                history_path=H.DEFAULT_PATH, outcome_scope=H.BLOCKING,
                tolerance=0.05, log_fn=log):
@@ -402,26 +422,35 @@ def run_engine(requirements, engine="qdrant", workdir=None, append=True,
     job is to make it *repeatable and recorded* rather than transcribed by
     hand into the history, which is how the first line got there.
 
-    `ONEGROUND_QDRANT_URL` points the run at an engine that is already up, so
-    a workdir can be calibrated against a Qdrant nobody has to compose.
+    `ONEGROUND_<ENGINE>_URL` points the run at an engine that is already up,
+    so a workdir can be calibrated against an engine nobody has to compose:
+    `ONEGROUND_QDRANT_URL`, `ONEGROUND_PGVECTOR_URL`. The variable is chosen
+    from the engine being calibrated -- reading the Qdrant variable while
+    calibrating pgvector would point one engine's run at another's endpoint,
+    and the resulting line would name the wrong engine for the number.
     """
     import json
 
     from .. import verify as V
 
-    url = os.environ.get("ONEGROUND_QDRANT_URL")
+    url_var = f"ONEGROUND_{str(engine).upper().replace('-', '_')}_URL"
+    url = os.environ.get(url_var)
     manage = url is None
     log_fn(f"engine calibration: {engine}"
-           + (f" at {url}" if url else " via the pinned compose file"))
+           + (f" at {url} (from {url_var})" if url
+              else " via the pinned compose file"))
 
+    # Only the engine being calibrated. A requirements file may list several
+    # for a comparison run; calibrating one engine must not silently measure
+    # and overwrite the others.
     wd = V.run(requirements, up=manage, down=manage, target_override="local",
-               endpoint_override=url, log_fn=log_fn)
+               endpoint_override=url, engines_override=[engine], log_fn=log_fn)
     workdir = workdir or wd
 
     with open(os.path.join(workdir, "verify.json"), encoding="utf-8") as f:
-        vj = json.load(f)
+        vj = _engine_block(json.load(f), engine)
     with open(os.path.join(workdir, "verify_info.json"), encoding="utf-8") as f:
-        vi = json.load(f)
+        vi = _engine_block(json.load(f), engine)
 
     cal = vj.get("calibration")
     err = vj.get("calibration_error_recall")

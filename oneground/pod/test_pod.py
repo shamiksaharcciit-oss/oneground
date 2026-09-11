@@ -2388,3 +2388,160 @@ def _main():
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# ------------------------------------------------- session 20260911-001111
+# A clone that "failed" and had not. The bundle was fine, every one of the 381
+# files checked out, and the command that exited 1 was a `git checkout master`
+# of a branch renamed to `main` in task 014 -- which the error message had
+# already thrown away.
+
+def test_tail_lines_collapses_carriage_return_progress_synthetic():
+    """The reason the real error was lost.
+
+    Git writes clone progress as ONE line with carriage returns, so the first
+    800 characters of a failed clone are always progress and a head-truncation
+    lands mid-word -- the captured output ended at `Upda`. The tail, with
+    progress collapsed, is where the error actually is.
+    """
+    # A realistic stream. Git emits one progress update per file, all on ONE
+    # logical line separated by carriage returns; 381 files is about 12 KB.
+    progress = "".join("Updating files: %3d%% (%d/381)\r" % (i * 100 // 381, i)
+                       for i in range(1, 382))
+    raw = ("Cloning into '/workspace/oneground'...\n"
+           + progress
+           + "Updating files: 100% (381/381), done.\n"
+           + "error: pathspec 'master' did not match any file(s) "
+             "known to git\n")
+
+    # Why the error was lost: the first 800 characters of a 12 KB stream are
+    # entirely progress, and the cut lands inside a word.
+    assert len(raw) > 8000
+    assert "error:" not in raw[:800]
+    assert "Updating files" in raw[:800]
+
+    got = sshx.tail_lines(raw, 20)
+    assert got.splitlines()[-1].startswith("error: pathspec 'master'")
+    # 381 progress fragments collapse to one line, in their final state
+    assert got.count("Updating files") == 1, got
+    assert "\r" not in got
+    assert len(got.splitlines()) == 3, got
+
+
+def test_tail_lines_keeps_only_the_last_n_synthetic():
+    text = "\n".join("line %d" % i for i in range(100))
+    got = sshx.tail_lines(text, 5).splitlines()
+    assert got == ["line 95", "line 96", "line 97", "line 98", "line 99"]
+
+
+def test_clone_command_checks_out_no_branch_by_default_synthetic():
+    """`git clone` from a bundle already checks out the bundle's HEAD.
+
+    The old form appended `git checkout master` unconditionally. Even while
+    that worked it was wrong: a task branch's session would clone at the
+    task's HEAD and then move to the default branch, so the pod measured code
+    the task had not written.
+    """
+    cmd = sshx.clone_command("/workspace/oneground.bundle",
+                             "/workspace/oneground")
+    assert "git clone /workspace/oneground.bundle /workspace/oneground" in cmd
+    assert "git checkout" not in cmd
+    assert "master" not in cmd
+
+
+def test_clone_command_asserts_the_commit_it_was_given_synthetic():
+    sha = "6fdebcb693c6066936b31212229d40f979059299"
+    cmd = sshx.clone_command("/b", "/d", commit=sha)
+    assert sha in cmd
+    assert "git rev-parse HEAD" in cmd
+    # It must FAIL, not warn, on the wrong commit: a pod running code nobody
+    # chose produces measurements rather than errors.
+    assert "exit 1" in cmd
+
+
+def test_clone_command_still_takes_an_explicit_branch_synthetic():
+    cmd = sshx.clone_command("/b", "/d", branch="some-branch")
+    assert "git checkout some-branch" in cmd
+
+
+def test_ssh_error_carries_both_streams_synthetic():
+    e = sshx.SshError("boom", returncode=1, stdout="out", stderr="err",
+                      command="ssh x")
+    assert e.stdout == "out" and e.stderr == "err"
+    assert e.returncode == 1 and e.command == "ssh x"
+
+
+# ------------------------------------------------- session 20260911-174648
+# /workspace is a NETWORK VOLUME: root can write there, nothing can chown
+# there, and postgres cannot create a file there itself. Three of this task's
+# six pod faults were that one surface, each fix trading one symptom for
+# another. These pin the shape that finally worked, because the script is
+# shell and nothing else type-checks it.
+
+def _pod_script():
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(os.path.dirname(here))
+    with open(os.path.join(root, "corpora", "run_verify_pod.sh"),
+              encoding="utf-8") as f:
+        return [ln for ln in f.read().split("\n")]
+
+
+def _live(lines):
+    """Non-comment, non-blank lines. Comments quote the failures verbatim, so
+    a naive grep matches its own history and never goes green."""
+    out = []
+    for ln in lines:
+        s = ln.strip()
+        if s and not s.startswith("#"):
+            out.append(ln)
+    return out
+
+
+def test_the_pod_script_never_chowns_the_network_volume():
+    """Not synthetic: the shipped script.
+
+    `chown: changing ownership of '/workspace/postgres.log': Operation not
+    permitted` killed session 20260911-174648 under `set -e`, 23 seconds after
+    the install finally succeeded.
+    """
+    offenders = [ln for ln in _live(_pod_script())
+                 if "chown" in ln and "/workspace" in ln]
+    assert not offenders, (
+        "chown against the network volume: " + "; ".join(offenders))
+
+
+def test_every_chown_in_the_pod_script_targets_a_directory_postgres_owns():
+    for ln in _live(_pod_script()):
+        if "chown" not in ln:
+            continue
+        assert ("$PGDATA" in ln or "$PG_LOG" in ln
+                or "/var/lib/postgresql" in ln), \
+            f"chown at an unvetted path: {ln.strip()}"
+
+
+def test_postgres_writes_its_own_log_off_the_volume():
+    """pg_ctl's -l file is created by the postgres process, not the calling
+    shell, so it cannot live on /workspace at all."""
+    live = _live(_pod_script())
+    pg_ctl = [ln for ln in live if "pg_ctl" in ln and "-l " in ln]
+    assert pg_ctl, "no pg_ctl start line found"
+    for ln in pg_ctl:
+        assert "$PG_LOG" in ln, f"pg_ctl -l is not $PG_LOG: {ln.strip()}"
+        assert "-l /workspace" not in ln, ln.strip()
+    assigns = [ln for ln in live if ln.strip().startswith("PG_LOG=")]
+    assert assigns, "PG_LOG is never assigned"
+    for ln in assigns:
+        assert "/var/lib/postgresql" in ln, ln.strip()
+
+
+def test_the_server_log_copy_is_best_effort():
+    """A server log that cannot be copied must never fail a run whose
+    measurements are already taken and already in the tarball."""
+    text = "\n".join(_pod_script())
+    i = text.index('if [ -n "${PG_LOG:-}" ]')
+    block = text[i:i + 600]
+    assert "cp " in block and "/workspace/postgres.log" in block
+    assert "2>/dev/null" in block, "the copy must swallow its own error"
+    assert "else" in block, "a failed copy must say so rather than be silent"
+    # and it must not be the last word on the run
+    assert "exit 1" not in block

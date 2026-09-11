@@ -178,17 +178,82 @@ at another is `couldnt_check`, not an approximation.
 
 ## Comparing two engines fairly
 
-`verify.engines: [a, b]` runs each engine **sequentially on the same pod**,
-with the same corpus, the same query set, the same concurrency and the same
-duration. Sequentially matters: two engines under load on one box are
-measuring each other.
+`verify.engines: [a, b]` runs each engine **sequentially on the same host**,
+with the same corpus, the same query set, the same index parameters, the same
+concurrency and the same duration.
 
-Both rows carry the same `environment_id`, so the report may compare them.
-Rows from two different pods may not.
+```yaml
+verify:
+  engines: [qdrant, pgvector]
+  endpoints:
+    qdrant: http://localhost:6333
+    pgvector: postgresql://oneground:oneground@localhost:55432/oneground
+  engine_params:
+    m: 32
+    ef_construct: 200        # Qdrant's name
+    ef_construction: 200     # pgvector's name, same value
+    hnsw_ef: 128
+    indexing_threshold: 1    # Qdrant only; pgvector has no equivalent
+```
 
-Only `qdrant` has an adapter today. The code path takes a list and refuses an
-unknown engine by name, so adding a second is an adapter and nothing else —
-see [ADAPTERS.md](ADAPTERS.md).
+One `engine_params` block serves both engines, which is what makes the two
+rows comparable rather than two different indexes measured side by side.
+Each engine is brought up, measured, and torn down before the next one starts.
+
+`verify.json` holds an `engines` list. **No engine is promoted to the top
+level**: a file with a primary engine and an also-ran would be picking a
+favourite in the format itself.
+
+### What "matched" guarantees
+
+- **Same host.** One machine, one kernel, one set of cores and one disk.
+- **Same client.** The same `verify` process, the same Python, the same
+  load generator, the same client-side timing code.
+- **Same sample and same queries.** Byte-identical inputs from one workdir.
+- **Same `environment_id`.** Which is what lets the report compare the rows
+  at all — see the same-environment rule above.
+- **No mutual contention.** They never run at the same time, so neither
+  number contains the other's load.
+
+### What "matched" does **not** guarantee
+
+- **Nothing about behaviour under a shared load.** Sequential is the honest
+  way to compare, and it is also a different question from "what happens when
+  both run on one box". This project does not answer the second one.
+- **That the engines were configured equivalently in any deeper sense.**
+  `m` and `ef_construction` mean the same thing in both; almost nothing else
+  does. pgvector's ingest excludes a synchronous `CREATE INDEX` that Qdrant
+  does in the background, so the two ingest rates are not the same quantity
+  unless the index build is added — the receipt carries both halves.
+- **That either engine was tuned.** Neither is. `COPY`, unlogged tables,
+  `synchronous_commit=off`, Qdrant's gRPC path, quantization: all absent, for
+  both, deliberately. This measures two default deployments on one host.
+- **That the client is not the bottleneck.** The RTT-ratio guard is what
+  answers that, per engine, per row. On this laptop it refused Qdrant's
+  sequential latency and admitted pgvector's, which is not a statement about
+  the engines — it is a statement about how much of each number was the path.
+- **That a faster engine here is faster for you.** Different corpus,
+  dimensionality, hardware and query mix all move it. The fixture is the
+  instrument, not the answer.
+
+### What the report may say about two engines
+
+Latency and throughput are judged **per engine**, so one architecture
+measured on two engines produces two latency verdicts, each naming its
+engine. A constraint is met if any engine meets it and fails only if every
+engine that could be checked fails — and the decision log names the engine
+every time, because "meets on qdrant" is a fact and "meets" alone is not.
+`report.json` carries `engines_meeting` per option: the engines on which that
+architecture cleared every engine-scoped constraint.
+
+The comparative entry fires only when the same configuration was verified on
+more than one engine, in the same environment, and both produced a value.
+Otherwise the log says why no comparison was made. A missing comparison and
+an unfavourable one look identical if only the favourable ones are printed.
+
+Two adapters exist today. The code path takes a list and refuses an unknown
+engine by name, so adding a third is an adapter and nothing else — see
+[ADAPTERS.md](ADAPTERS.md).
 
 ---
 
@@ -849,3 +914,48 @@ under the cap — is a different measurement needing a ramp rather than one load
 phase. It is documented in `oneground/report/verdict.py` and deliberately not
 implemented. The engine's ceiling and the rate it sustained are not the same
 number and must never share a row.
+
+## Rule: a single run does not settle a latency verdict near its threshold
+
+*Recorded 2026-09-11, from two sessions measuring the same thing.*
+
+The same configuration — `single_node_hnsw[M=32,efConstruction=200,efSearch=128]`
+on arxiv-150k, Qdrant 1.19.1, concurrency 32, 200 qps offered, 5 minutes —
+measured **p95 under load** twice:
+
+| session | pod | p95 under load |
+|---|---|---|
+| 20260909-225058 | `tf8sd2usxbblsm` | **38.22 ms** |
+| 20260911-181410 | `z01d7n4buc1a6i` | **42.82 ms** |
+
+**12% apart.** Both are RTX PRO 4000 in EU-RO-1, both ran the same sample
+against the same engine version with the same parameters, and neither is
+wrong. Two different physical machines from the same pool, on two different
+days, simply do not produce the same p95.
+
+That spread is larger than the distance from either number to the 40 ms
+constraint those runs were judged against — and the constraint fell between
+them. The first session's verdict was `meets`; the second's was `fails`. **The
+architecture did not change. The machine did.**
+
+So:
+
+- **A latency verdict within ~15% of its threshold is not settled by one run.**
+  It is a sample of one from a distribution nobody has characterised, and the
+  report presents it with exactly the confidence it presents a number that is
+  nowhere near its threshold — which is too much.
+- The `environment_id` rule already stops a verdict crossing machines. It does
+  **not** stop a verdict being read as more precise than one sample can be.
+- Nothing in the tool currently reports a spread, because nothing has ever run
+  the same configuration twice on purpose.
+
+**What would fix it, and what is not done here.** Repeated runs of one
+configuration in one session, reported as a distribution rather than a point —
+median and spread, with the verdict taken against the spread rather than
+against a single p95. That is a change to what `verify` runs and to what
+`latency_p95` reads, and it costs pod minutes per repetition. It is **task 017
+work**, recorded here so the next reader of a near-threshold verdict knows the
+number's precision before acting on it.
+
+Until then, read a latency verdict whose value sits within about 15% of its
+threshold as *couldn't-check wearing a verdict's clothes*.

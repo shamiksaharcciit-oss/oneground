@@ -1,0 +1,65 @@
+# Postgres + pgvector for `oneground verify --target local`.
+#
+# The image tag is pinned, and the pin is recorded in verify_info.json as a
+# declared fact: "recall 0.98 against pgvector" means nothing without saying
+# which pgvector. `latest` would make two runs a month apart incomparable
+# without either of them being wrong.
+#
+# Resolved live on 2026-09-11 from Docker Hub: 0.8.6 is the newest pgvector
+# 0.8.x built on Postgres 16.
+#
+#     image     pgvector/pgvector:0.8.6-pg16
+#     digest    sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+#     postgres  16.15 (Debian 16.15-1.pgdg12+2)
+#     pgvector  0.8.6
+#
+#     docker compose -f oneground/verify/compose/pgvector.yml up -d
+#     docker compose -f oneground/verify/compose/pgvector.yml down -v
+#
+# Storage is a named volume so a container restart does not silently reuse a
+# previous run's tables; `down -v` removes it. oneground's own namespaces are
+# tables prefixed `oneground-<session>-` and dropped in a finally regardless.
+
+services:
+  pgvector:
+    image: pgvector/pgvector:0.8.6-pg16
+    container_name: oneground-verify-pgvector
+    environment:
+      POSTGRES_USER: oneground
+      POSTGRES_PASSWORD: oneground
+      POSTGRES_DB: oneground
+      # Quiet by default; the run's own log is the receipt, not the engine's.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      # 55432 on the host, not 5432. A developer machine very often already
+      # has a Postgres on the default port -- this one did -- and binding over
+      # it would either fail or, worse, point a run at the wrong database.
+      - "55432:5432"
+    command:
+      # HNSW builds are memory-hungry, and pgvector spills to disk when
+      # maintenance_work_mem is too small. Spilling is not wrong, but it makes
+      # index build time depend on a setting nobody recorded, so it is set
+      # here and named in the receipt.
+      - "postgres"
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      - "-c"
+      - "shared_buffers=256MB"
+      # A search that falls back to a sequential scan returns exact answers
+      # and measures nothing about the index. This does not forbid that -- a
+      # planner override would change what is being measured -- but the
+      # adapter's wait_for_index refuses to measure until the index is valid,
+      # which is the honest version of the same guard.
+      - "-c"
+      - "max_parallel_workers_per_gather=0"
+    volumes:
+      - oneground-pgvector-storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oneground -d oneground"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  oneground-pgvector-storage:

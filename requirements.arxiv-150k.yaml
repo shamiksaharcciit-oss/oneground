@@ -129,7 +129,11 @@ constraints:
 verify:
   kind: declared
   target: runpod
-  engines: [qdrant]              # a list; only qdrant has an adapter
+  # Both engines, measured SEQUENTIALLY on one pod (task 015). Same corpus,
+  # same queries, same index parameters, same concurrency, same duration --
+  # and never at the same time, so neither number carries the other's load.
+  # docs/VERIFY.md says what "matched" does and does not guarantee.
+  engines: [qdrant, pgvector]
   duration_minutes: 5
   warmup_seconds: 15
   # The volume-first ruling. vectors.npy is 460 MB at a path outside the
@@ -139,6 +143,10 @@ verify:
   # The session generator computes its inputs from the named file, so what it
   # prints is what the pod will actually read.
   requirements_on_pod: requirements.arxiv-150k.pod.yaml
+  # Named for what the session is, not for the workdir it came from: this is
+  # the first run that measures two engines, and the file will be read months
+  # from now beside the single-engine session from task 011.
+  session_path: sessions/verify-arxiv-150k-two-engines.yaml
   # Confirmed from build 3's log: the volume holds the release tarball, not a
   # loose directory. The preflight extracts vectors.npy and queries.npy from
   # it -- not sample.jsonl.zst, which `verify` never reads -- and then checks
@@ -147,9 +155,13 @@ verify:
   # different builds, and stops the run before it measures anything.
   pod_corpus_tarball: /workspace/arxiv-150k-large.tgz
   pod_corpus_manifest: fixtures/arxiv-150k/MANIFEST.sha256
+  # One params block for both engines: `m` and the ef_construction value mean
+  # the same thing in each, which is what makes the two rows comparable
+  # rather than two different indexes measured side by side.
   engine_params:
     m: 32
-    ef_construct: 200
+    ef_construct: 200            # Qdrant's spelling
+    ef_construction: 200         # pgvector's spelling, same value
     hnsw_ef: 128
     # Without this Qdrant leaves a collection under its 20 MB default
     # unindexed and answers every search with an exact scan (task 009).

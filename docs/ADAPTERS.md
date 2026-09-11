@@ -18,6 +18,7 @@ Implemented today:
 |---|---|---|
 | `stub` | [`oneground/adapters/stub.py`](../oneground/adapters/stub.py) | in-process exact search; what CI runs against |
 | `qdrant` | [`oneground/adapters/qdrant/`](../oneground/adapters/qdrant/ADAPTER.md) | official client, pinned |
+| `pgvector` | [`oneground/adapters/pgvector/`](../oneground/adapters/pgvector/ADAPTER.md) | Postgres 16 + pgvector 0.8.6 via psycopg 3, pinned |
 
 ---
 
@@ -35,6 +36,8 @@ class VectorEngine(Protocol):
     def describe(self, ns) -> EngineFacts
     def scroll(self, ns, limit) -> (ids, vectors)
     def delete_namespace(self, ns) -> None
+    def namespace_exists(self, ns) -> bool
+    def wait_for_index(self, ns, timeout, poll) -> (indexed, points, seconds)
 ```
 
 `UpsertStats`, `Candidates` and `EngineFacts` are dataclasses in
@@ -110,8 +113,9 @@ those are different code paths and only one of them is obvious.
 ### Where it runs, and what a pass means
 
 - Against the in-process **stub**, always. No Docker, no network, no account.
-- Against **live Qdrant** only when `ONEGROUND_QDRANT_URL` is set. Otherwise
-  those tests **skip**, and a skip is reported as a skip.
+- Against a **live engine** only when its URL variable is set —
+  `ONEGROUND_QDRANT_URL`, `ONEGROUND_PGVECTOR_URL`. Otherwise those tests
+  **skip**, and a skip is reported as a skip.
 
 > **A stub pass is not an engine pass.** The stub is exact, so its recall is
 > 1.0 by construction and it can never surface an approximate-index bug. It
@@ -120,17 +124,43 @@ those are different code paths and only one of them is obvious.
 
 Nothing here fakes a pass for an engine that was never contacted.
 
-### A trap the suite had to be taught
+### A trap the suite had to be taught — three times now
 
-Check (c) is worthless if the engine never builds its index. Qdrant does not
-index a collection below `optimizers_config.indexing_threshold` (20 MB by
-default), so a 5,000-vector conformance corpus was answered by an exact scan
-and returned recall 1.0000 at `ef=4` — a green test proving nothing. The suite
-now sets the threshold and waits for `indexed_vectors_count` to reach the
-point count before measuring.
+Check (c) is worthless if the engine never builds its index, and **every
+engine has a way of not building it that looks like success**. All three known
+instances produce the same symptom: fast, exact answers and perfect recall,
+from a code path that never touches the index.
+
+| # | engine | how the index gets skipped | how you catch it |
+|---|---|---|---|
+| 1 | Qdrant | a collection below `indexing_threshold` (20 MB default) is answered by an exact scan — recall 1.0000 at `ef=4` | set the threshold; wait for `indexed_vectors_count` |
+| 2 | pgvector | the query operator does not match the index's operator class (`<=>` against a `vector_ip_ops` index) | choose operator and opclass together, from one table |
+| 3 | pgvector | `ORDER BY` the SELECT alias instead of repeating the distance expression — 25% *faster*, exact answers | `EXPLAIN` shows `Sort`, not `Index Scan` |
+
+The third is the nastiest, because every signal a careless reader checks says
+the change was an improvement. Recall goes **up**. Latency goes **down**.
+`EXPLAIN` is the only thing that tells them apart.
 
 Expect every engine to have one of these. Find it, document it in
-`ADAPTER.md`, and make the suite defeat it.
+`ADAPTER.md` with the measurement that found it, and make the suite defeat it.
+
+### Two methods that are required *because* they are skippable
+
+`wait_for_index` and `namespace_exists` were optional, duck-typed methods
+while Qdrant was the only adapter: the suite probed with `getattr` and skipped
+the check when absent. Task 015 promoted both to protocol methods, because
+pgvector is unready in a completely different way from Qdrant — an interrupted
+`CREATE INDEX` leaving `indisvalid = false`, versus background indexing that
+has not caught up — and an adapter that simply omitted the method would have
+had its unreadiness silently skipped.
+
+That is exactly the check that must not be skippable. An engine that is
+genuinely always ready (the stub) returns `(points, points, 0.0)` and says so
+in its `ADAPTER.md`. That is a claim it makes, not a method it omits.
+
+**The general rule, from the brief that forced it:** if a conformance check
+needs an adapter-specific step, it becomes a required protocol method, not a
+special case in the suite.
 
 ---
 
