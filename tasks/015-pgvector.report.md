@@ -207,7 +207,7 @@ methods.
 ### 4. The local two-engine verify
 
 `verify.engines: [qdrant, pgvector]` on arxiv-smoke, sequentially, one host,
-one `environment_id` (`local:DESKTOP-HAGOPQC`), one `verify.json`.
+one `environment_id` (`local:windows-amd64`), one `verify.json`.
 
 | engine | recall@10 | RTT p95 | query p95 | rtt/query | latency attributable? | ingest/s |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -228,12 +228,12 @@ which is better and why it is allowed to*:
 ```
 [engine_comparison] single_node_hnsw[M=32,efConstruction=200,efSearch=128]:
   on latency_p95, qdrant is the better of 2 engines measured in environment
-  local:DESKTOP-HAGOPQC -- qdrant 358.94 against pgvector 1177.85. Both were
+  local:windows-amd64 -- qdrant 358.94 against pgvector 1177.85. Both were
   measured on the same sample, on the same host, sequentially, and both carry
   fails against the constraint
 [engine_comparison] single_node_hnsw[M=32,efConstruction=200,efSearch=128]:
   on qps, qdrant is the better of 2 engines measured in environment
-  local:DESKTOP-HAGOPQC -- qdrant 46.20 against pgvector 11.25. ...
+  local:windows-amd64 -- qdrant 46.20 against pgvector 11.25. ...
 ```
 
 and, where it cannot:
