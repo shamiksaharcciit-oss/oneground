@@ -33,7 +33,6 @@ https://www.kaggle.com/datasets/Cornell-University/arxiv . The file's sha256 is
 recorded as the `source.snapshot_sha256` declared value.
 """
 
-import hashlib
 import json
 import os
 import platform
@@ -53,6 +52,7 @@ from ..receipts import (append_manifest, library_versions, round_floats,
                         write_manifest)
 from ..sample import sample_for_spec, split_queries
 from ..sample.fields import drift_cutoff, field_map
+from ..sample.stackexchange import local_source_digest
 from ..truth import exact_knn
 from .reference import ref_semantic_sharded, ref_single_node
 
@@ -65,26 +65,18 @@ RECEIPT_ARTIFACTS = ["sample.jsonl.zst", "vectors.npy", "queries.npy",
 
 
 def source_digest(source):
-    """sha256 of the source: of the file, or of a sharded source's manifest.
+    """sha256 of a local source: of the file, or of a shard directory.
 
-    arXiv is one 4 GB JSONL and hashes directly. A Stack Exchange dump is 59
-    parquet shards with no single byte stream, so its digest is taken over the
-    sorted `<sha256>  <relative path>` lines of its shards. That value moves if
-    any shard's bytes change, if one is added or removed, or if one is renamed
-    -- which is everything `source.snapshot_sha256` is for.
+    arXiv is one 4 GB JSONL and hashes directly. A local directory of shards
+    has no single byte stream, so its digest is taken over the sorted
+    `<sha256>  <relative path>` manifest of its files.
+
+    A *streamed* source has no local bytes at all. Its digest comes back from
+    the reader instead, through the `receipt` dict `build()` passes down -- see
+    `oneground.sample.stackexchange.verify_source`, which computes the same
+    manifest digest from the pinned values without transferring any content.
     """
-    if os.path.isfile(source):
-        return sha256_file(source)
-    lines = []
-    for root, _dirs, files in os.walk(source):
-        for fn in sorted(files):
-            full = os.path.join(root, fn)
-            rel = os.path.relpath(full, source).replace(os.sep, "/")
-            lines.append(f"{sha256_file(full)}  {rel}")
-    if not lines:
-        raise FileNotFoundError(f"source directory holds no files: {source}")
-    manifest = "".join(f"{line}\n" for line in sorted(lines))
-    return hashlib.sha256(manifest.encode()).hexdigest()
+    return local_source_digest(source)
 
 
 def log(msg):
@@ -145,8 +137,12 @@ def project(base, p):
     return red.fit_transform(base).astype(np.float32)
 
 
-def build(spec_path, source, out="fixtures", skip_projection=False):
-    """Build one fixture. Returns the output directory."""
+def build(spec_path, source=None, out="fixtures", skip_projection=False):
+    """Build one fixture. Returns the output directory.
+
+    `source` is the local snapshot to read. Omit it for a spec that names its
+    own source -- a pinned dataset revision, streamed rather than stored.
+    """
     spec = yaml.safe_load(open(spec_path))
     fx = spec["fixture"]
     outdir = os.path.join(out, fx["id"])
@@ -158,13 +154,20 @@ def build(spec_path, source, out="fixtures", skip_projection=False):
 
     fm = field_map(spec)
 
-    # ---- source receipt ----
-    log("hashing source snapshot")
-    src_sha = source_digest(source)
+    # ---- source receipt + sample ----
+    # A local source is hashed up front, so a wrong file fails before any work.
+    # A streamed one has nothing to hash: the reader verifies the pinned
+    # revision before it reads content and hands back the same manifest digest
+    # through `receipt`. Either way `src_sha` is `source.snapshot_sha256`.
+    receipt = {}
+    if source:
+        log("hashing source snapshot")
+        receipt["snapshot_sha256"] = source_digest(source)
 
-    # ---- sample + split ----
     records = sample_for_spec(source, spec, n_base + n_q,
-                              spec["sampling"]["seed"], log=log)
+                              spec["sampling"]["seed"], log=log,
+                              receipt=receipt)
+    src_sha = receipt["snapshot_sha256"]
     base_recs, q_recs, hot_cats = split_queries(records, n_q,
                                                 spec["queries"]["seed"],
                                                 cat_field=fm["categories"])

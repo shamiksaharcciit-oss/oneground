@@ -38,8 +38,13 @@ def eligible(rec, min_abs_len):
     return year_of(rec["update_date"]) is not None
 
 
-def sample_records(source, spec, n_total, seed, log=None):
-    """Stratified by year in proportion to volume, uniform within year."""
+def sample_records(source, spec, n_total, seed, log=None, receipt=None):
+    """Stratified by year in proportion to volume, uniform within year.
+
+    `receipt` is accepted so every reader has one signature, and ignored: an
+    arXiv snapshot is a single local file, so the builder hashes it directly
+    and needs nothing from the reader.
+    """
     def _say(msg):
         if log:
             log(msg)

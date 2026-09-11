@@ -77,12 +77,27 @@ source:
     categories: categories
     date: creation_date
   # sha256 over the sorted `<sha256>  <shard name>` manifest of the 59 parquet
-  # shards at the pinned revision, as `oneground.fixture.build.source_digest`
+  # shards at the pinned revision, as `oneground.receipts.manifest_digest`
   # computes it. Filled by the canonical build.
   snapshot_sha256: TO_BE_FILLED
-  # Per-shard sha256 values come from the Hub's LFS metadata at the pinned
-  # revision and are verified on download by the pod session's setup step.
+  # Per-shard sha256 values, recorded from the Hub's LFS metadata at the pinned
+  # revision (an LFS pointer's oid *is* the file's sha256).
   shard_digests: sessions/stackexchange-shards.sha256
+  # The shards are never stored. The sampler opens each one at the pinned
+  # revision and pulls its row groups through the reservoirs over HTTP range
+  # requests, so the build writes only the sample. See `sampling.rule`.
+  access: streamed
+  # What that costs the receipt, stated rather than glossed. Before reading any
+  # content, `oneground.sample.stackexchange.verify_source` checks that the
+  # pinned revision still resolves and that every pinned sha256 still matches
+  # the one the Hub reports, and refuses the build otherwise. That catches a
+  # moved or deleted revision, and a shard added, removed, renamed or changed.
+  # It does not hash the bytes actually read, because a random-access reader
+  # never reads them all in one order -- it fetches only the column chunks it
+  # needs. arXiv's snapshot is one file read end to end and is hashed directly,
+  # so it has no such gap. This is a property of a 34 GB sharded source, not a
+  # convenience: hashing it would mean transferring it whole and storing it.
+  digest_scope: pinned-metadata-verified-before-read
   kind: declared
 
 sampling:
@@ -93,12 +108,23 @@ sampling:
     No tag balancing: the real skew (javascript / python / java growth) is a
     feature of the fixture, not noise.
 
-    One pass with a seeded reservoir per year rather than arXiv's two passes
-    over byte offsets: the source is 59 parquet shards, the chosen rows land in
-    every row group, and eligibility depends on the body, so a second pass
-    would re-read the expensive column in full and buy nothing. The pass counts
-    eligible questions per year exactly, so the proportional quota and its
-    largest-remainder rounding are identical to arxiv-150k's.
+    One streamed pass with a seeded reservoir per year, rather than arXiv's two
+    passes over byte offsets: the source is 59 parquet shards read over the
+    network, the chosen rows land in every row group, and eligibility depends
+    on the body, so a second pass would re-read the expensive column in full
+    and buy nothing. The pass counts eligible questions per year exactly, so
+    the proportional quota and its largest-remainder rounding are identical to
+    arxiv-150k's.
+
+    Nothing is stored. The shards are never written to disk; the build's disk
+    requirement is the sample it produces. The reservoir bounds what is held in
+    memory: 16 years x 60,000 records, measured at 0.78 GiB.
+
+    Determinism is unaffected by streaming: the result is fixed by (seed,
+    pinned revision, shard order, row order), shards are read in sorted name
+    order and rows in file order, and the revision pins both. A local directory
+    of the same shards yields the same sample and is accepted for an offline
+    rebuild.
   seed: 20260911
   queries_seed_note: distinct from arxiv-150k's 20260908/20260909 pair
   year_range: [2008, 2023]
@@ -276,5 +302,12 @@ changelog:
       9e791fe8997879cf127e2a0b006bad3484bbda32; 59 parquet shards,
       58,329,355 posts, 2008-07-31 to 2023-03-05, measured from the shards'
       parquet footers without downloading them. Canonical build pending.
+  - build: 1-prep-b
+    date: '2026-09-11'
+    note: >
+      The source is streamed rather than fetched: the sampler reads row groups
+      at the pinned revision over range requests and stores nothing, removing
+      the build's 36 GiB of scratch disk. `source.digest_scope` records what
+      that costs the receipt. No sampling rule, seed or value changed.
 
 findings: []

@@ -52,6 +52,24 @@ def sha256_file(path, buf=1 << 20):
     return h.hexdigest()
 
 
+def manifest_digest(digests):
+    """One sha256 over a `{name: sha256}` mapping of many files.
+
+    A source made of many files has no single byte stream to hash, so its
+    receipt is taken over the sorted `<sha256>  <name>` lines instead -- the
+    `sha256sum -c` format, so the value can be reproduced with shell tools.
+    The digest moves if any file's bytes change, if one is added or removed,
+    or if one is renamed, which is everything `source.snapshot_sha256` is for.
+
+    Shared so that a source read from disk and the same source read over the
+    network cannot disagree about their own digest: both build the manifest
+    here.
+    """
+    lines = sorted(f"{sha}  {name}" for name, sha in digests.items())
+    return hashlib.sha256(
+        "".join(f"{line}\n" for line in lines).encode()).hexdigest()
+
+
 def sha256_array(a):
     """Digest of an array's raw bytes.
 

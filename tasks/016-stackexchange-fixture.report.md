@@ -1,9 +1,19 @@
 # Report: 016-stackexchange-fixture
 
 **Status: steps 1–4 complete, step 5 (the build) waiting on one `y`.**
-Steps 6–9 depend on artifacts that do not exist yet. This report is written now
-rather than after the build because the previous session ended in a crash and
-the state it left behind was not self-describing.
+Steps 6–9 depend on artifacts that do not exist yet.
+
+Two commits. `e29b622` built steps 1–4 and reported a planned fixture matching
+at 1.00. This revision, after review, makes two changes the reviewer asked for:
+
+1. **Only `built` or `verified` fixtures are matchable as analogies.** The
+   finding `e29b622` reported is now fixed rather than only named.
+2. **The source is streamed, never stored.** The 59 shards are read through the
+   reservoir over the network; the build writes only the sample, and the 36 GiB
+   of scratch disk it used to need is gone.
+
+Everything below covers both. Section headings marked **(016b)** are the second
+revision.
 
 ## Repo state expected vs found
 
@@ -127,12 +137,43 @@ fixture whose every measured value is `TO_BE_FILLED`. Tier 2's whole promise is
 that an analogy is backed by published numbers; here there are none.
 
 This resolves itself at **step 5** — the build sets `status: built` and fills
-the values, and then the 1.0 match is exactly what the analogy block is for. So
-the exposure is the window between this commit and a successful build. It is
-named here rather than fixed because whether a `planned` fixture should be
-matchable at all is a product decision, and CLAUDE.md puts those elsewhere. If
-the build is going to be deferred, this is the one thing in the tree that
-should not be left sitting.
+the values, and then the 1.0 match is exactly what the analogy block is for. In
+`e29b622` it was named rather than fixed, because whether a `planned` fixture
+should be matchable at all is a product decision.
+
+**(016b) The decision came back: it should not be.** `load_fixture_analogies`
+now skips any fixture whose `fixture.status` is not in
+`MATCHABLE_STATUS = ("built", "verified")`. The status is read from the spec,
+not inferred from whether artifacts are on disk, so a fresh clone with no
+artifacts still offers arxiv-150k's published values as the analogy they are.
+
+Measured after the change:
+
+| corpus | analogy | score |
+|---|---|---|
+| `qa`, short | **none** — and stackexchange-150k is not even named as nearest | 0.33 vs the 0.70 floor |
+| `papers`, medium | **arxiv-150k** | 1.00 |
+| matchable set | `[('arxiv-150k', 'verified')]` | — |
+
+Four tests pin it, and all four fail when `MATCHABLE_STATUS` is widened to
+include `planned`:
+
+    FAILED (as it must)  test_a_planned_fixture_is_not_matchable_synthetic
+    FAILED (as it must)  test_only_built_and_verified_are_matchable_synthetic
+    FAILED (as it must)  test_a_planned_fixture_cannot_be_the_nearest_either_synthetic
+    FAILED (as it must)  test_the_planned_stackexchange_spec_is_not_matchable_real_specs
+
+The third is worth naming: a planned fixture must not surface even as "the
+nearest" in a refusal message, because that still reads as a recommendation to
+anyone skimming. The real-specs test also asserts the stackexchange spec is on
+disk and *does* declare a `qa` analogy, so it is excluded for its status rather
+than because it was quietly missed.
+
+Two further notes. `arxiv-smoke` is also `planned` and `glove-100-angular` is
+`built`, but neither declares an `analogy:` block, so the filter changes nothing
+for them. And the existing synthetic tests were unaffected because their helper
+already wrote `status: built` — which is why the filter did not silently gut the
+suite.
 
 **What I did change** is the test, and only its stale premise. Its docstring
 read "with only arxiv-150k available", which task 016 makes false. The verdict
@@ -149,6 +190,96 @@ confirms the test is still a gate:
 
     FAILED (as it must) with floor lowered to 0.10: stackexchange-150k
 
+### (016b) The source is streamed, and nothing is stored
+
+`e29b622` fetched all 59 shards to the volume first — 34 GiB, plus 2 GiB
+headroom, with a disk preflight that refused before the first byte. That whole
+step is gone.
+
+**Why it is possible at all.** Parquet is a random-access format: the footer at
+the end of each file names the row groups and column chunks, so a reader can
+fetch just what it wants without the bytes in between. I verified this against
+the real pinned revision before building anything on it — the footer of shard
+`00000` reads `PAR1` over a range request, with no local copy:
+
+    size   : 409,251,174 bytes (0.38 GiB)
+    etag   : 62633ca46fed061b72df8ee94ec80db25ce8cbd50fa1143ad2567b602b526249
+    parquet footer magic at EOF: b'PAR1'   seekable remote file: True
+
+Then the full path, on real rows from the real shard, through the shipped
+cleaner — 8,192 rows scanned, 1,404 eligible, **no local copy**:
+
+    Id           : 6
+    Tags (raw)   : ['html', 'css', 'internet-explorer-7']
+    CreationDate : 2008-07-31   year 2008
+    Licence      : CC BY-SA 4.0
+
+That probe caught a real problem before it could bite: **`Tags` is a list
+column**, recorded in row-group metadata as `Tags.array`. The reader asks for
+`Tags` and pyarrow resolves it correctly, but it was worth proving rather than
+assuming, since a silently-empty `categories` field would have produced a
+fixture whose hot-category query split was meaningless.
+
+**"Nothing is stored" is measured, not asserted.** The unit test for this uses
+a stubbed filesystem, so it proves the reader's plumbing and not the library's
+behaviour. So I checked the real one: with `HF_HOME` and every temp-dir
+variable pointed at empty directories, reading **262,144 rows including the
+`Body` column** from the real pinned shard grew both by **0 bytes**.
+
+    baseline   HF_HOME 6,007  spool 0
+    read       262,144 rows including Body
+    after      HF_HOME 6,007  spool 0
+    growth during the read: 0 bytes
+
+The 6,007-byte baseline is `.agent_harnesses.json`, which `huggingface_hub`
+writes on import before any read — not shard content. `fsspec` keeps its
+read-ahead blocks in memory, and nothing touches the disk.
+
+**What it does not buy.** I measured per-column bytes rather than guessing:
+`Body` is 88% of the file, so requesting only the 7 needed columns of 16 saves
+**6.5%** — 364.9 MB of 390.2 MB per shard. The transfer is ~32 GB, not a small
+fraction of 34 GB. The win here is disk and a deleted step, not bandwidth.
+
+**The receipt cost, stated rather than glossed.** This is the one real loss and
+it is recorded in the spec as `source.digest_scope`, not buried here. A reader
+that fetches only some column chunks never reads a shard's bytes end to end, so
+it cannot hash them. Instead `verify_source` runs **before any content is
+read** and refuses the build unless the pinned revision still resolves and every
+pinned sha256 still matches the one the Hub reports. Conveniently, an LFS
+pointer's oid *is* the file's sha256 — the etag above matches the manifest's
+first line exactly — which is how the pins were written in the first place.
+
+So it catches a moved or deleted revision, and a shard added, removed, renamed
+or changed. It does **not** catch a corrupted transfer of the bytes actually
+read. arXiv's snapshot is one file read end to end and is still hashed
+directly, so it has no such gap. The difference is a property of a 34 GB
+sharded source, not a shortcut: closing it would mean transferring the whole
+dump and storing it, which is the thing being removed.
+
+`source.snapshot_sha256` keeps its old definition — the manifest digest over
+the sorted `<sha256>  <name>` lines — and both paths now compute it through one
+shared `receipts.manifest_digest`, so a local rebuild and a streamed one cannot
+disagree about their own digest. A test asserts they agree.
+
+**One pass, not two.** The brief's revision allowed two streaming passes if
+stratification needed counts first. It does not: the existing per-year
+reservoir counts eligible posts *as it goes*, so the proportional quota and its
+largest-remainder rounding are computed after a single pass, identically to
+arxiv-150k's. A second pass would re-read the `Body` column — 88% of the bytes
+— for nothing.
+
+**What moved.**
+
+| | |
+|---|---|
+| `corpora/fetch_stackexchange.py` | **deleted** — its whole job was storing the shards |
+| `corpora/run_stackexchange_build.sh` | **deleted** — it existed only to run the fetch before the build |
+| `sessions/stackexchange-build.yaml` | `run:` is now the generic `run_fixture_build.sh`; `SOURCE` is gone |
+| `--source` / `SOURCE` | now optional everywhere — the spec names its own source |
+
+The local-directory path is deliberately kept, for tests and an offline
+rebuild, and a test asserts it never consults the Hub.
+
 ### 016 step 4 — the pod session resolves
 
 `oneground pod plan sessions/stackexchange-build.yaml` resolves live and
@@ -163,8 +294,13 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 | Workflow-script suite (014d) | `python -m pytest -q .github/scripts` | **44 passed** in 174.3 s |
 | 016 unit tests | `python -m pytest -q oneground/sample/test_fields.py oneground/sample/test_stackexchange.py` | **31 passed** in 1.3 s |
 | Full suite, before the analogy test was corrected | `python -m pytest -q` | 514 passed, **1 failed**, 1 skipped in 335.0 s |
-| Full suite, after | `python -m pytest -q` | **515 passed, 1 skipped** in 312.6 s |
+| Full suite, after (`e29b622`) | `python -m pytest -q` | **515 passed, 1 skipped** in 312.6 s |
 | — vs the 014d baseline | 484 passed, 1 skipped | **+31**, all task 016 (14 field-map, 17 stackexchange) |
+| **(016b)** Full suite, after both changes | `python -m pytest -q` | **533 passed, 1 skipped** in 289.8 s |
+| — vs `e29b622` | 515 passed, 1 skipped | **+18** (4 analogy status, 14 streamed source) |
+| **(016b)** Streamed-source tests | `python -m pytest -q oneground/sample/test_stackexchange.py` | **31 passed** in 17.8 s |
+| **(016b)** Analogy tests | `python -m pytest -q oneground/test_analogy.py` | **21 passed** in 5.7 s |
+| **(016b)** Byte-identity re-checked after the refactor | smoke rebuild vs the committed manifest | `sample.jsonl.zst` and `query_ids.json` **still identical** |
 | `fixture verify` before the build | `python -m oneground.cli fixture verify stackexchange-150k` | clean refusal, `no such fixture directory`, exit 1 — not a crash |
 | `sample.jsonl.zst` byte-identity | rebuilt vs `fixtures/arxiv-smoke/MANIFEST.sha256` | **identical** |
 | `query_ids.json` byte-identity | same | **identical** |
@@ -175,8 +311,18 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 | Shard manifest | `sessions/stackexchange-shards.sha256` | **59** digests, no duplicates, all 64 hex — matches `source.shards: 59` |
 | Pods on the account | `python -m oneground.pod ls` | **0** |
 | Unpushed commits | `git log origin/main..main` | **1** (`444c250`) |
-| Analogy for a `qa` corpus | `A.choose({corpus_type: qa, …})` against the shipped specs | **stackexchange-150k, score 1.00**, `status: planned` |
-| Analogy for a ticket queue | same, `corpus_type: support_tickets` | **None**, nearest scores 0.47 against the 0.70 floor |
+| Analogy for a `qa` corpus, **before** the filter | `A.choose({corpus_type: qa, …})` against the shipped specs | **stackexchange-150k, score 1.00**, `status: planned` |
+| Analogy for a `qa` corpus, **after** | same | **none**; nearest arxiv-150k at 0.33 vs the 0.70 floor |
+| Analogy for `papers`, after | same, `corpus_type: papers` | **arxiv-150k, 1.00** — unchanged |
+| Matchable fixtures, after | `A.load_fixture_analogies()` | `[('arxiv-150k', 'verified')]` |
+| Shard 00000 size | `get_hf_file_metadata` at the pinned revision | 409,251,174 B (0.38 GiB) |
+| Remote random access | footer read over a range request | `PAR1` — seekable, no local copy |
+| Column bytes per shard | parquet row-group metadata, shard 00000 | 390.2 MB all 16 columns; **364.9 MB** the 7 needed (**93.5%**) |
+| — `Body` alone | same | 343.5 MB (88% of the file) |
+| Streamed read, real rows | `tasks/scratch/016b-stream-feasibility.py` | 8,192 rows, 1,404 eligible, no local copy |
+| Streamed sample == local sample | `test_a_streamed_dump_gives_the_same_sample_as_the_local_one` | **identical record lists** |
+| Disk needed by the build | was 34 GiB shards + 2 GiB headroom | **0** for the source; only the sample is written |
+| Real-library spooling | `tasks/scratch/016b-no-disk-probe2.py`, 262,144 rows incl. `Body`, empty `HF_HOME` + temp dirs | **0 bytes** written |
 
 ### What `plan` resolved
 
@@ -203,8 +349,21 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 - The rewritten ticket-queue test still gates: it fails when `MIN_SCORE` is
   lowered, so it is not passing merely because the assertion was loosened.
 
+- **(016b)** Only `built` or `verified` fixtures are offered as analogies, and
+  the four tests that say so all fail without the filter.
+- **(016b)** A streamed dump yields a record-for-record identical sample to the
+  same shards read locally, and the streamed digest equals the on-disk digest.
+- **(016b)** The real `HfFileSystem` writes **0 bytes** while reading 262,144
+  rows including `Body` — checked against the live Hub, not a stub.
+- **(016b)** The sampling layer is still byte-identical after the refactor:
+  the smoke rebuild reproduced both pre-embedding receipts exactly.
+
 **Failed.** Nothing failed that indicates a defect in the code under test. The
 smoke rebuild failed to *complete*, from memory exhaustion on this machine.
+**(016b)** On the re-check it was stopped deliberately: it had already written
+the two artifacts the comparison needs, and had then spent ~20 minutes in CPU
+embedding with the box down to 289 MB available, where its only outcome was the
+same `0xC0000005`. The layers past embedding remain couldn't-check, unchanged.
 
 **Couldn't check.**
 
@@ -216,19 +375,38 @@ smoke rebuild failed to *complete*, from memory exhaustion on this machine.
   `vectors.npy` / `queries.npy` / `sample.jsonl.zst` are not in the clone (they
   are the release asset; `../oneground-assets/` does not exist here), and a 150k
   rebuild is a pod job regardless. Nothing was measured for it.
-- Whether the `vecbench` volume has the ~36 GiB free the fetch needs (34 GiB of
-  shards + 2 GiB headroom) against its 50 GB. Volume contents cannot be listed
-  without a running pod. `corpora/fetch_stackexchange.py` refuses *before the
-  first byte* if not, so the failure mode is a cheap early exit rather than a
-  wasted transfer — but it costs a few pod-minutes to discover.
+- ~~Whether `vecbench` has the ~36 GiB free the fetch needs.~~ **(016b) Retired
+  by the change, not by a measurement.** Nothing is fetched, so the question no
+  longer exists.
+- **(016b) How long the streamed pass takes on the pod.** It is bound by the
+  pod's network throughput to the Hub, which `plan` cannot resolve and which my
+  own connection cannot stand in for — the feasibility probe measured ~3 MB/s
+  unauthenticated from here, which would be hours, while a datacentre pod is
+  typically two orders faster. The transfer volume is the same ~32 GB the old
+  fetch would have moved, so this is not a new risk, but it is the part of the
+  1.5 h cap with no precedent. If the run hits the cap, `watch` terminates it
+  and the report says where the time went.
+- **(016b) Whether the Hub serves the pinned revision at build time.**
+  `verify_source` checks it before any content is read and refuses cleanly, so
+  the failure is cheap — but it is a live dependency the old design converted
+  into a one-time fetch.
 
 ## Observed, not done
 
-- **A `planned` fixture is matchable as an analogy** (see above). The one-line
-  shape of a fix would be a `status` filter in `load_fixture_analogies`, or a
-  rule that an analogy must carry published values — but which of those is
-  right is a product decision, and the build makes the question moot. Not
-  changed.
+- ~~A `planned` fixture is matchable as an analogy.~~ **(016b) Fixed** — see
+  above. Left here so the trail from finding to fix stays readable.
+- **(016b) `fixture.status` is now load-bearing in a second place.** It already
+  drove what `fixture verify` expects; it now also decides whether a fixture is
+  offered as an analogy. Nothing validates that the value is one of
+  `planned | built | verified` — `glove-100-angular` even writes it with
+  irregular spacing. A typo would silently make a fixture unmatchable rather
+  than raise. A one-line validator at spec load would close it. Not done: no
+  brief asks for it, and the failure is quiet rather than wrong.
+- **(016b) `oneground fixture build` can now be called with no `--source`
+  against an arXiv spec**, which fails inside `open()` with a less helpful
+  message than a check at the top would give. The stackexchange reader refuses
+  clearly; the arXiv one does not. Not changed — no brief asks, and the pod
+  path always goes through `run_fixture_build.sh`, which sets `FIXTURE`.
 - **`oneground/test_analogy.py`'s module docstring says "the two tests named
   `_real_specs`" and there are three.** Pre-existing — `git show HEAD` has the
   same count and the same wording. Not changed; it is not mine and rule 2
@@ -255,21 +433,26 @@ All task 016, on `main`.
 |---|---|
 | `fixtures/stackexchange-150k.fixture.yaml` | new — the spec, `status: planned`, every value `TO_BE_FILLED` |
 | `oneground/sample/fields.py` | new — the canonical five-field map and drift cutoff, defaulting to arXiv's |
-| `oneground/sample/stackexchange.py` | new — one-pass per-year-reservoir reader over parquet shards |
+| `oneground/sample/stackexchange.py` | new — one-pass per-year-reservoir reader over parquet shards, local or streamed |
 | `oneground/sample/test_fields.py` | new — 14 tests, incl. the two call-site tests added this session |
-| `oneground/sample/test_stackexchange.py` | new — 17 tests, synthetic dumps, named as such |
+| `oneground/sample/test_stackexchange.py` | new — 31 tests; **(016b)** +14 for the streamed source, stubbed Hub, no network |
 | `oneground/sample/__init__.py` | reader dispatch on `source.format` |
 | `oneground/sample/arxiv.py` | `split_queries` takes `cat_field` |
-| `oneground/fixture/build.py` | field-map driven; `source_digest` hashes a sharded source by manifest |
-| `oneground/test_analogy.py` | the ticket-queue test's stale "only arxiv-150k" premise replaced; verdict and floor unchanged |
+| `oneground/fixture/build.py` | field-map driven; **(016b)** `source` optional, digest via the reader's `receipt` |
+| `oneground/test_analogy.py` | ticket-queue premise corrected; **(016b)** +4 tests for the status filter |
 | `fixtures/arxiv-150k.fixture.yaml`, `fixtures/arxiv-smoke.fixture.yaml` | declare `field_map` — arXiv's own names, a documented no-op |
-| `corpora/fetch_stackexchange.py` | new — pinned-revision fetch, per-shard digest verify, disk preflight |
-| `corpora/run_fixture_build.sh` | new — generic build runner, fixture from env |
-| `corpora/run_stackexchange_build.sh` | new — fetch, then build |
-| `sessions/stackexchange-build.yaml` | new — the pod session |
+| `oneground/analogy.py` | **(016b)** `MATCHABLE_STATUS`; only built/verified fixtures are offered |
+| `oneground/receipts/__init__.py` | **(016b)** `manifest_digest`, shared by the local and streamed paths |
+| `oneground/sample/stackexchange.py` | **(016b)** `verify_source`, `open_shards`, `read_pinned_digests`, `local_source_digest`; the pass streams |
+| `oneground/cli.py`, `corpora/build_fixture.py` | **(016b)** `--source` optional |
+| `corpora/run_fixture_build.sh` | new — generic build runner; **(016b)** `SOURCE` optional |
+| `corpora/fetch_stackexchange.py` | **(016b) deleted** — its job was storing the shards |
+| `corpora/run_stackexchange_build.sh` | **(016b) deleted** — it only sequenced fetch-then-build |
+| `sessions/stackexchange-build.yaml` | new — the pod session; **(016b)** no `SOURCE`, runs the generic runner |
 | `sessions/stackexchange-shards.sha256` | new — 59 pinned shard digests |
 | `tasks/scratch/016-negative-control.py` | new (scratch is gitignored) |
 | `tasks/scratch/016-reservoir-footprint.py` | new (scratch is gitignored) |
+| `tasks/scratch/016b-stream-probe.py`, `016b-schema-probe.py`, `016b-stream-feasibility.py`, `016b-no-disk-probe.py`, `016b-no-disk-probe2.py` | **(016b)** the source probes (scratch is gitignored) |
 
 ## Blocked on developer
 
@@ -278,6 +461,8 @@ All task 016, on `main`.
    and still the only thing that settles whether GitHub's receive-pack accepts
    a push from the depth-1 checkout.
 3. **The `y` for `oneground pod up sessions/stackexchange-build.yaml`** — brief
-   step 5. `plan` resolves, the cap is $1.08 worst case against `max_usd` 2.50,
-   and zero pods are running. Steps 6–9 (simulate, decision log, `fixture verify
+   step 5, once the other stream's pod is off the volume (one pod at a time).
+   `plan` resolves, the cap is $1.08 worst case against `max_usd` 2.50, and
+   zero pods are running. Steps 6–9 (simulate, decision log, `fixture verify
    --asset`, `docs/FIXTURES.md`) all need the artifacts this produces.
+   The session now needs **no volume space for the source at all**.

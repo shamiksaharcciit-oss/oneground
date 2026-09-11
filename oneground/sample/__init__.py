@@ -32,8 +32,14 @@ READERS = {
 }
 
 
-def sample_for_spec(source, spec, n_total, seed, log=None):
-    """Sample `n_total` records from `source` the way `spec` says to."""
+def sample_for_spec(source, spec, n_total, seed, log=None, receipt=None):
+    """Sample `n_total` records from `source` the way `spec` says to.
+
+    `source` may be None when the spec names its own source -- a pinned
+    dataset revision that is streamed rather than stored. `receipt`, if given,
+    is a dict the reader fills with `snapshot_sha256`, because a streamed
+    source has no local file for the builder to hash.
+    """
     fmt = ((spec.get("source") or {}).get("format")) or "arxiv_jsonl"
     try:
         reader = READERS[fmt]
@@ -41,7 +47,7 @@ def sample_for_spec(source, spec, n_total, seed, log=None):
         raise ValueError(
             f"source.format {fmt!r} has no reader; known formats: "
             f"{sorted(READERS)}") from None
-    return reader(source, spec, n_total, seed, log=log)
+    return reader(source, spec, n_total, seed, log=log, receipt=receipt)
 
 
 __all__ = [

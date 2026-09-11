@@ -42,8 +42,9 @@ from oneground.truth import exact_knn  # noqa: E402,F401
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--spec", required=True)
-    ap.add_argument("--source", required=True,
-                    help="arxiv-metadata-oai-snapshot.json")
+    ap.add_argument("--source", default=None,
+                    help="local snapshot (e.g. arxiv-metadata-oai-snapshot.json); "
+                         "omit for a spec that names its own source and streams it")
     ap.add_argument("--out", default="fixtures")
     ap.add_argument("--skip-projection", action="store_true")
     args = ap.parse_args()

@@ -114,13 +114,30 @@ def _model_family(name):
     return tail
 
 
+# A fixture is matchable only once its values exist. `planned` means the spec
+# has been written and every value is still TO_BE_FILLED.
+MATCHABLE_STATUS = ("built", "verified")
+
+
 def load_fixture_analogies(fixtures_dir=FIXTURES_DIR):
-    """Every fixture spec that declares an `analogy:` block.
+    """Every *built* fixture spec that declares an `analogy:` block.
 
     A fixture without one is skipped rather than guessed at: a spec that has
     not said what it is like cannot be matched against, and inferring its
     character from its measured values would be exactly the fitting this
     module refuses to do.
+
+    A fixture whose `fixture.status` is not in `MATCHABLE_STATUS` is skipped
+    for a different reason: it has no values yet. An analogy's entire worth is
+    that it points at published numbers measured on a real corpus, so a
+    `planned` spec -- whose every value is `TO_BE_FILLED` -- would be a perfect
+    match to nothing at all. Task 016 found exactly that: the stackexchange
+    spec scored 1.00 for a Q&A corpus the day it was written, days before the
+    corpus was built.
+
+    The status is read from the spec, not inferred from whether artifacts
+    happen to be on disk: a clone with no artifacts still reports `verified`
+    for arxiv-150k, and its published values are still the right analogy.
     """
     out = []
     if not os.path.isdir(fixtures_dir):
@@ -136,6 +153,8 @@ def load_fixture_analogies(fixtures_dir=FIXTURES_DIR):
             continue
         analogy = spec.get("analogy")
         if not analogy:
+            continue
+        if (spec.get("fixture", {}) or {}).get("status") not in MATCHABLE_STATUS:
             continue
         out.append((spec.get("fixture", {}).get("id") or
                     name[:-len(".fixture.yaml")], analogy, path, spec))

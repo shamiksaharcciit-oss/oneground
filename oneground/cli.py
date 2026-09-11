@@ -141,7 +141,9 @@ def _fixture_parser():
 
     b = sub.add_parser("build", help="build a fixture from its spec")
     b.add_argument("--spec", required=True)
-    b.add_argument("--source", required=True)
+    b.add_argument("--source", default=None,
+                   help="local snapshot to read; omit for a spec that "
+                        "names its own source and streams it")
     b.add_argument("--out", default="fixtures")
     b.add_argument("--skip-projection", action="store_true")
     envmod.add_argument(b)

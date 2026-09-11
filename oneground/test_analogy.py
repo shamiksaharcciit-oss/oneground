@@ -153,6 +153,55 @@ def test_a_fixture_without_an_analogy_block_is_skipped_synthetic():
         assert a is None and "analogy" in why
 
 
+def _status_dir(tmp, by_status):
+    """`{id: status}` written as specs that all declare the same analogy."""
+    d = os.path.join(tmp, "fixtures")
+    os.makedirs(d, exist_ok=True)
+    for fid, status in by_status.items():
+        fixture = {"id": fid}
+        if status is not None:
+            fixture["status"] = status
+        with open(os.path.join(d, f"{fid}.fixture.yaml"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            yaml.safe_dump({"fixture": fixture, "analogy": PAPERS}, f)
+    return d
+
+
+def test_a_planned_fixture_is_not_matchable_synthetic():
+    """An analogy is worth having only because it points at published numbers.
+    A `planned` spec has none -- every value is TO_BE_FILLED -- so a perfect
+    score against it is a perfect match to nothing at all."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = _status_dir(tmp, {"ready-fx": "built", "later-fx": "planned"})
+        assert [fid for fid, *_ in A.load_fixture_analogies(d)] == ["ready-fx"]
+        a, _why = A.choose(PAPERS, fixtures_dir=d)
+        assert a is not None and a.fixture == "ready-fx", a
+
+
+def test_only_built_and_verified_are_matchable_synthetic():
+    """`built` and `verified` have values; `planned`, an unknown status and a
+    missing one do not, and an absent status is not read as permission."""
+    assert A.MATCHABLE_STATUS == ("built", "verified")
+    with tempfile.TemporaryDirectory() as tmp:
+        d = _status_dir(tmp, {"b-fx": "built", "v-fx": "verified",
+                              "p-fx": "planned", "odd-fx": "retired",
+                              "none-fx": None})
+        assert sorted(fid for fid, *_ in A.load_fixture_analogies(d)) == \
+            ["b-fx", "v-fx"]
+
+
+def test_a_planned_fixture_cannot_be_the_nearest_either_synthetic():
+    """Not just unselectable -- invisible. A planned fixture must not surface
+    as "the nearest" in the refusal message either, because that reads as a
+    recommendation to anyone skimming."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = _status_dir(tmp, {"papers-fx": "built", "exact-fx": "planned"})
+        # exact-fx would score 1.00 and win outright if status were ignored.
+        a, why = A.choose(TICKETS, fixtures_dir=d)
+        assert "exact-fx" not in why, why
+        assert a is None or a.fixture != "exact-fx", a
+
+
 def test_the_label_names_the_fixture_and_denies_the_corpus_synthetic():
     """The words that must appear wherever the fixture's numbers appear."""
     a = A.Analogy("arxiv-150k", 1.0, ["corpus_type"], [], [], "spec.yaml")
@@ -194,6 +243,36 @@ def test_the_model_family_is_derived_crudely_and_only_helps_synthetic():
 
 
 # ------------------------------------------------------- the shipped specs
+def test_the_planned_stackexchange_spec_is_not_matchable_real_specs():
+    """Task 016 wrote the stackexchange spec, with its `analogy:` block, days
+    before the corpus was built. On the day it landed a Q&A corpus matched it
+    at 1.00 against a fixture whose every value was TO_BE_FILLED. It must be
+    excluded until the build fills them in.
+    """
+    loaded = {fid: spec.get("fixture", {}).get("status")
+              for fid, _an, _p, spec in A.load_fixture_analogies()}
+
+    assert "arxiv-150k" in loaded, loaded
+    assert loaded["arxiv-150k"] in A.MATCHABLE_STATUS, loaded
+    assert "stackexchange-150k" not in loaded, loaded
+
+    # Excluded for its status, not because it was missed: the spec is on disk
+    # and does declare a qa analogy.
+    path = os.path.join(A.FIXTURES_DIR, "stackexchange-150k.fixture.yaml")
+    with open(path, encoding="utf-8") as f:
+        se = yaml.safe_load(f)
+    assert se["analogy"]["corpus_type"] == "qa", se["analogy"]
+    assert se["fixture"]["status"] not in A.MATCHABLE_STATUS, se["fixture"]
+
+    # And the user-facing consequence: a Q&A corpus is not sent to it.
+    a, why = A.choose({"corpus_type": "qa", "text_length": "short",
+                       "topics_trend": True, "time_ordered": True,
+                       "dimension": 768,
+                       "embedding_model": "BAAI/bge-base-en-v1.5"})
+    assert a is None or a.fixture != "stackexchange-150k", (a, why)
+    assert "stackexchange-150k" not in why, why
+
+
 def test_arxiv_150k_declares_an_analogy_real_specs():
     found = dict((fid, an) for fid, an, _p, _s in A.load_fixture_analogies())
     assert "arxiv-150k" in found, sorted(found)

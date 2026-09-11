@@ -3,13 +3,15 @@
 # Same shape as sessions/arxiv-build.yaml. Two things differ, both because the
 # corpus does:
 #
-#   * the source is not on the volume already. It is 59 parquet shards, ~34 GB,
-#     at a pinned revision of `mikex86/stackoverflow-posts`, fetched and
-#     digest-verified as step 1 of the run. arxiv-150k's 4 GB snapshot was
+#   * the source is not on the volume, and is never put there. It is 59 parquet
+#     shards, ~34 GB, at a pinned revision of `mikex86/stackoverflow-posts`,
+#     and the sampler reads their row groups over the network straight into the
+#     per-year reservoirs. Nothing is downloaded and nothing is stored; the run
+#     writes only the sample. arxiv-150k's 4 GB snapshot, by contrast, was
 #     uploaded by hand once and has lived on the volume since.
-#   * the sampling pass reads all 34 GB once (see the spec's `sampling.rule`),
-#     so the run is longer than arxiv-150k's 19 minutes and the caps are
-#     larger. They are still caps, not estimates: `watch` terminates at them.
+#   * that read is still ~32 GB of column chunks over the wire, so the run is
+#     longer than arxiv-150k's 19 minutes and the caps are larger. They are
+#     still caps, not estimates: `watch` terminates at them.
 #
 #     python -m oneground.pod plan sessions/stackexchange-build.yaml
 #     python -m oneground.pod up   sessions/stackexchange-build.yaml   # asks first
@@ -34,17 +36,19 @@ volume_mount_path: /workspace
 # requirements.txt exactly.
 image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
 
-# Container disk, for the venv at /root/.venv. The 34 GB of shards go to the
-# network volume at /workspace, not here.
+# Container disk, for the venv at /root/.venv. Nothing else lands here: the
+# shards are streamed and never written, and the artifacts go to the volume.
 disk_gb: 20
 
 env:
   HF_HOME: /workspace/hf
   FIXTURE: stackexchange-150k
-  SOURCE: /workspace/stackexchange-posts
+  # No SOURCE. The spec names its own source -- repo, revision and per-shard
+  # digests -- and the sampler streams it. A SOURCE here would mean "read these
+  # local shards instead", which is the offline path, not this one.
 
 setup: corpora/POD_SETUP.md      # executed as the venv-on-local-disk script
-run: bash corpora/run_stackexchange_build.sh
+run: bash corpora/run_fixture_build.sh
 
 remote_repo: /workspace/oneground
 remote_log: /workspace/oneground-session.log
@@ -58,9 +62,9 @@ outputs:
      local: ../oneground-assets/}
 
 # The stall watchdog: `watch` terminates if the run's log stops growing for
-# this long. Every phase here logs progress -- the fetch prints per shard, the
-# sampling pass prints per shard, embedding prints per batch -- so the longest
-# legitimate quiet period is a single 500 MB shard download. 20 minutes is the
+# this long. Every phase here logs progress -- the sampling pass prints per
+# shard, embedding prints per batch -- so the longest legitimate quiet period is
+# one shard streamed end to end, ~0.4-0.6 GB of column chunks. 20 minutes is the
 # same value arxiv-build.yaml uses and is generous for that.
 stall_minutes: 20
 
@@ -70,14 +74,15 @@ caps:
   # actually billed) 1.5 hours is $1.08, inside max_usd with room for a more
   # expensive card if the cheap ones are not offered.
   #
-  # What has to fit inside 1.5 hours: ~34 GB fetched and sha256'd, one pass
-  # over the same 34 GB of parquet, 152k texts embedded on the GPU, exact k-NN
-  # for 2,000 queries against 150k vectors, and the two reference
-  # configurations. arxiv-150k did the last three in 19 minutes. The fetch and
-  # the parquet pass are the parts with no precedent in this repo, and they are
-  # the reason this is a measurement rather than a prediction -- if the run
-  # hits the cap, the report says so and says where the time went. The cap is
-  # not raised to make it fit.
+  # What has to fit inside 1.5 hours: one streamed pass pulling ~32 GB of
+  # column chunks through the reservoirs, 152k texts embedded on the GPU, exact
+  # k-NN for 2,000 queries against 150k vectors, and the two reference
+  # configurations. arxiv-150k did the last three in 19 minutes. The streamed
+  # pass is the part with no precedent in this repo, and it is the reason this
+  # is a measurement rather than a prediction -- it is bound by the pod's
+  # network throughput, which `plan` cannot resolve. If the run hits the cap,
+  # the report says so and says where the time went. The cap is not raised to
+  # make it fit.
   max_hours: 1.5
   max_concurrent: 1
   max_usd: 2.50

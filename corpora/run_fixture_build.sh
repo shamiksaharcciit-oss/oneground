@@ -11,8 +11,11 @@
 # derived from the spec, so the log name, the verify target, the artifact
 # directory and the tarball names cannot drift apart:
 #
-#   FIXTURE=stackexchange-150k SOURCE=/workspace/stackexchange-posts \
-#   bash corpora/run_fixture_build.sh
+#   FIXTURE=stackexchange-150k bash corpora/run_fixture_build.sh
+#
+# SOURCE is optional. Give it for a spec whose source is a local file or
+# directory; omit it for one that names its own source (a pinned dataset
+# revision), which is streamed through the sampler and never stored.
 #
 # On a laptop, against the smoke fixture, before the pod is ever started:
 #
@@ -33,7 +36,9 @@ set -euo pipefail
 
 FIXTURE="${FIXTURE:-arxiv-150k}"
 SPEC="${SPEC:-fixtures/${FIXTURE}.fixture.yaml}"
-SOURCE="${SOURCE:?SOURCE must name the source file or shard directory}"
+# Optional. A spec that names its own source (a pinned dataset revision)
+# streams it and stores nothing, so there is no local path to give.
+SOURCE="${SOURCE:-}"
 TARBALL="${TARBALL:-/workspace/${FIXTURE}-small.tgz}"
 TARBALL_LARGE="${TARBALL_LARGE:-/workspace/${FIXTURE}-large.tgz}"
 SKIP_PROJECTION="${SKIP_PROJECTION:-}"
@@ -55,7 +60,7 @@ fi
 
 mkdir -p logs
 
-if [ ! -e "$SOURCE" ]; then
+if [ -n "$SOURCE" ] && [ ! -e "$SOURCE" ]; then
     echo "ERROR: source not found: $SOURCE" >&2
     exit 1
 fi
@@ -73,11 +78,13 @@ FIXDIR="fixtures/$SPEC_ID"
 LOG="logs/build-${SPEC_ID}.log"
 
 # ------------------------------------------------------------- source receipt
-# Printed before any work starts. This is the value that goes into the spec's
-# source.snapshot_sha256. `source_digest` hashes a file directly and a sharded
-# directory by its sorted `<sha256>  <name>` manifest, so a multi-file source
-# has one digest that moves if any shard does.
-if [ -d "$SOURCE" ]; then
+# Reported before any work starts. A local source is described from disk; a
+# streamed one has nothing on disk to describe, and its snapshot_sha256 is
+# printed by the builder once it has verified the pinned revision.
+if [ -z "$SOURCE" ]; then
+    SIZE="streamed, not stored"
+    NSHARDS="$(python -c 'import sys,yaml; s=yaml.safe_load(open(sys.argv[1]))["source"]; print(s.get("shards","?"))' "$SPEC")"
+elif [ -d "$SOURCE" ]; then
     SIZE="$(du -sb "$SOURCE" 2>/dev/null | cut -f1 || echo '?')"
     NSHARDS="$(find "$SOURCE" -type f -name '*.parquet' | wc -l | tr -d ' ')"
 else
@@ -91,21 +98,29 @@ echo "  repo        : $REPO"
 echo "  python      : $(python --version 2>&1)"
 echo "  fixture     : $SPEC_ID"
 echo "  spec        : $SPEC"
-echo "  source      : $SOURCE"
+echo "  source      : ${SOURCE:-<streamed from the revision the spec pins>}"
 echo "  source parts: $NSHARDS"
 echo "  source bytes: $SIZE"
 echo "  artifacts   : $FIXDIR"
 echo "  log         : $LOG"
 echo "  started     : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "--------------------------------------------------------------"
-echo "hashing source (this is source.snapshot_sha256) ..."
-SRC_SHA="$(python -c 'import sys; from oneground.fixture.build import source_digest; print(source_digest(sys.argv[1]))' "$SOURCE")"
-echo "  source.snapshot_sha256: $SRC_SHA"
+if [ -n "$SOURCE" ]; then
+    echo "hashing source (this is source.snapshot_sha256) ..."
+    SRC_SHA="$(python -c 'import sys; from oneground.fixture.build import source_digest; print(source_digest(sys.argv[1]))' "$SOURCE")"
+    echo "  source.snapshot_sha256: $SRC_SHA"
+else
+    SRC_SHA="(streamed -- printed by the builder after it verifies the pinned revision)"
+    echo "source is streamed from the pinned revision; nothing is stored."
+fi
 echo "=============================================================="
 echo
 
 # -------------------------------------------------------------------- build
-BUILD_ARGS=(--spec "$SPEC" --source "$SOURCE" --out fixtures/)
+BUILD_ARGS=(--spec "$SPEC" --out fixtures/)
+if [ -n "$SOURCE" ]; then
+    BUILD_ARGS+=(--source "$SOURCE")
+fi
 if [ -n "$SKIP_PROJECTION" ]; then
     echo "NOTE: SKIP_PROJECTION set - no projection.npy will be produced."
     BUILD_ARGS+=(--skip-projection)
