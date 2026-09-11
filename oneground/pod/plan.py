@@ -32,7 +32,7 @@ class Plan:
 
     def __init__(self, session, volume, gpu, usd_min, usd_max, stock,
                  data_center_id, candidates, dc_candidates=None,
-                 dc_searched=None):
+                 dc_searched=None, deploy_candidates=None):
         self.session = session
         self.volume = volume                  # the raw API record, or None
         self.gpu = gpu                        # {id, display_name, ...}
@@ -46,10 +46,31 @@ class Plan:
         # chosen rather than assumed.
         self.dc_candidates = dc_candidates or []
         self.dc_searched = dc_searched
+        # Every deployable (datacenter, gpu), in the order `up` should try
+        # them: the chosen one first, then the rest of the spec's preference
+        # order. `up` walks this when a create is refused for want of
+        # capacity, which is a refusal RunPod hands out routinely on Low
+        # stock and which used to end the session.
+        self.deploy_candidates = deploy_candidates or [{
+            "data_center_id": data_center_id, "gpu": gpu,
+            "usd_min": usd_min, "usd_max": usd_max, "stock": stock}]
 
     @property
     def uses_volume(self):
         return self.volume is not None
+
+    def candidates_within(self, ceiling):
+        """Candidates whose confirmed worst case is at or under `ceiling`.
+
+        The developer authorised a **price**, not a card: `ask_to_create`
+        shows `$X/hr` and a total, and nothing in that prompt names a GPU. So
+        any candidate at or below the rate already agreed is inside what was
+        confirmed, and one above it is not -- it needs asking again.
+        """
+        if ceiling is None:
+            return []
+        return [c for c in self.deploy_candidates
+                if c["usd_max"] is not None and c["usd_max"] <= ceiling + 1e-9]
 
     @property
     def usd_per_hr(self):
@@ -97,7 +118,7 @@ class Plan:
         return True
 
     # -- the deploy payload -------------------------------------------------
-    def deploy_spec(self, session_id):
+    def deploy_spec(self, session_id, candidate=None):
         """The exact POST /pods body. Built here, in the read-only module, so
         `plan` can print the same object `up` would send.
 
@@ -109,14 +130,20 @@ class Plan:
         """
         env = dict(self.session.env)
         env["ONEGROUND_SESSION"] = session_id
+        # `candidate` is a fallthrough target; omitted, it is this plan's own
+        # choice. The body is built the same way either way, so what `up`
+        # sends on the second attempt is the same shape `plan` printed for the
+        # first.
+        gpu = (candidate or {}).get("gpu") or self.gpu
+        dc = (candidate or {}).get("data_center_id") or self.data_center_id
         spec = {
             "name": "oneground-session-%s" % session_id,
             "imageName": self.session.image,
-            "gpuTypeIds": [self.gpu["id"]],
+            "gpuTypeIds": [gpu["id"]],
             "gpuCount": 1,
             "cloudType": self.session.cloud_type,
             "computeType": "GPU",
-            "dataCenterIds": [self.data_center_id],
+            "dataCenterIds": [dc],
             "containerDiskInGb": self.session.disk_gb,
             "env": env,
             "ports": ["22/tcp"],
@@ -252,6 +279,36 @@ def resolve_volume(client, name):
         "it, so the name has to be the real one." % (name, known))
 
 
+def _lookup(prices, want):
+    """A GPU entry by display name, or by full type id if a spec is explicit."""
+    entry = prices.get(want)
+    if entry is None:
+        for e in prices.values():
+            if e["id"] == want:
+                return e
+    return entry
+
+
+def _available_in_order(prices, session):
+    """Every requested GPU this datacenter can actually sell, in spec order."""
+    out = []
+    for want in session.gpu:
+        e = _lookup(prices, want)
+        if e and e["usd_min"] is not None and e["offered_on_cloud"]:
+            out.append(e)
+    return out
+
+
+def _as_candidates(pairs):
+    """[(datacenter_id, gpu_entry)] -> the list `up` falls through.
+
+    One shape for both placement rules, so the create loop never has to know
+    whether the region was derived from a volume or chosen.
+    """
+    return [{"data_center_id": dc, "gpu": e, "usd_min": e["usd_min"],
+             "usd_max": e["usd_max"], "stock": e["stock"]} for dc, e in pairs]
+
+
 def _pick_gpu(prices, session):
     """First GPU in the spec's order that this datacenter actually sells.
 
@@ -262,13 +319,7 @@ def _pick_gpu(prices, session):
     candidates = []
     chosen = None
     for want in session.gpu:
-        entry = prices.get(want)
-        # Also accept the full type id, so a spec may be explicit if it wants.
-        if entry is None:
-            for e in prices.values():
-                if e["id"] == want:
-                    entry = e
-                    break
+        entry = _lookup(prices, want)
         lo = entry["usd_min"] if entry else None
         hi = entry["usd_max"] if entry else None
         stock = entry["stock"] if entry else None
@@ -308,7 +359,11 @@ def resolve_anywhere(client, session):
 
     by_dc = client.gpu_prices_across_datacenters(dcs, session.cloud_type)
 
-    # GPU preference order outer, price inner.
+    # GPU preference order outer, price inner. Every deployable (gpu, dc) is
+    # kept, not only the winner: `up` falls through this list when a create is
+    # refused for want of capacity, and a list that stopped at the first hit
+    # would leave it with nowhere to go.
+    ordered = []
     for want in session.gpu:
         offers = []
         for dc in dcs:
@@ -316,20 +371,23 @@ def resolve_anywhere(client, session):
                                        _OneGpu(session, want))
             if chosen is not None:
                 offers.append((dc, chosen))
-        if not offers:
-            continue
         # Worst case first, then the floor, then the id so a tie is stable and
         # a re-run of `plan` cannot silently move the pod to another region.
         offers.sort(key=lambda t: (t[1]["usd_max"], t[1]["usd_min"], t[0]))
-        dc, chosen = offers[0]
+        ordered.extend(offers)
+
+    if ordered:
+        dc, chosen = ordered[0]
         considered = [(d, e["usd_min"], e["usd_max"], e["stock"])
-                      for d, e in offers]
+                      for d, e in ordered
+                      if e["display_name"] == chosen["display_name"]]
         _chosen, candidates = _pick_gpu(by_dc.get(dc, {}), session)
         return Plan(session=session, volume=None, gpu=chosen,
                     usd_min=chosen["usd_min"], usd_max=chosen["usd_max"],
                     stock=chosen["stock"], data_center_id=dc,
                     candidates=candidates, dc_candidates=considered,
-                    dc_searched=len(dcs))
+                    dc_searched=len(dcs),
+                    deploy_candidates=_as_candidates(ordered))
 
     tried = ", ".join(session.gpu)
     raise PlanError(
@@ -369,28 +427,12 @@ def resolve(client, session):
 
     prices = client.gpu_price_ranges(dc, session.cloud_type)
 
-    candidates = []
-    chosen = None
-    for want in session.gpu:
-        entry = prices.get(want)
-        # Also accept the full type id, so a spec may be explicit if it wants.
-        if entry is None:
-            for e in prices.values():
-                if e["id"] == want:
-                    entry = e
-                    break
-        lo = entry["usd_min"] if entry else None
-        hi = entry["usd_max"] if entry else None
-        stock = entry["stock"] if entry else None
-        candidates.append((want, lo, hi, stock))
-        # Two conditions, both needed. `usd_min` present means the datacenter
-        # stocks the type; `offered_on_cloud` means the cloud this session
-        # actually buys sells it. RTX PRO 4500 carries a communityPrice of
-        # $0.34 with communityCloud false -- a price for a machine nobody can
-        # be given, and the one task 006b confirmed.
-        if (chosen is None and entry and lo is not None
-                and entry["offered_on_cloud"]):
-            chosen = entry
+    chosen, candidates = _pick_gpu(prices, session)
+    # Every other GPU this region can actually sell, in the spec's preference
+    # order, so `up` has somewhere to fall through to when a create is refused
+    # for want of capacity. The datacenter is fixed here, so the fallthrough
+    # is across cards only.
+    deployable = [(dc, e) for e in _available_in_order(prices, session)]
 
     if chosen is None:
         offered = ", ".join(
@@ -409,4 +451,5 @@ def resolve(client, session):
     return Plan(session=session, volume=volume, gpu=chosen,
                 usd_min=chosen["usd_min"], usd_max=chosen["usd_max"],
                 stock=chosen["stock"], data_center_id=dc,
-                candidates=candidates)
+                candidates=candidates,
+                deploy_candidates=_as_candidates(deployable))

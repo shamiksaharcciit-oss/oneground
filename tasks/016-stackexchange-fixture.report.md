@@ -25,8 +25,15 @@ And a fourth when the first `up` created a pod it could not talk to:
    RUNNING, then its first real command hung for 60 s and died having printed
    only the known-hosts line. RUNNING is the container's state, not sshd's.
 
-Everything below covers all four. Headings marked **(016b)** are the second
-revision, **(016c)** the third, **(016d)** the fourth.
+And a fifth when the pod could not be created at all:
+
+5. **Fall through on no-capacity.** Three creates refused in a row — EU-CZ-1
+   RTX 4090 twice, EU-RO-1 RTX PRO 4500 once, all Low stock. Each ended the
+   session and made a human retype `y` for a machine they had already agreed
+   to pay for.
+
+Everything below covers all five. Headings marked **(016b)** are the second
+revision, **(016c)** the third, **(016d)** the fourth, **(016e)** the fifth.
 
 ## Repo state expected vs found
 
@@ -452,6 +459,72 @@ module — which patches it for pytest and every other test in the file, not jus
 the code under test. That is what wedged the suite for 10 minutes before I
 caught it. The tests now rebind the `subprocess` *name* inside `sshx`.
 
+### (016e) The confirmation is a ceiling, not a card
+
+Three creates refused for want of capacity, each ending the session. The
+authorisation this reuses is worth quoting, because the argument rests on it —
+`ask_to_create` prints:
+
+    Create this pod at up to $0.74/hr (range $0.34-$0.74) with a hard cap of
+    1.5 hours = up to $1.11? [y/N]
+
+That names a **rate** and a total. It names no GPU and no region. So a
+candidate at or under the rate already confirmed is inside what was
+authorised, and `up` now falls through to it without asking again. A candidate
+*above* that rate is not, and is never tried: it is logged as skipped, and the
+run ends telling the developer what a second `y` would buy.
+
+**Only one error is retryable, and that is the load-bearing decision here.**
+`api.is_no_capacity` matches RunPod's "there are no instances currently
+available" and nothing else. Every other failed create may have made a pod
+whose id this process never saw — a timeout, a proxy 502, a response that did
+not parse — and retrying those could put **two pods behind one `y`**. They
+propagate untouched. Matching on the phrase rather than the status code is for
+the same reason: a 500 alone does not say whether anything was allocated.
+
+The plan now carries every deployable `(datacenter, GPU)` in fallthrough order
+— preference order outer, price inner — instead of only the winner, and
+`deploy_spec` takes a candidate so the second attempt is built the same way
+the first was. The state record names **the card that exists**, not the one
+first chosen, with `planned_gpu` set when they differ; otherwise `status` and
+`watch` would report a machine the account never had.
+
+**The GPU list is widened**, as asked: `L4, RTX A5000, RTX A4000, RTX 3090,
+A40` after the existing four. All run bge-base fine — the embedding is 152k
+short texts at batch 128, roughly 4–6 minutes on the fast cards and about
+**10–15 minutes** on these. Against a 1.5 h cap whose long pole is the ~32 GB
+streamed read, that does not decide the run: an available slower card beats an
+unavailable fast one.
+
+**What the live account actually has, measured.** This is the part worth
+knowing before a retry:
+
+    3 GPU types purchasable on SECURE somewhere, of 48 known
+      L4        US-MO-2   $0.49/hr  Low
+      RTX 4090  EU-CZ-1   $0.74/hr  Low
+      B300      US-WA-2   $7.89/hr  Low
+
+So the market is thin, not just EU-RO-1. And it **moves between calls**: three
+probes minutes apart saw RTX 4090 alone, then L4 in US-MO-2, then A40 in
+CA-MTL-1. That flicker initially looked like a bug in my candidate list — a
+card the availability survey found was missing from `deploy_candidates`. It
+was not. Resolving both from a **single** price fetch shows them agreeing
+exactly:
+
+    raw availability          deploy_candidates (same fetch)
+      RTX 4090  EU-CZ-1         1  RTX 4090  EU-CZ-1  $0.74
+      A40       CA-MTL-1        2  A40       CA-MTL-1  $0.49
+
+Preference order is honoured (RTX 4090 is 4th in the spec, A40 is 9th) and the
+A40 at $0.49 sits under a $0.74 ceiling, so it is a fallthrough target that
+needs no second `y`. I would rather record that I chased a phantom for ten
+minutes than leave the discrepancy unexplained in the log.
+
+Two negative controls beyond the usual: removing the fallthrough restores the
+behaviour that cost three sessions, and removing the ceiling lets one `y` buy a
+$2.09/hr card after confirming $0.84. A third makes `is_no_capacity` true for
+everything, which is the two-pods-one-`y` regression.
+
 ### 016 step 4 — the pod session resolves
 
 `oneground pod plan sessions/stackexchange-build.yaml` resolves live and
@@ -505,6 +578,13 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 | **(016d)** Observed failure | session record `20260911-200558` | first SSH command (`mkdir -p`, added by 016c) hung **60 s**; the whole recorded evidence was `ssh -p 40134` plus the known-hosts line |
 | **(016d)** That pod, placed by 016c | same record | EU-CZ-1, RTX 4090, **$0.74/hr** true rate, reached RUNNING |
 | **(016d)** Pods left behind | `python -m oneground.pod ls` | **0 on the account** |
+| **(016e)** Creates refused before this change | developer report | **3 in a row** — EU-CZ-1 RTX 4090 x2, EU-RO-1 RTX PRO 4500 x1, all Low stock |
+| **(016e)** Purchasable on SECURE anywhere | `tasks/scratch/016e-whats-available.py`, 33 listed datacenters | **3 GPU types of 48** — L4 $0.49 (US-MO-2), RTX 4090 $0.74 (EU-CZ-1), B300 $7.89 (US-WA-2) |
+| **(016e)** Stock flicker | three probes, minutes apart | RTX 4090 only -> +L4/US-MO-2 -> +A40/CA-MTL-1 |
+| **(016e)** Candidates from one fetch | `tasks/scratch/016e-same-call.py` | availability and `deploy_candidates` agree exactly; 2 candidates, A40 at $0.49 under a $0.74 ceiling |
+| **(016e)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **171 passed, 1 skipped**, 15.2 s |
+| **(016e)** Full suite | `python -m pytest -q` | **596 passed, 1 skipped** in 260.8 s (+16) |
+| **(016e)** GraphQL blips | two `plan` runs in a row | HTTP 500 twice, then fine; the aliased query re-probed OK at every size 2..33, so transient server-side |
 | **(016d)** Baseline note | `git log` | task 015 merged into `main` at 21:58, **after** 016c's commit at 21:44, so the 555 and 580 figures are not the same baseline — hence the collect-only delta above |
 | **(016d)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **155 passed, 1 skipped**, 7.7 s (+15 from this change) |
 | **(016d)** Suite runtime before the seam | same command | **hung** past 400 s — two harnesses retrying a pod at 10.0.0.1 for the full window |
@@ -684,11 +764,14 @@ All task 016, on `main`.
 | `corpora/run_stackexchange_build.sh` | **(016b) deleted** — it only sequenced fetch-then-build |
 | `oneground/pod/session.py` | **(016c)** `volume: none`, `uses_volume`, both rules documented |
 | `oneground/pod/plan.py` | **(016c)** `resolve_anywhere`, `_pick_gpu` shared by both paths, volume-less payload and rendering |
+| — | **(016e)** `deploy_candidates` in fallthrough order, `candidates_within`, per-candidate `deploy_spec` |
 | `oneground/pod/api.py` | **(016c)** `list_datacenters`, `gpu_prices_across_datacenters` (one aliased call) |
 | `oneground/pod/state.py` | **(016c)** records `volume: None` rather than crashing |
 | `oneground/pod/cli.py` | **(016c)** `mkdir -p` the mount path before the first scp; **(016d)** `_wait_ssh_ready` seam, `--ssh-ready-timeout`, `_redact_dict`, records `ssh_ready`/`ssh_error`/`last_ssh` |
-| `oneground/pod/test_pod.py` | **(016c)** +22 tests, `DcTransport` stub; **(016d)** +25, `RefusingSsh` stub |
+| `oneground/pod/test_pod.py` | **(016c)** `DcTransport` stub; **(016d)** `RefusingSsh` stub; **(016e)** `_CreateStub`, +16 |
 | `oneground/pod/sshx.py` | **(016d)** `wait_ready`, `SshNotReady`, `SshError.as_dict`, timeouts carry their command |
+| `oneground/pod/api.py` | **(016c)** datacenter listing + aliased price matrix; **(016e)** `is_no_capacity` |
+| `oneground/pod/state.py` | **(016c)** `volume: None`; **(016e)** records the card actually deployed, plus `planned_gpu` |
 | `sessions/stackexchange-build.yaml` | new — the pod session; **(016b)** no `SOURCE`, generic runner; **(016c)** `volume: none`, `disk_gb: 60` |
 | `sessions/stackexchange-shards.sha256` | new — 59 pinned shard digests |
 | `tasks/scratch/016-negative-control.py` | new (scratch is gitignored) |

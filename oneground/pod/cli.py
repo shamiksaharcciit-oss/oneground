@@ -174,12 +174,23 @@ def cmd_up(args):
         return 1
 
     session_id = state.new_session_id()
-    spec = p.deploy_spec(session_id)
 
     # The only point in the package where a billable client exists.
     client.allow_create(token.consume())
-    print("\ncreating pod ...")
-    pod = client.create_pod(spec)
+    try:
+        pod, chosen = _create_with_fallthrough(client, p, session_id, token)
+    except confirm.ConfirmationRefused as e:
+        print("\nNot created: %s" % e)
+        return 1
+    except api.PodApiError as e:
+        print("\nCREATE FAILED: %s" % api.redact(str(e)))
+        return 1
+    if pod is None:
+        return 1
+    if chosen is not p.deploy_candidates[0]:
+        # The plan printed above is no longer what was built. Say so before
+        # anything else is printed against it.
+        print("  NOTE: deployed the fallback candidate, not the planned one.")
     pod_id = pod.get("id") or (pod.get("pod") or {}).get("id")
     if not pod_id:
         # The one post-create failure that cannot be cleaned up automatically:
@@ -202,7 +213,8 @@ def cmd_up(args):
     # that had not been thought about yet, which is the shape this class of
     # bug will always have.
     try:
-        return _run_session(client, args, s, p, root, session_id, pod_id, pod)
+        return _run_session(client, args, s, p, root, session_id, pod_id,
+                            pod, chosen)
     except sshx.LaunchFailed as e:
         # The remote launch returned non-zero or refused to confirm. Nothing
         # ever started, and the pod is billing for it.
@@ -233,6 +245,73 @@ def cmd_up(args):
         raise
 
 
+def _create_with_fallthrough(client, p, session_id, token, log=print):
+    """Create the pod, falling through the plan's candidates on no-capacity.
+
+    Returns `(pod, candidate)`; `(None, None)` when every candidate was
+    refused.
+
+    Why this does not re-prompt. `ask_to_create` shows a **rate** and a total
+    and names no GPU, so what the developer authorised is a ceiling. A
+    candidate at or under the rate already confirmed is inside that
+    authorisation; one above it is not, and is asked about separately. Session
+    20260911 failed three creates in a row -- EU-CZ-1 RTX 4090 twice, EU-RO-1
+    RTX PRO 4500 once, all "Low" stock -- and each one ended the session and
+    made a human retype 'y' for a machine they had already agreed to pay for.
+
+    Why only this one error. `api.is_no_capacity` matches the one refusal that
+    states plainly that nothing was allocated. Every other create failure may
+    have made a pod whose id this process never saw, and retrying it could put
+    two pods behind one confirmation. Those propagate untouched.
+    """
+    candidates = p.deploy_candidates
+    within = p.candidates_within(token.usd_per_hr)
+    tried = []
+
+    for i, cand in enumerate(candidates, 1):
+        name = cand["gpu"]["display_name"]
+        dc = cand["data_center_id"]
+        rate = cand["usd_max"]
+
+        if cand not in within:
+            # Above the ceiling the developer agreed to. Nothing here re-asks
+            # on its own: `up` stops and says what it would have needed.
+            log("  attempt %d/%d skipped: %s in %s is $%.2f/hr, above the "
+                "$%.2f/hr already confirmed. A dearer card needs a new 'y'."
+                % (i, len(candidates), name, dc,
+                   rate if rate is not None else float("nan"),
+                   token.usd_per_hr))
+            continue
+
+        log("  attempt %d/%d: %s in %s at up to $%.2f/hr ..."
+            % (i, len(candidates), name, dc, rate))
+        try:
+            pod = client.create_pod(p.deploy_spec(session_id, cand))
+        except api.PodApiError as e:
+            if not api.is_no_capacity(e):
+                raise
+            tried.append("%s/%s" % (dc, name))
+            log("    no instances available. Falling through -- nothing was "
+                "created, and the next candidate is no dearer.")
+            continue
+        log("  created on %s in %s at up to $%.2f/hr." % (name, dc, rate))
+        return pod, cand
+
+    over = [c for c in candidates if c not in within]
+    log("\nNO CAPACITY: every candidate at or under the confirmed "
+        "$%.2f/hr was refused (%s)." % (token.usd_per_hr,
+                                        ", ".join(tried) or "none tried"))
+    if over:
+        log("  %d dearer candidate(s) were not tried: %s."
+            % (len(over), ", ".join(
+                "%s/%s $%.2f/hr" % (c["data_center_id"],
+                                    c["gpu"]["display_name"], c["usd_max"])
+                for c in over[:4])))
+        log("  Re-run `up` to confirm one of those, or wait for stock.")
+    log("  Nothing was created and nothing is billing.")
+    return None, None
+
+
 def _wait_ssh_ready(ssh, timeout, log=print):
     """Seam for the readiness probe, so it can be stubbed like `_wait_running`.
 
@@ -245,13 +324,14 @@ def _wait_ssh_ready(ssh, timeout, log=print):
     return ssh.wait_ready(timeout=timeout, log=log)
 
 
-def _run_session(client, args, s, p, root, session_id, pod_id, pod):
+def _run_session(client, args, s, p, root, session_id, pod_id, pod,
+                 candidate=None):
     """The whole of `up` after the create. Raises; never cleans up itself.
 
     Cleanup belongs to the single guard in `cmd_up`. This function's job is to
     fail honestly and let that guard stop the meter.
     """
-    rec = state.record_for(p, session_id, pod_id, pod)
+    rec = state.record_for(p, session_id, pod_id, pod, candidate)
     rec_path = state.save(rec, root)
     print("  pod id     : %s" % pod_id)
     print("  session    : %s" % session_id)
@@ -260,6 +340,10 @@ def _run_session(client, args, s, p, root, session_id, pod_id, pod):
     # The price actually charged, checked against the price confirmed. Task
     # 006b confirmed $0.34/hr and was handed a $0.72/hr machine; nothing
     # noticed, and the cap survived only because it was bounded in hours.
+    # Checked against the rate actually confirmed, which is the ceiling the
+    # developer agreed to -- not the fallback's own quote. A cheaper card
+    # deployed under that ceiling is inside the authorisation; a pod billing
+    # above it is not, whichever candidate it came from.
     true_rate = _check_true_price(client, root, session_id, pod_id, pod,
                                   p.usd_max, args.price_tolerance)
     if true_rate is None:

@@ -33,6 +33,19 @@ gpu:
   - RTX PRO 6000
   - RTX 6000 Ada
   - RTX 4090
+  # Widened after three creates in a row were refused for want of capacity
+  # (EU-CZ-1 RTX 4090 twice, EU-RO-1 RTX PRO 4500 once, all "Low" stock).
+  # Everything below runs bge-base perfectly well, just slower: the embedding
+  # is 152k short texts at batch 128, which the cards above do in roughly
+  # 4-6 minutes and these do in about **10-15 minutes**. Against a 1.5 hour
+  # cap whose long pole is the ~32 GB streamed read, that difference does not
+  # decide the run -- an available slower card beats an unavailable fast one.
+  # Ordered by descending throughput, not by price.
+  - L4
+  - RTX A5000
+  - RTX A4000
+  - RTX 3090
+  - A40
 
 # No network volume. Task 016's build needs nothing that outlives the pod: the
 # source is streamed and never stored, and both outputs come back as tarballs.

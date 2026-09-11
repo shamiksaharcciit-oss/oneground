@@ -97,6 +97,26 @@ def is_gone(exc):
     return "HTTP 404" in str(exc)
 
 
+NO_CAPACITY_MARKERS = ("no instances currently available",
+                       "no instances available")
+
+
+def is_no_capacity(exc):
+    """True only for RunPod's "there are no instances currently available".
+
+    Deliberately narrow, and it must stay that way. `up` treats this one
+    refusal as "nothing was allocated, try the next candidate" and retries
+    against the same confirmation. Any *other* failed create may have created
+    a pod this process never saw the id of -- a timeout, a 502 from a proxy, a
+    response that did not parse -- and retrying those would risk a second pod
+    against one 'y'. Matching on the phrase rather than on the status code is
+    deliberate for the same reason: the status alone does not say whether
+    anything was allocated.
+    """
+    text = str(exc).lower()
+    return any(m in text for m in NO_CAPACITY_MARKERS)
+
+
 class CreateCallBlocked(PodApiError):
     """A billable endpoint was reached without developer confirmation.
 

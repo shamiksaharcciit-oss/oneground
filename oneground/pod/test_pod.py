@@ -2718,6 +2718,268 @@ def test_any_ssh_failure_after_readiness_records_its_command():
         assert rec["last_ssh"]["timed_out"] is True, rec["last_ssh"]
         assert "x.bundle" in rec["last_ssh"]["command"], rec["last_ssh"]
 
+
+
+# ===================================================================
+# Falling through candidates when a create is refused (task 016e)
+# ===================================================================
+# Three creates in a row were refused -- EU-CZ-1 RTX 4090 twice, EU-RO-1
+# RTX PRO 4500 once, all "Low" stock -- and each one ended the session and
+# made a human retype 'y' for a machine they had already agreed to pay for.
+# `ask_to_create` shows a rate and a total and names no GPU, so what was
+# authorised is a ceiling, not a card.
+
+NO_CAPACITY = ("POST https://rest.runpod.io/v1/pods -> HTTP 500 "
+               '{"error":"There are no instances currently available '
+               'with the requested specifications."}')
+
+
+def _cand(dc, name, usd_max, usd_min=None, stock="Low"):
+    return {"data_center_id": dc,
+            "gpu": {"id": "NVIDIA " + name, "display_name": name},
+            "usd_max": usd_max,
+            "usd_min": usd_min if usd_min is not None else usd_max - 0.10,
+            "stock": stock}
+
+
+class _CreateStub:
+    """A client whose first N creates are refused for want of capacity.
+
+    Only `create_pod` is modelled: the fallthrough is the whole subject, and
+    a real client would drag the guard and the transport in with it.
+    """
+
+    def __init__(self, refusals, error=None, fail_all_with=None):
+        self.refusals = refusals
+        self.error = error or NO_CAPACITY
+        self.fail_all_with = fail_all_with
+        self.specs = []
+
+    def create_pod(self, spec):
+        self.specs.append(spec)
+        if self.fail_all_with is not None:
+            raise self.fail_all_with
+        if len(self.specs) <= self.refusals:
+            raise api.PodApiError(self.error, status=500)
+        return {"id": "pod-%d" % len(self.specs), "name": spec["name"]}
+
+
+class _Plan:
+    """Just the surface `_create_with_fallthrough` touches."""
+
+    def __init__(self, candidates):
+        self.deploy_candidates = candidates
+
+    def candidates_within(self, ceiling):
+        return planmod.Plan.candidates_within(self, ceiling)
+
+    def deploy_spec(self, session_id, candidate=None):
+        c = candidate or self.deploy_candidates[0]
+        return {"name": "oneground-session-%s" % session_id,
+                "gpuTypeIds": [c["gpu"]["id"]],
+                "dataCenterIds": [c["data_center_id"]]}
+
+
+def _token(usd_per_hr=0.84):
+    return confirm.CreateAuthorization("s", usd_per_hr, 1.5, 2.50)
+
+
+def _fallthrough(candidates, refusals, ceiling=0.84, **kw):
+    stub = _CreateStub(refusals, **kw)
+    lines = []
+    pod, chosen = cli._create_with_fallthrough(
+        stub, _Plan(candidates), "20260911-test", _token(ceiling),
+        log=lines.append)
+    return pod, chosen, stub, "\n".join(lines)
+
+
+# ---------------------------------------------------------- the happy path
+def test_the_first_candidate_is_used_when_capacity_exists():
+    cands = [_cand("EU-CZ-1", "RTX 4090", 0.74),
+             _cand("US-KS-2", "L4", 0.43)]
+    pod, chosen, stub, _log = _fallthrough(cands, refusals=0)
+    assert pod["id"] == "pod-1"
+    assert chosen is cands[0]
+    assert len(stub.specs) == 1
+
+
+def test_it_falls_through_to_the_next_candidate_without_re_prompting():
+    """The three refusals that prompted this, then a card that is free."""
+    cands = [_cand("EU-CZ-1", "RTX 4090", 0.74),
+             _cand("EU-RO-1", "RTX PRO 4500", 0.72),
+             _cand("US-KS-2", "L4", 0.43)]
+    pod, chosen, stub, log = _fallthrough(cands, refusals=2)
+    assert pod is not None
+    assert chosen is cands[2], chosen["gpu"]["display_name"]
+    assert len(stub.specs) == 3
+    # No prompt was reached: the only stdin reader in the package is
+    # confirm.ask_to_create, and this never calls it.
+    assert "attempt 1/3" in log and "attempt 3/3" in log
+    assert log.count("no instances available") == 2, log
+
+
+def test_each_attempt_is_logged_with_its_card_region_and_rate():
+    cands = [_cand("EU-CZ-1", "RTX 4090", 0.74),
+             _cand("US-KS-2", "L4", 0.43)]
+    _pod, _chosen, _stub, log = _fallthrough(cands, refusals=1)
+    assert "RTX 4090 in EU-CZ-1 at up to $0.74/hr" in log, log
+    assert "L4 in US-KS-2 at up to $0.43/hr" in log, log
+    assert "created on L4 in US-KS-2" in log, log
+
+
+def test_the_fallback_spec_names_the_fallback_card_and_region():
+    cands = [_cand("EU-CZ-1", "RTX 4090", 0.74),
+             _cand("US-KS-2", "L4", 0.43)]
+    _pod, _chosen, stub, _log = _fallthrough(cands, refusals=1)
+    assert stub.specs[0]["gpuTypeIds"] == ["NVIDIA RTX 4090"]
+    assert stub.specs[0]["dataCenterIds"] == ["EU-CZ-1"]
+    assert stub.specs[1]["gpuTypeIds"] == ["NVIDIA L4"]
+    assert stub.specs[1]["dataCenterIds"] == ["US-KS-2"]
+
+
+# ------------------------------------------------------------- the ceiling
+def test_a_candidate_above_the_confirmed_rate_is_never_tried():
+    """The developer authorised a price. A dearer card is outside it."""
+    cands = [_cand("EU-CZ-1", "RTX 4090", 0.74),
+             _cand("US-WA-1", "RTX PRO 6000", 2.09),      # over the ceiling
+             _cand("US-KS-2", "L4", 0.43)]
+    pod, chosen, stub, log = _fallthrough(cands, refusals=1, ceiling=0.84)
+    assert chosen is cands[2], chosen["gpu"]["display_name"]
+    tried = [s["gpuTypeIds"][0] for s in stub.specs]
+    assert "NVIDIA RTX PRO 6000" not in tried, tried
+    assert "above the $0.84/hr already confirmed" in log, log
+    assert "needs a new 'y'" in log
+
+
+def test_a_candidate_exactly_at_the_ceiling_is_inside_it():
+    cands = [_cand("EU-CZ-1", "RTX 4090", 0.74),
+             _cand("US-WA-1", "RTX 6000 Ada", 0.84)]      # == the ceiling
+    pod, chosen, _stub, _log = _fallthrough(cands, refusals=1, ceiling=0.84)
+    assert pod is not None
+    assert chosen is cands[1]
+
+
+def test_everything_refused_creates_nothing_and_says_so():
+    cands = [_cand("EU-CZ-1", "RTX 4090", 0.74),
+             _cand("US-KS-2", "L4", 0.43)]
+    pod, chosen, stub, log = _fallthrough(cands, refusals=99)
+    assert pod is None and chosen is None
+    assert len(stub.specs) == 2
+    assert "NO CAPACITY" in log
+    assert "Nothing was created and nothing is billing." in log
+
+
+def test_dearer_untried_candidates_are_named_when_everything_else_fails():
+    """So the developer knows a second 'y' would have somewhere to go."""
+    cands = [_cand("EU-CZ-1", "RTX 4090", 0.74),
+             _cand("US-WA-1", "RTX PRO 6000", 2.09)]
+    _pod, _chosen, _stub, log = _fallthrough(cands, refusals=99, ceiling=0.84)
+    assert "1 dearer candidate(s) were not tried" in log, log
+    assert "RTX PRO 6000 $2.09/hr" in log, log
+    assert "Re-run `up`" in log
+
+
+# ------------------------------- only this one error may be retried
+def test_any_other_create_failure_is_not_retried():
+    """A create that failed for another reason may have made a pod this
+    process never saw the id of. Retrying it could put two pods behind one
+    'y', so it propagates."""
+    cands = [_cand("EU-CZ-1", "RTX 4090", 0.74),
+             _cand("US-KS-2", "L4", 0.43)]
+    other = api.PodApiError("POST /pods -> HTTP 502 bad gateway", status=502)
+    try:
+        _fallthrough(cands, refusals=0, fail_all_with=other)
+    except api.PodApiError as e:
+        assert "502" in str(e)
+        return
+    raise AssertionError("a non-capacity failure was swallowed and retried")
+
+
+def test_is_no_capacity_matches_runpods_phrase_and_little_else():
+    assert api.is_no_capacity(api.PodApiError(NO_CAPACITY, status=500))
+    assert api.is_no_capacity(
+        api.PodApiError("There are no instances available", status=500))
+    for other in ["HTTP 502 bad gateway",
+                  "HTTP 500 internal server error",
+                  "HTTP 401 unauthorized",
+                  "timed out"]:
+        assert not api.is_no_capacity(api.PodApiError(other)), other
+
+
+# --------------------------------------------- what the plan hands it
+def test_the_plan_orders_candidates_by_preference_then_price():
+    table = {"EU-CZ-1": {"RTX PRO 4500": (0.50, "Low"),
+                         "RTX 4090": (0.20, "High")},
+             "US-KS-2": {"RTX PRO 4500": (0.34, "High")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        p, _t = _resolve_anywhere(table, tmp)
+    order = [(c["data_center_id"], c["gpu"]["display_name"])
+             for c in p.deploy_candidates]
+    # First choice first, cheapest region of it first; the second choice
+    # follows even though it is cheaper than either.
+    assert order == [("US-KS-2", "RTX PRO 4500"),
+                     ("EU-CZ-1", "RTX PRO 4500"),
+                     ("EU-CZ-1", "RTX 4090")], order
+
+
+def test_a_volume_session_falls_through_cards_in_its_own_region():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.load(_spec_file(
+            tmp, SPEC_YAML.replace('["RTX PRO 4500", "RTX 4090"]',
+                                   '["RTX PRO 4500", "L4"]')))
+        p = planmod.resolve(_client(), s)
+    order = [(c["data_center_id"], c["gpu"]["display_name"])
+             for c in p.deploy_candidates]
+    assert order == [("EU-RO-1", "RTX PRO 4500"), ("EU-RO-1", "L4")], order
+
+
+def test_candidates_within_excludes_the_dearer_ones():
+    cands = [_cand("a", "cheap", 0.43), _cand("b", "dear", 2.09)]
+    p = _Plan(cands)
+    assert p.candidates_within(0.84) == [cands[0]]
+    assert p.candidates_within(2.09) == cands
+    assert p.candidates_within(None) == []
+
+
+def test_the_session_lists_the_slower_cards_after_the_fast_ones():
+    """Not synthetic: the shipped session, widened after the refusals."""
+    import yaml as _y
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "..", "..", "sessions",
+                        "stackexchange-build.yaml")
+    with open(path, encoding="utf-8") as f:
+        spec = _y.safe_load(f)
+    gpus = spec["gpu"]
+    for name in ("L4", "RTX A5000", "RTX A4000", "RTX 3090", "A40"):
+        assert name in gpus, name
+    assert gpus.index("RTX 4090") < gpus.index("L4"), gpus
+    assert gpus[-5:] == ["L4", "RTX A5000", "RTX A4000", "RTX 3090", "A40"]
+
+
+
+def test_the_record_names_the_card_that_was_actually_deployed():
+    """A fallback must not leave `status` and `watch` reporting a card the
+    account never had."""
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.load(_spec_file(tmp))
+        p = planmod.resolve(_client(), s)
+        fallback = _cand("US-KS-2", "L4", 0.43)
+        rec = statemod.record_for(p, "20260911-test", "pod-9", None, fallback)
+    assert rec["gpu"] == "L4", rec["gpu"]
+    assert rec["data_center_id"] == "US-KS-2"
+    assert rec["usd_per_hr_confirmed"] == 0.43
+    assert rec["planned_gpu"] == "RTX PRO 4500", rec["planned_gpu"]
+
+
+def test_the_record_is_unchanged_when_the_plan_was_used_as_planned():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.load(_spec_file(tmp))
+        p = planmod.resolve(_client(), s)
+        rec = statemod.record_for(p, "20260911-test", "pod-9")
+    assert rec["gpu"] == "RTX PRO 4500"
+    assert rec["data_center_id"] == "EU-RO-1"
+    assert rec["planned_gpu"] is None, rec["planned_gpu"]
+
 _SKIP_EXCEPTIONS = [_Skipped]
 try:
     from _pytest.outcomes import Skipped as _PytestSkipped

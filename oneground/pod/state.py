@@ -87,9 +87,20 @@ def live_sessions(repo_root="."):
             if r.get("state") not in ("terminated", "failed")]
 
 
-def record_for(plan, session_id, pod_id, pod=None):
-    """Build the record written at `up`."""
+def record_for(plan, session_id, pod_id, pod=None, candidate=None):
+    """Build the record written at `up`.
+
+    `candidate` is what was actually deployed, which is not always what was
+    planned: `up` falls through to the next (datacenter, GPU) when a create is
+    refused for want of capacity. The record names the machine that exists,
+    not the one that was first chosen -- otherwise `status` and `watch` would
+    report a card the account never had.
+    """
     s = plan.session
+    gpu = (candidate or {}).get("gpu") or plan.gpu
+    dc = (candidate or {}).get("data_center_id") or plan.data_center_id
+    usd_max = (candidate or {}).get("usd_max", plan.usd_max)
+    usd_min = (candidate or {}).get("usd_min", plan.usd_min)
     return {
         "id": session_id,
         "session": s.name,
@@ -98,15 +109,19 @@ def record_for(plan, session_id, pod_id, pod=None):
         "state": "running",
         "created_at": _now_iso(),
         "started_at_epoch": time.time(),
-        "data_center_id": plan.data_center_id,
-        "gpu": plan.gpu["display_name"],
-        "gpu_type_id": plan.gpu["id"],
+        "data_center_id": dc,
+        "gpu": gpu["display_name"],
+        "gpu_type_id": gpu["id"],
+        # Set when the pod deployed is not the plan's first choice, so a
+        # record that disagrees with the plan above it explains itself.
+        "planned_gpu": (plan.gpu["display_name"]
+                        if gpu["id"] != plan.gpu["id"] else None),
         # What was confirmed (top of the range) and what the pod actually
         # costs, kept apart. `cost_so_far` uses the true rate once known;
         # before then it uses the confirmed worst case, so the estimate errs
         # high rather than low.
-        "usd_per_hr_confirmed": plan.usd_max,
-        "usd_per_hr_quoted_min": plan.usd_min,
+        "usd_per_hr_confirmed": usd_max,
+        "usd_per_hr_quoted_min": usd_min,
         "usd_per_hr_true": None,
         "usd_per_hr_at_create": plan.usd_per_hr,   # kept: older records read it
         "caps": {"max_hours": s.caps.max_hours, "max_usd": s.caps.max_usd,
