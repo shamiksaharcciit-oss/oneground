@@ -108,6 +108,16 @@ jobs:
           pip install -r requirements.txt
       - name: unit tests
         run: python -m pytest -q
+
+      - name: tests for this workflow's own scripts
+        # A separate run on purpose. pytest prunes dot-directories, and
+        # naming `.github/scripts` alongside `.` does not help -- pytest
+        # drops an argument that is a descendant of another, so the tests
+        # collect silently to zero. These guard the contradiction counter and
+        # the calibration push, both of which exist because a bug shipped
+        # inside an untestable YAML heredoc; leaving them uncollected would
+        # repeat exactly that mistake.
+        run: python -m pytest -q .github/scripts
       - name: cache the ANN-Benchmarks corpus
         uses: actions/cache@v4
         with:
@@ -188,6 +198,16 @@ jobs:
           pip install -r requirements.txt
       - name: unit tests
         run: python -m pytest -q
+
+      - name: tests for this workflow's own scripts
+        # A separate run on purpose. pytest prunes dot-directories, and
+        # naming `.github/scripts` alongside `.` does not help -- pytest
+        # drops an argument that is a descendant of another, so the tests
+        # collect silently to zero. These guard the contradiction counter and
+        # the calibration push, both of which exist because a bug shipped
+        # inside an untestable YAML heredoc; leaving them uncollected would
+        # repeat exactly that mistake.
+        run: python -m pytest -q .github/scripts
       - name: cache the ANN-Benchmarks corpus
         uses: actions/cache@v4
         with:

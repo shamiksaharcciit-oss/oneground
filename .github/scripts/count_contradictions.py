@@ -55,20 +55,29 @@ def read_lines(path):
     return out
 
 
+def judge(lines):
+    """Which of exactly these lines are blocking contradictions."""
+    return [d for d in lines
+            if d.get("outcome") == CONTRADICTED
+            and d.get("outcome_scope", BLOCKING) == BLOCKING]
+
+
 def blocking_contradictions(lines, appended):
     """The blocking contradictions among the last `appended` lines.
 
     `appended` is how many lines this run added. Zero means the run appended
     nothing, so it cannot have contradicted anything -- an empty result, not
     "look at everything".
+
+    Prefer `--lines` where the caller can name the lines it produced. A
+    trailing slice is only correct while nothing else has written to the file,
+    and once the push step has merged a concurrent run's lines onto the
+    calibration branch that is no longer true.
     """
     appended = int(appended or 0)
     if appended <= 0:
         return []
-    recent = lines[-appended:]
-    return [d for d in recent
-            if d.get("outcome") == CONTRADICTED
-            and d.get("outcome_scope", BLOCKING) == BLOCKING]
+    return judge(lines[-appended:])
 
 
 def main(argv=None):
@@ -76,14 +85,23 @@ def main(argv=None):
         description="Count blocking contradictions among newly appended "
                     "calibration lines.")
     ap.add_argument("--history", default="calibration/history.jsonl")
-    ap.add_argument("--appended", required=True,
-                    help="how many lines this run appended")
+    ap.add_argument("--appended", default=None,
+                    help="how many lines this run appended (slices the tail "
+                         "of --history; use --lines instead where possible)")
+    ap.add_argument("--lines", default=None,
+                    help="a file holding exactly the lines this run "
+                         "produced. Every one of them is judged; no slice.")
     ap.add_argument("--github-output", default=None,
                     help="write count= and body= here (GITHUB_OUTPUT)")
     args = ap.parse_args(argv)
 
-    lines = read_lines(args.history)
-    bad = blocking_contradictions(lines, args.appended)
+    if args.lines is None and args.appended is None:
+        ap.error("one of --lines or --appended is required")
+
+    if args.lines is not None:
+        bad = judge(read_lines(args.lines))
+    else:
+        bad = blocking_contradictions(read_lines(args.history), args.appended)
 
     out = [f"count={len(bad)}"]
     if bad:

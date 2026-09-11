@@ -33,6 +33,12 @@ inputs:
     description: branch the harness is allowed to write to
     required: false
     default: calibration
+  new_lines:
+    description: >
+      where to write the lines this run appended. Every step after `what
+      changed` reads this rather than re-deriving them from the history.
+    required: false
+    default: /tmp/oneground-new-calibration-lines.jsonl
 
 runs:
   using: composite
@@ -40,41 +46,63 @@ runs:
     - name: what changed
       id: diff
       shell: bash
+      env:
+        NEW_LINES: ${{ inputs.new_lines }}
       run: |
         set -euo pipefail
+        # Capture the lines themselves, not just the count. Every later step
+        # works from this file: the push merges exactly these onto the branch,
+        # and the contradiction check judges exactly these. A count alone only
+        # locates lines by position, which stops being true the moment a
+        # concurrent run appends to the same branch.
+        : > "$NEW_LINES"
+        added=0
         if git diff --quiet -- "${{ inputs.history }}"; then
-          echo "appended=0" >> "$GITHUB_OUTPUT"
           echo "no new calibration lines"
         else
-          n="$(git diff --numstat -- "${{ inputs.history }}" | awk '{print $1}')"
-          echo "appended=${n:-0}" >> "$GITHUB_OUTPUT"
-          echo "$n new line(s)"
+          read -r added removed _ < <(git diff --numstat -- "${{ inputs.history }}")
+          # Append-only. A removed line is somebody else's measurement being
+          # rewritten, and no amount of retrying makes that the right push.
+          if [ "${removed:-0}" != "0" ]; then
+            echo "::error::${removed} line(s) removed from ${{ inputs.history }} -- the calibration history is append-only"
+            exit 1
+          fi
+          git diff -U0 -- "${{ inputs.history }}" \
+            | grep '^+' | grep -v '^+++' | cut -c2- > "$NEW_LINES"
+          echo "$added new line(s)"
         fi
+        echo "appended=${added:-0}" >> "$GITHUB_OUTPUT"
 
     - name: push to the calibration branch
       if: steps.diff.outputs.appended != '0'
       shell: bash
       env:
-        BRANCH: ${{ inputs.branch }}
+        REMOTE: origin
+        BASE_BRANCH: main
+        PUSH_ATTEMPTS: "3"
+        NEW_LINES: ${{ inputs.new_lines }}
       run: |
         set -euo pipefail
-        git config user.name  "oneground calibration bot"
-        git config user.email "noreply@users.noreply.github.com"
-        # Take the appended lines onto the calibration branch, so that master
-        # is never a target of an automated push.
-        cp "${{ inputs.history }}" /tmp/history.jsonl
-        git fetch origin "$BRANCH" || true
-        git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null \
-          || git checkout -B "$BRANCH"
-        cp /tmp/history.jsonl "${{ inputs.history }}"
-        git add "${{ inputs.history }}"
-        git commit -m "calibration(${{ inputs.label }}): ${{ steps.diff.outputs.appended }} line(s) from run ${{ github.run_id }}" \
-          || { echo "nothing to commit"; exit 0; }
-        git push origin "$BRANCH"
+        # The git plumbing lives in a script so it can be tested against a
+        # stubbed remote. Inline, it failed run #3:
+        #
+        #     ! [rejected]  calibration -> calibration (non-fast-forward)
+        #
+        # It fetched with `|| true` and then checked out `origin/$BRANCH`,
+        # falling back to a bare `checkout -B` -- which on a tag push, where
+        # no refs/remotes/origin/* refspec is configured, started the branch
+        # from the tag commit. See .github/scripts/test_push_calibration.py.
+        "${{ github.action_path }}/../../scripts/push-calibration.sh" \
+          "${{ inputs.branch }}" \
+          "${{ inputs.history }}" \
+          "$NEW_LINES" \
+          "calibration(${{ inputs.label }}): ${{ steps.diff.outputs.appended }} line(s) from run ${{ github.run_id }}"
 
     - name: find contradictions
       id: bad
       shell: bash
+      env:
+        NEW_LINES: ${{ inputs.new_lines }}
       run: |
         set -euo pipefail
         # The rule lives in a script so it can be tested. It used to be a
@@ -83,9 +111,11 @@ runs:
         # where N counted appended lines -- failed run #1 on seven
         # contradictions the run had not produced. See
         # .github/scripts/test_count_contradictions.py.
+        # --lines, not --appended: by now the push step has merged this run's
+        # lines onto the calibration branch, so the tail of the history is not
+        # reliably ours. These are.
         python "${{ github.action_path }}/../../scripts/count_contradictions.py" \
-          --history "${{ inputs.history }}" \
-          --appended "${{ steps.diff.outputs.appended }}" \
+          --lines "$NEW_LINES" \
           --github-output "$GITHUB_OUTPUT"
 
     - name: open an issue carrying the line

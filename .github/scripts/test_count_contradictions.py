@@ -161,3 +161,71 @@ def test_blank_lines_in_the_history_are_skipped():
             f.write(json.dumps(line(outcome="verified")) + "\n")
             f.write("\n")
         assert len(read_lines(p)) == 1
+
+
+# ------------------------------------------------------- naming the lines
+def test_lines_judges_exactly_what_it_is_given():
+    with tempfile.TemporaryDirectory() as tmp:
+        p = _history(tmp, [line(outcome="contradicted", scope="blocking"),
+                           line(outcome="contradicted", scope="advisory"),
+                           line(outcome="verified")])
+        out = os.path.join(tmp, "out.txt")
+        assert main(["--lines", p, "--github-output", out]) == 0
+        assert "count=1" in open(out, encoding="utf-8").read()
+
+
+def test_lines_needs_no_appended_count():
+    """--appended exists to locate the run's lines in a bigger file. When the
+    caller can name them outright there is nothing to locate."""
+    with tempfile.TemporaryDirectory() as tmp:
+        p = _history(tmp, [line(outcome="verified")])
+        out = os.path.join(tmp, "out.txt")
+        assert main(["--lines", p, "--github-output", out]) == 0
+        assert "count=0" in open(out, encoding="utf-8").read()
+
+
+def test_an_empty_lines_file_contradicts_nothing():
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "none.jsonl")
+        open(p, "w").close()
+        out = os.path.join(tmp, "out.txt")
+        assert main(["--lines", p, "--github-output", out]) == 0
+        assert "count=0" in open(out, encoding="utf-8").read()
+
+
+def test_the_tail_slice_misreads_a_merged_history_and_lines_does_not():
+    """Why the action passes --lines.
+
+    After `push-calibration.sh` merges, the file on the calibration branch is
+    the branch's history plus this run's lines -- but a concurrent run's
+    lines may have landed in between. Slicing the last N then judges somebody
+    else's measurement. Here this run appended one verified line; the tail of
+    the merged file is a *different* run's blocking contradiction.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        mine = [line(outcome="verified", check="mine")]
+        merged = _history(tmp, [line(outcome="verified", check="old")]
+                          + mine
+                          + [line(outcome="contradicted", scope="blocking",
+                                  check="someone_elses")])
+        theirs = blocking_contradictions(read_lines(merged), 1)
+        assert [d["check"] for d in theirs] == ["someone_elses"]
+
+        mine_only = os.path.join(tmp, "mine.jsonl")
+        with open(mine_only, "w", encoding="utf-8", newline="\n") as f:
+            for d in mine:
+                f.write(json.dumps(d, sort_keys=True) + "\n")
+        out = os.path.join(tmp, "out.txt")
+        assert main(["--lines", mine_only, "--github-output", out]) == 0
+        assert "count=0" in open(out, encoding="utf-8").read()
+
+
+def test_neither_lines_nor_appended_is_an_error():
+    with tempfile.TemporaryDirectory() as tmp:
+        p = _history(tmp, [line()])
+        try:
+            main(["--history", p])
+        except SystemExit as e:
+            assert e.code == 2
+        else:
+            raise AssertionError("expected argparse to refuse")
