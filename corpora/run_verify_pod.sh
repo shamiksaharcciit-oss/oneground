@@ -382,15 +382,51 @@ if has_engine pgvector; then
     # Storage on the container disk, not the network volume, for the same
     # reason Qdrant's is: an engine's storage on a network mount measures the
     # mount. Task 006 measured a 30-minute venv install for that reason.
-    PGDATA=/root/pgdata
+    #
+    # NOT /root/pgdata. `/root` is drwx------ root root, so the postgres user
+    # cannot TRAVERSE it however the data directory itself is owned --
+    # chowning the directory looks like it should work and does not:
+    #
+    #     pg_ctl: could not access directory "/root/pgdata": Permission denied
+    #
+    # /var/lib/postgresql is created by postgresql-common, owned by postgres,
+    # and on the container disk, which is what the paragraph above actually
+    # asks for. Caught in a container before a third pod session paid for it.
+    PGDATA=/var/lib/postgresql/oneground-pgdata
     rm -rf "$PGDATA"
     mkdir -p "$PGDATA"
     chown -R postgres:postgres "$PGDATA"
-    su postgres -c "$PGBIN/initdb -D $PGDATA --data-checksums -A trust"         >/workspace/pg-initdb.log 2>&1
+    chmod 700 "$PGDATA"
+    # initdb and pg_ctl are checked explicitly. Chained with `&&` they failed
+    # silently and the run carried on to three connection errors against a
+    # server that had never started -- four messages for one fault, none of
+    # them naming it.
+    if ! su postgres -c "$PGBIN/initdb -D $PGDATA --data-checksums -A trust"         >/workspace/pg-initdb.log 2>&1; then
+        echo "ERROR: initdb failed; last 20 lines:" >&2
+        tail -20 /workspace/pg-initdb.log >&2
+        exit 1
+    fi
     # maintenance_work_mem matters: pgvector spills the HNSW build to disk
     # when it is too small, which makes index build time depend on a setting
     # nobody recorded. Same value as the local compose file.
-    su postgres -c "$PGBIN/pg_ctl -D $PGDATA -l /workspace/postgres.log -o         '-p $PG_PORT -c maintenance_work_mem=512MB -c shared_buffers=256MB          -c max_parallel_workers_per_gather=0' -w start"
+    # pg_ctl's -l file is created by the POSTGRES process, not by this
+    # shell, and /workspace is root-owned -- so postgres cannot create it:
+    #
+    #   /bin/sh: 1: cannot create /workspace/postgres.log: Permission denied
+    #
+    # Note the asymmetry that hides this. The `>/workspace/pg-initdb.log`
+    # above is a redirect performed by the ROOT shell outside `su`, so
+    # initdb's log lands fine and only the server's does not -- one of the
+    # two logs working is what makes the other look like a postgres fault.
+    # Pre-create it with the right owner, so the log still ends up where
+    # the session collects its outputs.
+    touch /workspace/postgres.log
+    chown postgres:postgres /workspace/postgres.log
+    if ! su postgres -c "$PGBIN/pg_ctl -D $PGDATA -l /workspace/postgres.log         -o '-p $PG_PORT -c maintenance_work_mem=512MB -c shared_buffers=256MB          -c max_parallel_workers_per_gather=0' -w start"; then
+        echo "ERROR: postgres did not start; last 20 lines of its log:" >&2
+        tail -20 /workspace/postgres.log >&2
+        exit 1
+    fi
     su postgres -c "$PGBIN/createuser -p $PG_PORT -s $PG_USER" || true
     su postgres -c "$PGBIN/createdb -p $PG_PORT -O $PG_USER $PG_DB" || true
     su postgres -c "$PGBIN/psql -p $PG_PORT -d $PG_DB -c         'CREATE EXTENSION IF NOT EXISTS vector'"

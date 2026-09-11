@@ -497,10 +497,63 @@ the `pgdg24.04` pins already fix it); and the install runs at `-q` rather than
 `-qq` so its `Get:` lines keep the 15-minute stall watchdog fed while
 dependency debs come down at 191 KB/s.
 
-**What is still unvalidated**: `initdb`, `pg_ctl start`, `CREATE EXTENSION` and
-an HNSW index build have not been run end to end anywhere. The install they
-depend on now has been. A container test of the remainder was still running
-when this was written and is not reported as evidence.
+**Then the remainder was validated locally, and it found two more faults** --
+both of which would have cost a pod session each.
+
+**Fault 3: `PGDATA=/root/pgdata` cannot work.** `/root` is `drwx------ root
+root`, so the `postgres` user cannot *traverse* it however the data directory
+itself is owned. `chown -R postgres:postgres /root/pgdata` looks like it
+solves this and does not:
+
+    pg_ctl: could not access directory "/root/pgdata": Permission denied
+
+`PGDATA` is now `/var/lib/postgresql/oneground-pgdata` -- created by
+postgresql-common, owned by postgres, and still on the container disk rather
+than the network volume, which is what the surrounding comment actually asks
+for.
+
+**Fault 4: postgres cannot write its own logfile to `/workspace`.**
+
+    /bin/sh: 1: cannot create /workspace/postgres.log: Permission denied
+
+`pg_ctl -l` is created by the **postgres process**, not by the calling shell,
+and `/workspace` is root-owned. The asymmetry is what hides it: the adjacent
+`>/workspace/pg-initdb.log` is a redirect performed by the *root* shell
+outside `su`, so initdb's log lands fine and only the server's does not --
+one of the two logs working is exactly what makes the other look like a
+postgres fault. The file is now pre-created with the right owner, so it still
+ends up where the session collects its outputs.
+
+**Fault 3 was found only because of a fifth change made in the same pass**:
+`initdb` and `pg_ctl` were chained with `&&`, so they failed silently and the
+run carried on to three connection errors against a server that had never
+started -- four messages for one fault, none of them naming it. Both are now
+checked explicitly and print the tail of their own log before exiting.
+
+**Verified by running the script's own text**, extracted verbatim from
+`corpora/run_verify_pod.sh` rather than retyped, in a container with the
+pinned versions:
+
+```
+  [5/5] initdb + start
+waiting for server to start.... done
+server started
+CREATE EXTENSION
+        extension
+pgvector 0.8.6
+```
+
+and separately, an HNSW index built and read back through the catalog exactly
+as `describe()` will:
+
+```
+CREATE INDEX t_hnsw ON public.t USING hnsw (embedding vector_ip_ops)
+  WITH (m='32', ef_construction='200')
+  tcp ok, server 16.15 (Debian 16.15-1.pgdg12+2)
+```
+
+Every step of the pod's pgvector path has now run somewhere. What has still
+never run on a pod is the path as a whole, on that machine, over that link.
 
 ## Observed, not done
 
