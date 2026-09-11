@@ -391,3 +391,106 @@ def test_the_script_is_executable_in_the_index():
 def test_a_green_run_can_be_produced_on_demand():
     """`workflow_dispatch`, so the fix can be proven before the schedule."""
     assert "workflow_dispatch:" in open(WORKFLOW, encoding="utf-8").read()
+
+
+# ------------------------------------------------- run #5: the branch's tree
+def test_the_scripts_survive_a_push_to_a_branch_whose_tree_lacks_them(tmp_path):
+    """Calibration run #5, reproduced and then prevented.
+
+        .github/scripts/merge_history.py: No such file or directory
+
+    `merge_history.py` was in the commit the job checked out. The push step
+    then checked out `calibration` -- rooted at 0.1.0-preview, three commits
+    before the scripts existed -- into the same working tree, which *deleted*
+    them, and invoked one of them by path on the next line. The action's
+    `find contradictions` step, one step later, would have died the same way
+    on `count_contradictions.py`.
+
+    Everything the existing tests do runs the script from the real repo, whose
+    path no checkout inside `tmp_path` can disturb, so none of them could see
+    this. Here the script runs from *inside* the clone it is operating on,
+    which is what CI does.
+    """
+    bash = _bash()
+    if not bash:
+        pytest.skip("no POSIX shell available")
+
+    remote = str(tmp_path / "remote.git")
+    seed = str(tmp_path / "seed")
+    work = str(tmp_path / "work")
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", remote],
+                   check=True, capture_output=True)
+
+    # Commit A: the era the calibration branch was cut in. No scripts.
+    os.makedirs(os.path.join(seed, "calibration"))
+    subprocess.run(["git", "init", "-q", "-b", "main", seed], check=True,
+                   capture_output=True)
+    _git(seed, "config", "user.email", "t@example.invalid")
+    _git(seed, "config", "user.name", "t")
+    with open(os.path.join(seed, "calibration", "history.jsonl"), "w",
+              encoding="utf-8", newline="\n") as f:
+        f.write(_line(0, scope="blocking") + "\n")
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-qm", "0.1.0-preview")
+    _git(seed, "remote", "add", "origin", remote)
+    _git(seed, "push", "-q", "origin", "main")
+    _git(seed, "push", "-q", "origin", "main:calibration")   # run #1 cut it here
+
+    # Commit B: the scripts land on main, and only on main.
+    scripts = os.path.join(seed, ".github", "scripts")
+    os.makedirs(scripts, exist_ok=True)
+    for name in ("push-calibration.sh", "merge_history.py",
+                 "count_contradictions.py"):
+        shutil.copy(os.path.join(HERE, name), os.path.join(scripts, name))
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-qm", "task 014c")
+    _git(seed, "push", "-q", "origin", "main")
+
+    subprocess.run(["git", "clone", "-q", remote, work], check=True,
+                   capture_output=True)
+    _git(work, "config", "user.email", "t@example.invalid")
+    _git(work, "config", "user.name", "t")
+
+    assert _git(work, "ls-tree", "-r", "--name-only",
+                "origin/calibration") == "calibration/history.jsonl", \
+        "the fixture must reproduce a calibration branch with no scripts"
+
+    hist, new = _append(work, [_line(1)])
+    e = dict(os.environ, REMOTE="origin", BASE_BRANCH="main")
+    p = subprocess.run(
+        [bash, ".github/scripts/push-calibration.sh", "calibration", hist,
+         new, "calibration(pins): 1 line(s)"],
+        cwd=work, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", env=e, timeout=300)
+
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "No such file or directory" not in (p.stdout + p.stderr)
+
+    # The scripts the next steps run must still be on disk.
+    for name in ("merge_history.py", "count_contradictions.py",
+                 "push-calibration.sh"):
+        assert os.path.exists(os.path.join(work, ".github", "scripts", name)), \
+            f"{name} was removed from the working tree by the push step"
+
+    assert _line(1) in _remote_history(remote, tmp_path)
+
+
+def test_the_push_leaves_the_checkout_exactly_as_it_found_it(world, tmp_path):
+    """The job has steps after this one, and they read the tree they started
+    with. A push that succeeds must not move HEAD, the branch, or the index."""
+    bash, remote, work = world
+    before_head = _git(work, "rev-parse", "HEAD")
+    before_branch = _git(work, "rev-parse", "--abbrev-ref", "HEAD")
+
+    hist, new = _append(work, [_line(1)])
+    p = _run(bash, work, hist, new)
+    assert p.returncode == 0, p.stdout + p.stderr
+
+    assert _git(work, "rev-parse", "HEAD") == before_head
+    assert _git(work, "rev-parse", "--abbrev-ref", "HEAD") == before_branch
+    assert _git(work, "branch", "--list", "calibration") == "", \
+        "a local calibration branch was created in the job's checkout"
+    # The run's own appended lines are still in the working copy, untouched.
+    with open(os.path.join(work, "calibration", "history.jsonl"),
+              encoding="utf-8") as f:
+        assert _line(1) in [l.strip() for l in f]
