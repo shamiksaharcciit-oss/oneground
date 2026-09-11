@@ -7,6 +7,7 @@ Everything else is resolved live by `plan`.
 
     gpu: ["RTX PRO 4500", "RTX 6000 Ada"]   # display names, first available
     volume: organic_orange_catfish_volume   # by name; datacenter derived
+                                            # -- or `none`, see below
     image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
     disk_gb: 20
     env: {HF_HOME: /workspace/hf}
@@ -19,6 +20,28 @@ Everything else is resolved live by `plan`.
       - {remote: /workspace/arxiv-150k-small.tgz, local: ./, extract: true}
       - {remote: /workspace/arxiv-150k-large.tgz, local: ../oneground-assets/}
     caps: {max_hours: 2, max_concurrent: 1, max_usd: 3.00}
+
+Volume, or no volume
+--------------------
+`volume:` is required and decides how the datacenter is picked:
+
+    volume: vecbench    the datacenter is **derived from the volume**. A
+                        network volume can only be attached by a pod in its own
+                        region, so the region is never written in the spec and
+                        cannot drift from it.
+
+    volume: none        no network volume. The datacenter is then **chosen by
+                        GPU availability**: of every listed datacenter, the
+                        cheapest one offering the first available GPU in the
+                        `gpu` list. `volume_mount_path` is an ordinary
+                        directory on the container disk, so `disk_gb` has to be
+                        big enough for everything the run writes, and anything
+                        left there dies with the pod.
+
+`none` exists because pinning a region to a volume also pins it to that
+region's stock. Task 016's build needed neither -- it streams its source and
+returns its outputs as tarballs -- and EU-RO-1, where the volume lives, was
+offering only a $5.98/hr B200 and an AMD card our CUDA build cannot use.
 
 Caps are enforced client-side, and the spec is refused without them. There is
 no server-side spend limit behind this: RunPod will happily run a pod until
@@ -143,7 +166,16 @@ class Session:
         self.path = path
         self.gpu = list(data["gpu"]) if isinstance(data["gpu"], (list, tuple)) \
             else [data["gpu"]]
-        self.volume = str(data["volume"])
+        # `volume: none` (or an explicit YAML null) means this session needs no
+        # network volume, and so is not tied to the volume's region. `volume`
+        # stays required: a session must say which it is, because the silent
+        # default would be the expensive mistake in either direction -- a lost
+        # workspace, or a pod that cannot be placed.
+        vol = data["volume"]
+        if vol is None or str(vol).strip().lower() == "none":
+            self.volume = None
+        else:
+            self.volume = str(vol)
         self.image = str(data["image"])
         self.disk_gb = int(data.get("disk_gb", 20))
         self.env = dict(data.get("env") or {})
@@ -184,9 +216,23 @@ class Session:
         if self.input_size_cap_mb <= 0:
             raise SessionSpecError("input_size_cap_mb must be > 0")
 
+    @property
+    def uses_volume(self):
+        """True when a network volume is named, and so fixes the datacenter.
+
+        The two placement rules hang off this, and nothing else:
+
+        * with a volume -- the datacenter is **derived from the volume**, since
+          a network volume can only be attached by a pod in its own region.
+        * without one -- the datacenter is **chosen by GPU availability**
+          across every listed datacenter, and `volume_mount_path` is an
+          ordinary directory on the container disk, which dies with the pod.
+        """
+        return self.volume is not None
+
     def __repr__(self):
         return "Session(%s, gpu=%s, volume=%s)" % (self.name, self.gpu,
-                                                   self.volume)
+                                                   self.volume or "none")
 
 
 def load(path):

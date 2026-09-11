@@ -392,3 +392,89 @@ class RunPodClient:
                 "stock": lp.get("stockStatus"),
             }
         return out
+
+    # -- datacenters --------------------------------------------------------
+    def list_datacenters(self, listed_only=True):
+        """Every datacenter the account can see, newest schema fields only.
+
+        `listed` is RunPod's own flag for "offered right now". An unlisted
+        datacenter may still hold a network volume -- the volume-derived path
+        never consults this list, precisely so that a session pinned to a
+        volume keeps working in a region that has stopped taking new pods.
+        It is the *volume-less* path that needs the list, because it is
+        choosing a region rather than being told one.
+        """
+        q = "query { dataCenters { id name location storageSupport listed } }"
+        rows = self.graphql(q).get("dataCenters") or []
+        out = []
+        for d in rows:
+            if listed_only and not d.get("listed"):
+                continue
+            out.append({"id": d.get("id"), "name": d.get("name"),
+                        "location": d.get("location"),
+                        "storage": bool(d.get("storageSupport")),
+                        "listed": bool(d.get("listed"))})
+        return sorted(out, key=lambda d: d["id"] or "")
+
+    def gpu_prices_across_datacenters(self, data_center_ids,
+                                      cloud_type="SECURE"):
+        """`{datacenter_id: {display_name: entry}}`, in **one** GraphQL call.
+
+        `gpu_price_ranges` is the same thing for a single datacenter. Asking it
+        33 times costs 33 round trips; `lowestPrice` takes a `dataCenterId`
+        argument, so the whole matrix can be aliased into one query instead
+        (measured: 5.8 s for 33 datacenters, against ~33 sequential calls).
+
+        The entries have exactly the shape `gpu_price_ranges` returns, so the
+        resolver treats a datacenter chosen here and one derived from a volume
+        identically.
+
+        One asymmetry is worth knowing before reading the resolver: `usd_max`
+        comes from `securePrice`, which the API reports **globally**, not per
+        datacenter. Only `usd_min` (the `lowestPrice` floor) varies by region.
+        So "the cheapest datacenter" can only be decided on the floor, while
+        the number anyone confirms against stays the global list price -- the
+        same rule task 006b's overspend established.
+        """
+        cloud = (cloud_type or "SECURE").upper()
+        dcs = list(data_center_ids)
+        if not dcs:
+            return {}
+        aliases = " ".join(
+            "dc%d: lowestPrice(input:{gpuCount:1, dataCenterId:%s}) "
+            "{ uninterruptablePrice stockStatus }" % (i, json.dumps(d))
+            for i, d in enumerate(dcs))
+        q = ("query { gpuTypes { id displayName memoryInGb "
+             "secureCloud communityCloud securePrice communityPrice %s } }"
+             % aliases)
+
+        out = {d: {} for d in dcs}
+        for g in self.graphql(q).get("gpuTypes", []) or []:
+            if cloud == "COMMUNITY":
+                list_price = g.get("communityPrice")
+                offered_on_cloud = bool(g.get("communityCloud"))
+            else:
+                list_price = g.get("securePrice")
+                offered_on_cloud = bool(g.get("secureCloud"))
+
+            for i, dc in enumerate(dcs):
+                lp = g.get("dc%d" % i) or {}
+                floor = lp.get("uninterruptablePrice")
+                if floor is not None and list_price is not None:
+                    usd_min, usd_max = min(floor, list_price), max(floor,
+                                                                  list_price)
+                else:
+                    usd_min, usd_max = floor, list_price
+                out[dc][g["displayName"]] = {
+                    "id": g["id"],
+                    "display_name": g["displayName"],
+                    "memory_gb": g.get("memoryInGb"),
+                    "usd_min": usd_min,
+                    "usd_max": usd_max,
+                    "floor": floor,
+                    "list_price": list_price,
+                    "cloud_type": cloud,
+                    "offered_on_cloud": offered_on_cloud,
+                    "stock": lp.get("stockStatus"),
+                }
+        return out

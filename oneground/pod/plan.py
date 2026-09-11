@@ -31,15 +31,25 @@ class Plan:
     """A resolved, priced session. Inert -- holding one costs nothing."""
 
     def __init__(self, session, volume, gpu, usd_min, usd_max, stock,
-                 data_center_id, candidates):
+                 data_center_id, candidates, dc_candidates=None,
+                 dc_searched=None):
         self.session = session
-        self.volume = volume                  # the raw API record
+        self.volume = volume                  # the raw API record, or None
         self.gpu = gpu                        # {id, display_name, ...}
         self.usd_min = usd_min
         self.usd_max = usd_max                # what everything is confirmed at
         self.stock = stock
         self.data_center_id = data_center_id
         self.candidates = candidates          # [(name, min, max, stock)]
+        # Volume-less only: the regions that offered the chosen GPU, and how
+        # many were searched. Kept so `plan` can show that the region was
+        # chosen rather than assumed.
+        self.dc_candidates = dc_candidates or []
+        self.dc_searched = dc_searched
+
+    @property
+    def uses_volume(self):
+        return self.volume is not None
 
     @property
     def usd_per_hr(self):
@@ -99,7 +109,7 @@ class Plan:
         """
         env = dict(self.session.env)
         env["ONEGROUND_SESSION"] = session_id
-        return {
+        spec = {
             "name": "oneground-session-%s" % session_id,
             "imageName": self.session.image,
             "gpuTypeIds": [self.gpu["id"]],
@@ -107,13 +117,19 @@ class Plan:
             "cloudType": self.session.cloud_type,
             "computeType": "GPU",
             "dataCenterIds": [self.data_center_id],
-            "networkVolumeId": self.volume["id"],
-            "volumeMountPath": self.session.volume_mount_path,
             "containerDiskInGb": self.session.disk_gb,
             "env": env,
             "ports": ["22/tcp"],
             "supportPublicIp": True,
         }
+        # Both keys are omitted rather than sent as null when there is no
+        # volume: `volumeMountPath` without a `networkVolumeId` describes a
+        # mount that does not exist, and the mount path is then just a
+        # directory on the container disk, which needs no declaring.
+        if self.uses_volume:
+            spec["networkVolumeId"] = self.volume["id"]
+            spec["volumeMountPath"] = self.session.volume_mount_path
+        return spec
 
     # -- rendering ----------------------------------------------------------
     def render(self, session_id="<assigned at up>"):
@@ -122,16 +138,31 @@ class Plan:
         A = L.append
         A("session      : %s   (%s)" % (s.name, s.path or "-"))
         A("")
-        A("  volume     : %s" % self.volume["name"])
-        A("               id %s, %s GB" % (self.volume["id"],
-                                           self.volume.get("size", "?")))
-        A("  datacenter : %s   (derived from the volume, not the spec)"
-          % self.data_center_id)
+        if self.uses_volume:
+            A("  volume     : %s" % self.volume["name"])
+            A("               id %s, %s GB" % (self.volume["id"],
+                                               self.volume.get("size", "?")))
+            A("  datacenter : %s   (derived from the volume, not the spec)"
+              % self.data_center_id)
+        else:
+            A("  volume     : none   (nothing outlives the pod)")
+            A("  datacenter : %s   (chosen by GPU availability%s)"
+              % (self.data_center_id,
+                 "" if self.dc_searched is None
+                 else ", %d searched" % self.dc_searched))
+            if self.priced:
+                A("               cheapest of %d offering %s, at $%.2f/hr"
+                  % (len(self.dc_candidates), self.gpu["display_name"],
+                     self.usd_max))
         A("  gpu        : %s   [%s]" % (self.gpu["display_name"], self.gpu["id"]))
         A("               stock %s" % self.stock)
         A("  image      : %s" % s.image)
-        A("  disk       : %d GB container disk, volume at %s"
-          % (s.disk_gb, s.volume_mount_path))
+        if self.uses_volume:
+            A("  disk       : %d GB container disk, volume at %s"
+              % (s.disk_gb, s.volume_mount_path))
+        else:
+            A("  disk       : %d GB container disk; %s is on it, not a volume"
+              % (s.disk_gb, s.volume_mount_path))
         A("  cloud      : %s" % s.cloud_type)
         if s.env:
             A("  env        : %s" % ", ".join("%s=%s" % kv
@@ -181,7 +212,26 @@ class Plan:
                        if lo is not None and hi is not None
                        else ("couldn't-check" if lo is not None
                              else "unavailable"))
-            for n, lo, hi, st in self.candidates) or "-"))
+            for n, lo, hi, st in self.candidates) or "-")
+          + ("   (in %s)" % self.data_center_id if not self.uses_volume
+             else ""))
+        if not self.uses_volume and self.dc_candidates:
+            A("")
+            A("  datacenters offering %s, cheapest first:"
+              % self.gpu["display_name"])
+            for d, lo, hi, st in self.dc_candidates[:8]:
+                A("    %-11s $%s - $%s/hr   stock %s%s"
+                  % (d,
+                     "?" if lo is None else "%.2f" % lo,
+                     "?" if hi is None else "%.2f" % hi,
+                     st, "   <- chosen" if d == self.data_center_id else ""))
+            if len(self.dc_candidates) > 8:
+                A("    ... and %d more" % (len(self.dc_candidates) - 8))
+            if self.priced:
+                A("  The list price is global, so every region above would be")
+                A("  confirmed at the same $%.2f/hr -- the floor is the only"
+                  % self.usd_max)
+                A("  regional signal, and it only breaks the tie.")
         return "\n".join(L)
 
     def render_payload(self, session_id="<assigned at up>"):
@@ -202,8 +252,114 @@ def resolve_volume(client, name):
         "it, so the name has to be the real one." % (name, known))
 
 
+def _pick_gpu(prices, session):
+    """First GPU in the spec's order that this datacenter actually sells.
+
+    Returns `(chosen_entry_or_None, candidates)`. Split out so the
+    volume-derived and volume-less paths cannot drift in what "available"
+    means.
+    """
+    candidates = []
+    chosen = None
+    for want in session.gpu:
+        entry = prices.get(want)
+        # Also accept the full type id, so a spec may be explicit if it wants.
+        if entry is None:
+            for e in prices.values():
+                if e["id"] == want:
+                    entry = e
+                    break
+        lo = entry["usd_min"] if entry else None
+        hi = entry["usd_max"] if entry else None
+        stock = entry["stock"] if entry else None
+        candidates.append((want, lo, hi, stock))
+        # Two conditions, both needed. `usd_min` present means the datacenter
+        # stocks the type; `offered_on_cloud` means the cloud this session
+        # actually buys sells it. RTX PRO 4500 carries a communityPrice of
+        # $0.34 with communityCloud false -- a price for a machine nobody can
+        # be given, and the one task 006b confirmed.
+        if (chosen is None and entry and lo is not None
+                and entry["offered_on_cloud"]):
+            chosen = entry
+    return chosen, candidates
+
+
+def resolve_anywhere(client, session):
+    """Session -> Plan for a session with no network volume.
+
+    The rule, in the spec's own words: **the cheapest datacenter offering the
+    first available GPU in the list**. The GPU list is a preference order, so
+    it is honoured first -- a cheap datacenter for a card the session did not
+    ask for is not a better answer, it is a different one. Only once a GPU is
+    fixed does price choose between the regions offering it.
+
+    "Cheapest" can only mean the `lowestPrice` floor, because `securePrice` --
+    the number this project confirms against -- is reported globally and is the
+    same in every region. The ranking is still written worst-case-first so it
+    stays correct if that ever changes, and the floor is only ever a tie-break
+    between regions, never the number anyone is asked to approve.
+    """
+    dcs = [d["id"] for d in client.list_datacenters(listed_only=True)]
+    if not dcs:
+        raise PlanError(
+            "the API listed no datacenters, so a region cannot be chosen. A "
+            "session with `volume: none` picks its own region; one pinned to "
+            "a volume does not need this call.")
+
+    by_dc = client.gpu_prices_across_datacenters(dcs, session.cloud_type)
+
+    # GPU preference order outer, price inner.
+    for want in session.gpu:
+        offers = []
+        for dc in dcs:
+            chosen, _cands = _pick_gpu(by_dc.get(dc, {}),
+                                       _OneGpu(session, want))
+            if chosen is not None:
+                offers.append((dc, chosen))
+        if not offers:
+            continue
+        # Worst case first, then the floor, then the id so a tie is stable and
+        # a re-run of `plan` cannot silently move the pod to another region.
+        offers.sort(key=lambda t: (t[1]["usd_max"], t[1]["usd_min"], t[0]))
+        dc, chosen = offers[0]
+        considered = [(d, e["usd_min"], e["usd_max"], e["stock"])
+                      for d, e in offers]
+        _chosen, candidates = _pick_gpu(by_dc.get(dc, {}), session)
+        return Plan(session=session, volume=None, gpu=chosen,
+                    usd_min=chosen["usd_min"], usd_max=chosen["usd_max"],
+                    stock=chosen["stock"], data_center_id=dc,
+                    candidates=candidates, dc_candidates=considered,
+                    dc_searched=len(dcs))
+
+    tried = ", ".join(session.gpu)
+    raise PlanError(
+        "none of the requested GPU types is offered on %s in any of the %d "
+        "listed datacenters.\n  requested: %s\n"
+        "This session sets `volume: none`, so every region was searched and "
+        "the answer is not a regional one -- the spec's gpu list has to name "
+        "something RunPod is currently selling."
+        % (session.cloud_type, len(dcs), tried))
+
+
+class _OneGpu:
+    """`session` narrowed to a single GPU, for reusing `_pick_gpu` per region.
+
+    A shim rather than a second code path: it keeps "is this GPU available on
+    this cloud in this datacenter" defined in exactly one place.
+    """
+
+    __slots__ = ("gpu", "cloud_type")
+
+    def __init__(self, session, want):
+        self.gpu = [want]
+        self.cloud_type = session.cloud_type
+
+
 def resolve(client, session):
     """Session -> Plan, using read-only calls only."""
+    if not session.uses_volume:
+        return resolve_anywhere(client, session)
+
     volume = resolve_volume(client, session.volume)
     dc = volume.get("dataCenterId")
     if not dc:

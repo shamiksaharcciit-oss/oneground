@@ -525,6 +525,11 @@ def _sync_and_start(ssh, s, root, session_id, pod_id=None):
         for ln in dirty[:10]:
             print("    %s" % ln)
         print("  a bundle carries commits, not the working tree.")
+    # With a network volume the mount path already exists. With `volume: none`
+    # it is an ordinary directory on the container disk and nothing has made it
+    # yet, so the first scp into it would fail. Idempotent, and cheap enough
+    # not to be worth branching on.
+    ssh.run("mkdir -p %s" % shlex.quote(s.volume_mount_path), timeout=60)
     remote_bundle = "/workspace/oneground.bundle"
     ssh.put(bundle, remote_bundle)
     ssh.run(sshx.clone_command(remote_bundle, s.remote_repo), timeout=600)

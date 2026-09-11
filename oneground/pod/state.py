@@ -111,8 +111,11 @@ def record_for(plan, session_id, pod_id, pod=None):
         "usd_per_hr_at_create": plan.usd_per_hr,   # kept: older records read it
         "caps": {"max_hours": s.caps.max_hours, "max_usd": s.caps.max_usd,
                  "max_concurrent": s.caps.max_concurrent},
-        "volume": plan.volume.get("name"),
-        "volume_id": plan.volume.get("id"),
+        # None for a `volume: none` session. Recorded rather than omitted, so
+        # a later reader can tell "no volume" from "record written before
+        # volumes existed".
+        "volume": plan.volume.get("name") if plan.volume else None,
+        "volume_id": plan.volume.get("id") if plan.volume else None,
         "remote_log": s.remote_log,
         "remote_repo": s.remote_repo,
         "done_marker": s.done_marker,

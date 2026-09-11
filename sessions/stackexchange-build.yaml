@@ -1,14 +1,18 @@
 # stackexchange-150k canonical build, as a pod session (task 016).
 #
-# Same shape as sessions/arxiv-build.yaml. Two things differ, both because the
+# Same shape as sessions/arxiv-build.yaml. Three things differ, all because the
 # corpus does:
 #
-#   * the source is not on the volume, and is never put there. It is 59 parquet
+#   * it uses no network volume at all (`volume: none`), so the datacenter is
+#     chosen by GPU availability rather than derived from a volume's region.
+#     Nothing it produces needs to outlive the pod.
+#   * the source is not on a volume, and is never put anywhere. It is 59 parquet
 #     shards, ~34 GB, at a pinned revision of `mikex86/stackoverflow-posts`,
 #     and the sampler reads their row groups over the network straight into the
 #     per-year reservoirs. Nothing is downloaded and nothing is stored; the run
 #     writes only the sample. arxiv-150k's 4 GB snapshot, by contrast, was
-#     uploaded by hand once and has lived on the volume since.
+#     uploaded by hand once and has lived on the vecbench volume since, which
+#     is why that session still names a volume and this one does not.
 #   * that read is still ~32 GB of column chunks over the wire, so the run is
 #     longer than arxiv-150k's 19 minutes and the caps are larger. They are
 #     still caps, not estimates: `watch` terminates at them.
@@ -18,17 +22,27 @@
 #     python -m oneground.pod watch <id>
 
 gpu:
-  # Display names, tried in order; the first actually offered in the volume's
-  # datacenter wins. arxiv-150k build 3 ran on an RTX PRO 4500 Blackwell, and
-  # the same list is used here so the two fixtures' embeddings come off
-  # comparable hardware where possible. `plan` resolves this live.
+  # Display names, in preference order. With `volume: none` below, the first
+  # one available *anywhere* wins, and the cheapest listed datacenter offering
+  # it is chosen -- preference order first, price only between the regions
+  # offering that card. arxiv-150k build 3 ran on an RTX PRO 4500 Blackwell,
+  # and the same list is used here so the two fixtures' embeddings come off
+  # comparable hardware where possible. `plan` resolves this live, and stock
+  # moves between runs: re-run `plan` before `up`.
   - RTX PRO 4500
   - RTX PRO 6000
   - RTX 6000 Ada
   - RTX 4090
 
-volume: vecbench            # by name; datacenter derived from it
-volume_mount_path: /workspace
+# No network volume. Task 016's build needs nothing that outlives the pod: the
+# source is streamed and never stored, and both outputs come back as tarballs.
+# Pinning a region to a volume also pins it to that region's stock, and EU-RO-1
+# -- where vecbench lives -- was offering only a $5.98/hr B200 (over cap) and an
+# AMD MI300X our cu130 torch cannot run on. With `none` the datacenter is chosen
+# by GPU availability instead: the cheapest listed datacenter offering the first
+# available GPU in the list above. `plan` prints which, and at what price.
+volume: none
+volume_mount_path: /workspace   # an ordinary directory on the container disk
 
 # The same pinned tag as arxiv-build.yaml: CUDA 13.0 for torch 2.14.0+cu130,
 # ubuntu2404 for python 3.12.3. The image's own torch is irrelevant -- setup
@@ -36,12 +50,16 @@ volume_mount_path: /workspace
 # requirements.txt exactly.
 image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
 
-# Container disk, for the venv at /root/.venv. Nothing else lands here: the
-# shards are streamed and never written, and the artifacts go to the volume.
-disk_gb: 20
+# Container disk. With no volume this holds everything the run writes, so it is
+# sized for the whole build rather than just the venv: the venv at /root/.venv,
+# the bge-base weights under HF_HOME, the fixture artifacts (vectors.npy is
+# ~460 MB) and both output tarballs. The 34 GB of shards are NOT here -- they
+# are streamed and never written. 60 GB is comfortable for that, and the disk
+# dies with the pod, so nothing is left behind to pay for.
+disk_gb: 60
 
 env:
-  HF_HOME: /workspace/hf
+  HF_HOME: /workspace/hf          # container disk now, not the volume
   FIXTURE: stackexchange-150k
   # No SOURCE. The spec names its own source -- repo, revision and per-shard
   # digests -- and the sampler streams it. A SOURCE here would mean "read these

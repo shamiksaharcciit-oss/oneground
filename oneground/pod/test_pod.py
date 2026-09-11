@@ -2049,6 +2049,314 @@ def test_live_plan_against_the_real_api():
 # pytest is installed, `pytest.skip()` raises pytest's own Skipped rather than
 # the shim's -- so the no-runner path has to know about both, or installing a
 # test runner silently breaks running the tests without one.
+
+
+# ===================================================================
+# `volume: none` -- the datacenter is chosen, not derived (task 016c)
+# ===================================================================
+# EU-RO-1, where the vecbench volume lives, stopped offering anything this
+# project can use: a $5.98/hr B200, over cap, and an AMD MI300X our cu130
+# torch cannot run on. A session that needs no volume should not be pinned to
+# that region's stock. These cover both placement rules and, as much as
+# anything, that they stay separate.
+
+
+class DcTransport:
+    """A stubbed API answering both GraphQL queries the chooser makes.
+
+    It dispatches on the request body rather than a call counter, and parses
+    the alias->datacenter mapping out of the real query text, so a change to
+    the query shape surfaces here as a failure rather than as a stub that
+    quietly keeps agreeing.
+
+    `table`    {datacenter_id: {gpu_display_name: (floor, stock)}}
+    `globals_` {gpu_display_name: (type_id, securePrice, secureCloud)}
+    """
+
+    def __init__(self, table, globals_, listed=None):
+        self.table = table
+        self.globals = globals_
+        self.listed = listed if listed is not None else sorted(table)
+        self.calls = []
+        self.queries = []
+
+    def __call__(self, method, url, body, headers, timeout):
+        self.calls.append((method, url, body))
+        if "graphql" not in url:
+            return {}
+        q = (body or {}).get("query", "")
+        self.queries.append(q)
+        if "dataCenters" in q:
+            return {"data": {"dataCenters": [
+                {"id": d, "name": d, "location": "Test",
+                 "storageSupport": True, "listed": d in self.listed}
+                for d in sorted(self.table)]}}
+
+        pairs = re.findall(
+            r'(dc\d+):\s*lowestPrice\(input:\{gpuCount:1,\s*'
+            r'dataCenterId:("(?:[^"\\]|\\.)*")\}\)', q)
+        assert pairs, "the aliased price query did not match: %r" % q[:200]
+        alias_dc = [(a, json.loads(d)) for a, d in pairs]
+
+        types = []
+        for name, (type_id, secure_price, secure_cloud) in self.globals.items():
+            g = {"id": type_id, "displayName": name, "memoryInGb": 48,
+                 "secureCloud": secure_cloud, "communityCloud": False,
+                 "securePrice": secure_price, "communityPrice": None}
+            for alias, dc in alias_dc:
+                floor, stock = self.table.get(dc, {}).get(name, (None, None))
+                g[alias] = {"uninterruptablePrice": floor,
+                            "stockStatus": stock}
+            types.append(g)
+        return {"data": {"gpuTypes": types}}
+
+
+DC_GLOBALS = {
+    "RTX PRO 4500": ("NVIDIA RTX PRO 4500 Blackwell", 0.72, True),
+    "RTX 4090": ("NVIDIA GeForce RTX 4090", 0.74, True),
+    "B200": ("NVIDIA B200", 6.79, True),
+}
+
+
+def _anywhere_spec(tmp, **over):
+    """The reference spec with `volume: none`, plus any overrides."""
+    import yaml as _y
+    d = _spec_data()
+    d["volume"] = "none"
+    d.update(over)
+    p = os.path.join(tmp, "anywhere.yaml")
+    with open(p, "w", encoding="utf-8", newline="\n") as f:
+        _y.safe_dump(d, f, sort_keys=False)
+    return p
+
+
+def _resolve_anywhere(table, tmp, listed=None, globals_=None, **over):
+    t = DcTransport(table, globals_ or DC_GLOBALS, listed=listed)
+    c = api.RunPodClient(key=FAKE_KEY, transport=t)
+    s = sessionmod.load(_anywhere_spec(tmp, **over))
+    return planmod.resolve(c, s), t
+
+
+# -------------------------------------------------------------- the schema
+def test_volume_none_parses_as_no_volume():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.load(_anywhere_spec(tmp))
+    assert s.volume is None
+    assert s.uses_volume is False
+
+
+def test_an_explicit_yaml_null_is_also_no_volume():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.load(_anywhere_spec(tmp, volume=None))
+    assert s.volume is None and s.uses_volume is False
+
+
+def test_the_word_none_is_matched_case_insensitively():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.load(_anywhere_spec(tmp, volume="None"))
+    assert s.volume is None
+
+
+def test_a_named_volume_still_uses_a_volume():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.load(_spec_file(tmp))
+    assert s.volume == "vol-a" and s.uses_volume is True
+
+
+def test_volume_is_still_a_required_key():
+    """No silent default in either direction: a lost workspace and an
+    unplaceable pod are both expensive."""
+    import yaml as _y
+    with tempfile.TemporaryDirectory() as tmp:
+        d = _spec_data()
+        d.pop("volume")
+        p = os.path.join(tmp, "novol.yaml")
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
+            _y.safe_dump(d, f, sort_keys=False)
+        try:
+            sessionmod.load(p)
+        except sessionmod.SessionSpecError as e:
+            assert "volume" in str(e)
+            return
+    raise AssertionError("a spec with no volume key was accepted")
+
+
+# ----------------------------------------------------------- the placement
+def test_the_cheapest_datacenter_offering_the_gpu_wins():
+    table = {"EU-CZ-1": {"RTX PRO 4500": (0.50, "Low")},
+             "US-KS-2": {"RTX PRO 4500": (0.34, "High")},
+             "US-NC-1": {"RTX PRO 4500": (0.60, "Medium")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        p, _t = _resolve_anywhere(table, tmp)
+    assert p.data_center_id == "US-KS-2", p.data_center_id
+    assert p.gpu["display_name"] == "RTX PRO 4500"
+    assert p.usd_min == 0.34
+    assert p.usd_max == 0.72          # the global list price, not the floor
+    assert len(p.dc_candidates) == 3
+
+
+def test_gpu_preference_order_beats_a_cheaper_second_choice():
+    """The gpu list is a preference order, not a shortlist to price-shop. A
+    cheaper region for a card the session did not ask for first is a
+    different answer, not a better one."""
+    table = {"EU-CZ-1": {"RTX 4090": (0.20, "High")},
+             "US-KS-2": {"RTX PRO 4500": (0.90, "Low")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        p, _t = _resolve_anywhere(table, tmp)
+    assert p.gpu["display_name"] == "RTX PRO 4500", p.gpu["display_name"]
+    assert p.data_center_id == "US-KS-2"
+
+
+def test_it_falls_through_to_the_next_gpu_when_the_first_is_nowhere():
+    table = {"EU-CZ-1": {"RTX 4090": (0.34, "Low")},
+             "US-KS-2": {"B200": (5.98, "High")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        p, _t = _resolve_anywhere(table, tmp)
+    assert p.gpu["display_name"] == "RTX 4090"
+    assert p.data_center_id == "EU-CZ-1"
+
+
+def test_an_unlisted_datacenter_is_not_chosen():
+    table = {"EU-CZ-1": {"RTX PRO 4500": (0.50, "Low")},
+             "US-KS-2": {"RTX PRO 4500": (0.10, "High")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        p, _t = _resolve_anywhere(table, tmp, listed=["EU-CZ-1"])
+    assert p.data_center_id == "EU-CZ-1", p.data_center_id
+
+
+def test_a_tie_is_broken_stably_by_datacenter_id():
+    """Two `plan` runs must not silently move the pod between regions."""
+    table = {"US-NC-1": {"RTX PRO 4500": (0.34, "High")},
+             "EU-CZ-1": {"RTX PRO 4500": (0.34, "High")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        first, _t = _resolve_anywhere(table, tmp)
+        second, _t2 = _resolve_anywhere(table, tmp)
+    assert first.data_center_id == "EU-CZ-1"
+    assert second.data_center_id == first.data_center_id
+
+
+def test_a_gpu_not_sold_on_this_cloud_is_not_chosen_anywhere():
+    """The task 006b trap, now across regions: a floor without the cloud flag
+    is the price of a machine nobody can be given."""
+    g = dict(DC_GLOBALS)
+    g["RTX PRO 4500"] = ("NVIDIA RTX PRO 4500 Blackwell", 0.72, False)
+    table = {"EU-CZ-1": {"RTX PRO 4500": (0.34, "High"),
+                         "RTX 4090": (0.40, "Low")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        p, _t = _resolve_anywhere(table, tmp, globals_=g)
+    assert p.gpu["display_name"] == "RTX 4090", p.gpu["display_name"]
+
+
+def test_nothing_available_anywhere_refuses_and_says_where_it_looked():
+    table = {"EU-CZ-1": {"B200": (5.98, "High")},
+             "US-KS-2": {"B200": (6.10, "Low")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            _resolve_anywhere(table, tmp)
+        except planmod.PlanError as e:
+            assert "any of the 2 listed datacenters" in str(e), str(e)
+            assert "volume: none" in str(e)
+            return
+    raise AssertionError("an unavailable GPU list resolved")
+
+
+def test_a_volume_less_session_makes_no_volume_lookup():
+    table = {"EU-CZ-1": {"RTX PRO 4500": (0.34, "High")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        _p, t = _resolve_anywhere(table, tmp)
+    assert [u for _m, u, _b in t.calls if "networkvolume" in u.lower()] == []
+
+
+def test_the_price_matrix_costs_one_graphql_call():
+    """33 datacenters must not mean 33 round trips."""
+    table = {"dc-%02d" % i: {"RTX PRO 4500": (0.30 + i / 100.0, "Low")}
+             for i in range(12)}
+    with tempfile.TemporaryDirectory() as tmp:
+        _p, t = _resolve_anywhere(table, tmp)
+    price_queries = [q for q in t.queries if "lowestPrice" in q]
+    assert len(price_queries) == 1, len(price_queries)
+    assert price_queries[0].count("lowestPrice") == 12
+
+
+def test_resolving_without_a_volume_creates_nothing():
+    table = {"EU-CZ-1": {"RTX PRO 4500": (0.34, "High")}}
+    with tempfile.TemporaryDirectory() as tmp:
+        _p, t = _resolve_anywhere(table, tmp)
+    assert [(m, u) for m, u, _b in t.calls if api.is_billable(m, u)] == []
+
+
+# --------------------------------------------------- the payload and render
+def _anywhere_plan(tmp, table=None, **over):
+    table = table or {"EU-CZ-1": {"RTX PRO 4500": (0.34, "High")},
+                      "US-KS-2": {"RTX PRO 4500": (0.55, "Low")}}
+    p, _t = _resolve_anywhere(table, tmp, **over)
+    return p
+
+
+def test_the_payload_omits_the_volume_keys_entirely():
+    """Absent, not null: a mount path with no volume id describes a mount
+    that does not exist."""
+    with tempfile.TemporaryDirectory() as tmp:
+        spec = _anywhere_plan(tmp).deploy_spec("20260911-test")
+    assert "networkVolumeId" not in spec
+    assert "volumeMountPath" not in spec
+    assert spec["dataCenterIds"] == ["EU-CZ-1"]
+    assert spec["containerDiskInGb"] == 20
+
+
+def test_the_volume_payload_still_carries_both_keys():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.load(_spec_file(tmp))
+        spec = planmod.resolve(_client(), s).deploy_spec("20260911-test")
+    assert spec["networkVolumeId"] == VOLUME["id"]
+    assert spec["volumeMountPath"] == "/workspace"
+
+
+def test_render_names_the_chosen_datacenter_and_its_price():
+    with tempfile.TemporaryDirectory() as tmp:
+        text = _anywhere_plan(tmp).render()
+    assert "volume     : none" in text
+    assert "EU-CZ-1" in text
+    assert "chosen by GPU availability" in text
+    assert "<- chosen" in text
+    assert "$0.72/hr" in text                     # confirmed at the top
+    assert "datacenters offering RTX PRO 4500" in text
+
+
+def test_render_says_the_mount_is_container_disk():
+    with tempfile.TemporaryDirectory() as tmp:
+        text = _anywhere_plan(tmp, disk_gb=60).render()
+    assert "60 GB container disk" in text
+    assert "not a volume" in text
+
+
+def test_render_of_a_volume_session_is_unchanged():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.load(_spec_file(tmp))
+        text = planmod.resolve(_client(), s).render()
+    assert "derived from the volume" in text
+    assert "chosen by GPU availability" not in text
+
+
+def test_the_cap_still_binds_without_a_volume():
+    """The region became negotiable; the money boundary did not."""
+    with tempfile.TemporaryDirectory() as tmp:
+        p = _anywhere_plan(tmp, caps={"max_hours": 10, "max_usd": 1.00,
+                                      "max_concurrent": 1})
+        try:
+            p.check_cap()
+        except planmod.PlanError as e:
+            assert "cap exceeded" in str(e)
+            return
+    raise AssertionError("an over-cap volume-less plan was accepted")
+
+
+def test_the_state_record_notes_there_was_no_volume():
+    with tempfile.TemporaryDirectory() as tmp:
+        rec = statemod.record_for(_anywhere_plan(tmp), "20260911-test", None)
+    assert rec["volume"] is None
+    assert rec["volume_id"] is None
+
 _SKIP_EXCEPTIONS = [_Skipped]
 try:
     from _pytest.outcomes import Skipped as _PytestSkipped

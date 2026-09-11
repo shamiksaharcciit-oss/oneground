@@ -12,8 +12,15 @@ at 1.00. This revision, after review, makes two changes the reviewer asked for:
    reservoir over the network; the build writes only the sample, and the 36 GiB
    of scratch disk it used to need is gone.
 
-Everything below covers both. Section headings marked **(016b)** are the second
-revision.
+A third revision followed when `up` was refused by the region itself:
+
+3. **`volume: none`.** EU-RO-1, where `vecbench` lives, offered only an
+   over-cap B200 and an AMD card our CUDA build cannot use. A session that
+   needs no volume now picks its datacenter by GPU availability instead of
+   inheriting the volume's region.
+
+Everything below covers all three. Headings marked **(016b)** are the second
+revision, **(016c)** the third.
 
 ## Repo state expected vs found
 
@@ -280,6 +287,79 @@ arxiv-150k's. A second pass would re-read the `Body` column — 88% of the bytes
 The local-directory path is deliberately kept, for tests and an offline
 rebuild, and a test asserts it never consults the Hub.
 
+### (016c) `volume: none` — the datacenter is chosen, not derived
+
+`up` refused: EU-RO-1, where the `vecbench` volume lives, was offering only a
+B200 at $5.98–6.79/hr (over cap) and an MI300X (AMD, which our cu130 torch
+cannot use). Pinning a session to a volume also pins it to that region's stock
+— and this session needs no volume at all, since the source streams and both
+outputs come back as tarballs.
+
+`volume:` stays **required**, and now takes `none` (or an explicit YAML null).
+The two placement rules are separate and both tested:
+
+| `volume:` | datacenter | `volume_mount_path` |
+|---|---|---|
+| a name | **derived from the volume** — unchanged | the mount |
+| `none` | **chosen by GPU availability** | a directory on the container disk |
+
+The choosing rule, precisely: **the cheapest listed datacenter offering the
+first available GPU in the list**. GPU preference order is honoured *first* — a
+cheaper region for a card the session did not ask for is a different answer,
+not a better one — and only then does price choose between the regions offering
+it. Ties break on datacenter id so two `plan` runs cannot silently move the pod.
+
+**One honest wrinkle, recorded because it changes what "cheapest" means.**
+`securePrice` — the number this project confirms against, per task 006b — is
+reported **globally**, not per datacenter. Only the `lowestPrice` floor varies
+by region. So "cheapest datacenter" can only be decided on the floor, while the
+confirmed rate is identical everywhere. The ranking is still written
+worst-case-first so it stays correct if that ever changes, and `plan` says so
+in as many words rather than implying a saving that is not there.
+
+**One query, not 33.** `lowestPrice` takes a `dataCenterId`, so the whole
+price matrix is aliased into a single GraphQL call — measured at 5.8 s for 33
+listed datacenters, against 33 sequential round trips. A test asserts the call
+count is 1.
+
+Unlisted datacenters are excluded from the *choice* but the volume-derived path
+never consults the list at all, deliberately: a session pinned to a volume must
+keep working in a region that has stopped taking new pods.
+
+`deploy_spec` **omits** `networkVolumeId` and `volumeMountPath` entirely rather
+than sending nulls — a mount path with no volume id describes a mount that does
+not exist. And `_sync_and_start` now `mkdir -p`s the mount path before the first
+scp: with a volume it already exists, without one nothing had created it, and
+the bundle upload would have failed after the pod was already billing.
+
+**Live, read-only, nothing created:**
+
+    volume     : none   (nothing outlives the pod)
+    datacenter : US-WA-1   (chosen by GPU availability, 33 searched)
+                 cheapest of 1 offering RTX 6000 Ada, at $0.84/hr
+    gpu        : RTX 6000 Ada   [NVIDIA RTX 6000 Ada Generation]
+                 stock Low
+    disk       : 60 GB container disk; /workspace is on it, not a volume
+    price      : $0.74 - $0.84/hr   (live on-demand range, SECURE, US-WA-1)
+                 confirmed at the TOP of the range, $0.84/hr
+    caps       : max_hours 1.5, max_usd $2.50, max_concurrent 1
+    COST CAP   : 1.5 h x up to $0.84/hr = up to $1.26   within max_usd
+    considered : RTX PRO 4500=unavailable  RTX PRO 6000=unavailable
+                 RTX 6000 Ada=$0.74-$0.84/Low  RTX 4090=unavailable  (in US-WA-1)
+
+    datacenters offering RTX 6000 Ada, cheapest first:
+      US-WA-1     $0.74 - $0.84/hr   stock Low   <- chosen
+
+Worth noting how live this is: a probe twenty minutes earlier found RTX 4090 in
+EU-CZ-1 and **no** listed datacenter offering RTX 6000 Ada. Stock moves between
+runs, which is the argument for resolving it at `plan` time rather than writing
+a region into the spec.
+
+The session is now `volume: none` with `disk_gb: 60` — sized for the venv, the
+bge-base weights, the artifacts (`vectors.npy` is ~460 MB) and both tarballs.
+The 34 GB of shards are *not* on it; they are streamed. The disk dies with the
+pod, so nothing is left behind to pay for.
+
 ### 016 step 4 — the pod session resolves
 
 `oneground pod plan sessions/stackexchange-build.yaml` resolves live and
@@ -323,6 +403,14 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 | Streamed sample == local sample | `test_a_streamed_dump_gives_the_same_sample_as_the_local_one` | **identical record lists** |
 | Disk needed by the build | was 34 GiB shards + 2 GiB headroom | **0** for the source; only the sample is written |
 | Real-library spooling | `tasks/scratch/016b-no-disk-probe2.py`, 262,144 rows incl. `Body`, empty `HF_HOME` + temp dirs | **0 bytes** written |
+| **(016c)** Datacenters visible | `dataCenters` GraphQL query | 50 total, **33 listed** |
+| **(016c)** Cross-datacenter price matrix | one aliased GraphQL call, 33 datacenters | **5.8 s**, 3,328-char query, **1** round trip |
+| **(016c)** Live resolution, `volume: none` | `pod plan sessions/stackexchange-build.yaml` | **US-WA-1**, RTX 6000 Ada, $0.74–$0.84/hr |
+| **(016c)** Cost cap on that plan | 1.5 h x $0.84 | **$1.26** vs `max_usd` $2.50 |
+| **(016c)** Stock volatility | the same probe 20 min apart | RTX 4090 in EU-CZ-1, then unavailable; RTX 6000 Ada nowhere, then US-WA-1 |
+| **(016c)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **130 passed, 1 skipped** (+22) |
+| **(016c)** Full suite | `python -m pytest -q` | **555 passed, 1 skipped** in 560.7 s |
+| — vs `8056afb` | 533 passed, 1 skipped | **+22**, all `volume: none` |
 
 ### What `plan` resolved
 
@@ -357,6 +445,16 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
   rows including `Body` — checked against the live Hub, not a stub.
 - **(016b)** The sampling layer is still byte-identical after the refactor:
   the smoke rebuild reproduced both pre-embedding receipts exactly.
+- **(016c)** Both placement rules, against a stubbed API that dispatches on the
+  request body and parses the alias→datacenter mapping out of the real query,
+  so a change to the query shape fails the stub rather than slipping past it.
+  Two negative controls: a naive "cheapest anything, anywhere" rule breaks
+  preference order, the `listed` filter and the cheapest-datacenter choice;
+  dropping `offered_on_cloud` re-creates the task 006b trap. All four tests
+  fail as they must.
+- **(016c)** A volume-less resolve makes **no** volume lookup and **no**
+  billable call, and the volume-derived path's payload and rendering are
+  unchanged.
 
 **Failed.** Nothing failed that indicates a defect in the code under test. The
 smoke rebuild failed to *complete*, from memory exhaustion on this machine.
@@ -402,6 +500,24 @@ same `0xC0000005`. The layers past embedding remain couldn't-check, unchanged.
   irregular spacing. A typo would silently make a fixture unmatchable rather
   than raise. A one-line validator at spec load would close it. Not done: no
   brief asks for it, and the failure is quiet rather than wrong.
+- **(016c) `docs/POD.md` is now partly stale.** It documents `volume:` as
+  always naming a volume (line 158), states "the datacenter is never written
+  down… derived from the volume's record" (line 171) as the only rule, and
+  shows a `plan` output with a volume (lines 189–190). All of that is still
+  true for a volume-backed session and incomplete for `volume: none`. Not
+  edited: CLAUDE.md makes `docs/` read-only unless a brief names the file and
+  the change, and this one named the session schema, not the doc. It wants one
+  short section, and I would rather you commissioned it than found it.
+- **(016c) `watch` and `fetch` have not been exercised against a volume-less
+  pod.** Nothing in them reads the volume — `fetch` pulls the declared outputs
+  over scp and `state` now records `volume: None` — but the only proof is that
+  the code paths do not mention it. The first real run is the test. Worth
+  knowing because a failed fetch on a volume-less pod loses the artifacts
+  outright: there is no volume left holding them.
+- **(016c) `disk_gb: 60` is a judgement, not a measurement.** arxiv-150k's
+  artifacts plus the venv and the model weights are roughly 3–4 GB, and 60 GB
+  is deliberate slack because the container disk is now the only disk. Sizing
+  it from a real run is a thing to do after this build, not before it.
 - **(016b) `oneground fixture build` can now be called with no `--source`
   against an arXiv spec**, which fails inside `open()` with a less helpful
   message than a check at the top would give. The stackexchange reader refuses
@@ -448,7 +564,13 @@ All task 016, on `main`.
 | `corpora/run_fixture_build.sh` | new — generic build runner; **(016b)** `SOURCE` optional |
 | `corpora/fetch_stackexchange.py` | **(016b) deleted** — its job was storing the shards |
 | `corpora/run_stackexchange_build.sh` | **(016b) deleted** — it only sequenced fetch-then-build |
-| `sessions/stackexchange-build.yaml` | new — the pod session; **(016b)** no `SOURCE`, runs the generic runner |
+| `oneground/pod/session.py` | **(016c)** `volume: none`, `uses_volume`, both rules documented |
+| `oneground/pod/plan.py` | **(016c)** `resolve_anywhere`, `_pick_gpu` shared by both paths, volume-less payload and rendering |
+| `oneground/pod/api.py` | **(016c)** `list_datacenters`, `gpu_prices_across_datacenters` (one aliased call) |
+| `oneground/pod/state.py` | **(016c)** records `volume: None` rather than crashing |
+| `oneground/pod/cli.py` | **(016c)** `mkdir -p` the mount path before the first scp |
+| `oneground/pod/test_pod.py` | **(016c)** +22 tests, `DcTransport` stub |
+| `sessions/stackexchange-build.yaml` | new — the pod session; **(016b)** no `SOURCE`, generic runner; **(016c)** `volume: none`, `disk_gb: 60` |
 | `sessions/stackexchange-shards.sha256` | new — 59 pinned shard digests |
 | `tasks/scratch/016-negative-control.py` | new (scratch is gitignored) |
 | `tasks/scratch/016-reservoir-footprint.py` | new (scratch is gitignored) |
@@ -461,8 +583,18 @@ All task 016, on `main`.
    and still the only thing that settles whether GitHub's receive-pack accepts
    a push from the depth-1 checkout.
 3. **The `y` for `oneground pod up sessions/stackexchange-build.yaml`** — brief
-   step 5, once the other stream's pod is off the volume (one pod at a time).
-   `plan` resolves, the cap is $1.08 worst case against `max_usd` 2.50, and
-   zero pods are running. Steps 6–9 (simulate, decision log, `fixture verify
-   --asset`, `docs/FIXTURES.md`) all need the artifacts this produces.
-   The session now needs **no volume space for the source at all**.
+   step 5. `plan` resolves live to **US-WA-1 / RTX 6000 Ada**, worst case
+   **$1.26** against `max_usd` 2.50. Steps 6–9 (simulate, decision log,
+   `fixture verify --asset`, `docs/FIXTURES.md`) all need the artifacts this
+   produces.
+
+   **(016c) The one-pod-at-a-time constraint no longer applies to this
+   session.** It uses no network volume, so it does not contend with the other
+   stream's pod on `vecbench` — the two can run at the same time, in different
+   regions. `caps.max_concurrent` is still 1 *within this session*.
+
+   Two things to expect. Stock moved twice during this task, so `plan` may pick
+   a different region or card by the time you run `up`; re-run `plan` first and
+   the confirmation prompt will show what it actually resolved. And stock on the
+   chosen card reads **Low**, so a create can fail outright — that costs
+   nothing, but it means a retry rather than a queue.
