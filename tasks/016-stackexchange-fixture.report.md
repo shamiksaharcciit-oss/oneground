@@ -19,8 +19,14 @@ A third revision followed when `up` was refused by the region itself:
    needs no volume now picks its datacenter by GPU availability instead of
    inheriting the volume's region.
 
-Everything below covers all three. Headings marked **(016b)** are the second
-revision, **(016c)** the third.
+And a fourth when the first `up` created a pod it could not talk to:
+
+4. **Wait for sshd.** Session 20260911-200558 (pod `x514af1cflnw6m`) reached
+   RUNNING, then its first real command hung for 60 s and died having printed
+   only the known-hosts line. RUNNING is the container's state, not sshd's.
+
+Everything below covers all four. Headings marked **(016b)** are the second
+revision, **(016c)** the third, **(016d)** the fourth.
 
 ## Repo state expected vs found
 
@@ -360,6 +366,92 @@ bge-base weights, the artifacts (`vectors.npy` is ~460 MB) and both tarballs.
 The 34 GB of shards are *not* on it; they are streamed. The disk dies with the
 pod, so nothing is left behind to pay for.
 
+### (016d) RUNNING is the container's state, not sshd's
+
+The first `up` got as far as a live pod. I read its record rather than working
+from the summary, and it is worth quoting, because it is both the bug and the
+evidence problem in four lines:
+
+    pod_id            x514af1cflnw6m
+    volume            None
+    data_center_id    EU-CZ-1          gpu RTX 4090      $0.74/hr
+    state             terminated
+    finished_because  failed-after-create
+    last_error        timed out after 60s: ssh -p 40134
+                        stderr: Warning: Permanently added
+                        '[213.192.2.69]:40134' (ED25519) to the list of
+                        known hosts.
+
+Two things that summary does not say. **016c worked end to end** — a
+volume-less session resolved EU-CZ-1, created an RTX 4090 at $0.74/hr and
+reached RUNNING, which is exactly what the placement change was for.
+
+And the command that hung was `ssh`, not `scp`: it is the `mkdir -p
+/workspace` that 016c itself added, the first thing in `_sync_and_start`. So
+the very first command over SSH was the one that met the race. The pod billed
+for all 60 s of it and the session was torn down over something that usually
+resolves in seconds.
+
+Note what `last_error` could tell me and what it could not: the known-hosts
+line proves ssh got as far as the host key, and `ssh -p 40134` is the *entire*
+record of what was run. That is the second half of this fix.
+
+**The fix is a probe that is allowed to fail.** Before anything that matters,
+`ssh … true` is retried with backoff up to **180 s**. `true` is the smallest
+thing that proves the whole path — endpoint, port mapping, key, and a shell —
+and it is cheap enough to throw away as many times as needed.
+
+Each attempt is bounded by **20 s**, not the session timeout: a probe that
+hangs for 60 s teaches nothing a 20 s one does not, and it spends the budget
+the retry loop exists to have. Backoff is `2, 3, 5, 8, 12, 15` seconds —
+growing, then flat, because this almost always resolves in the first few
+seconds and after that there is no point hammering it. The last attempt is
+clamped to whatever is left, so the wait never overruns its deadline. Every
+attempt is logged:
+
+    waiting for sshd on 10.0.0.1:44089 ...
+      sshd not ready yet (attempt 1, 0s elapsed): Connection refused
+      retrying in 2s
+      ...
+      ssh ready after 4 attempt(s), 10s
+
+**The second half is the record.** The timeout path in `_run` raised
+`SshError` with **no** `command`, no streams and no timeout flag — so
+20260911-200558's record could say only that something timed out after 60 s,
+with the port number as the entire evidence. It now carries the full argv, the
+tailed streams and `timed_out`, and `up` writes them to the session file as
+`ssh_error` (readiness) or `last_ssh` (anything later). The exit-code path
+recorded `" ".join(cmd[:3])` — `ssh -p 44089` — and now records the whole
+command too. A successful wait is recorded as well, as `ssh_ready`, because how
+long sshd actually took is the number that says whether 180 s is the right
+window.
+
+A pod that never comes up is terminated with reason `ssh-never-ready`, distinct
+from `failed-after-create`: nothing ran, so there is no remote state to reason
+about — only a pod that is billing and cannot be reached.
+
+**Tested against a remote that refuses the first N connections.** `RefusingSsh`
+overrides `_run`, not `run`, so the real argv construction, the real retry
+loop, the real backoff and the real deadline all execute; a fake clock makes
+the three-minute window cost nothing. Both failure shapes are covered —
+connection *refused*, and the connection *hanging*, which is what
+20260911-200558 actually saw and which a refusal-only stub would have missed.
+
+**Two things this turned up that were not in the brief.**
+
+The readiness wait is the one post-create step that does real network work
+before anything under test happens, so inserting it **hung two existing
+tests**: their harness drives `up` to a later step with a pod at `10.0.0.1`
+that does not exist, and my probe dutifully retried it for the full window with
+real sleeps. It is now behind a `cli._wait_ssh_ready` seam and stubbed by those
+harnesses, the way `_wait_running` already was. Worth saying plainly: the first
+version of this change would have added three minutes to every failing session.
+
+And my own first draft of the test monkeypatched `subprocess.run` on the real
+module — which patches it for pytest and every other test in the file, not just
+the code under test. That is what wedged the suite for 10 minutes before I
+caught it. The tests now rebind the `subprocess` *name* inside `sshx`.
+
 ### 016 step 4 — the pod session resolves
 
 `oneground pod plan sessions/stackexchange-build.yaml` resolves live and
@@ -409,6 +501,15 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 | **(016c)** Cost cap on that plan | 1.5 h x $0.84 | **$1.26** vs `max_usd` $2.50 |
 | **(016c)** Stock volatility | the same probe 20 min apart | RTX 4090 in EU-CZ-1, then unavailable; RTX 6000 Ada nowhere, then US-WA-1 |
 | **(016c)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **130 passed, 1 skipped** (+22) |
+| **(016d)** Readiness window | `sshx.READY_TIMEOUT_SECONDS` | **180 s**, per-attempt probe **20 s**, backoff `2,3,5,8,12,15` |
+| **(016d)** Observed failure | session record `20260911-200558` | first SSH command (`mkdir -p`, added by 016c) hung **60 s**; the whole recorded evidence was `ssh -p 40134` plus the known-hosts line |
+| **(016d)** That pod, placed by 016c | same record | EU-CZ-1, RTX 4090, **$0.74/hr** true rate, reached RUNNING |
+| **(016d)** Pods left behind | `python -m oneground.pod ls` | **0 on the account** |
+| **(016d)** Baseline note | `git log` | task 015 merged into `main` at 21:58, **after** 016c's commit at 21:44, so the 555 and 580 figures are not the same baseline — hence the collect-only delta above |
+| **(016d)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **155 passed, 1 skipped**, 7.7 s (+15 from this change) |
+| **(016d)** Suite runtime before the seam | same command | **hung** past 400 s — two harnesses retrying a pod at 10.0.0.1 for the full window |
+| **(016d)** Full suite | `python -m pytest -q` | **580 passed, 1 skipped** in 213.3 s |
+| — added by this change | `pytest --collect-only -q` at `26fc72e` vs HEAD | 566 -> 581 collected, **+15** |
 | **(016c)** Full suite | `python -m pytest -q` | **555 passed, 1 skipped** in 560.7 s |
 | — vs `8056afb` | 533 passed, 1 skipped | **+22**, all `volume: none` |
 
@@ -455,6 +556,12 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 - **(016c)** A volume-less resolve makes **no** volume lookup and **no**
   billable call, and the volume-derived path's payload and rendering are
   unchanged.
+- **(016d)** The readiness wait retries a refusing remote and a *hanging* one,
+  logs every attempt, gives up exactly at its deadline and never overruns it,
+  probes with a harmless `true`, and records the full command on failure —
+  15 tests against a stub that refuses the first N connections. Two negative
+  controls: removing the wait and restoring the pre-016d timeout path each
+  fail the tests that guard them.
 
 **Failed.** Nothing failed that indicates a defect in the code under test. The
 smoke rebuild failed to *complete*, from memory exhaustion on this machine.
@@ -508,6 +615,17 @@ same `0xC0000005`. The layers past embedding remain couldn't-check, unchanged.
   edited: CLAUDE.md makes `docs/` read-only unless a brief names the file and
   the change, and this one named the session schema, not the doc. It wants one
   short section, and I would rather you commissioned it than found it.
+- **(016d) The 180 s window is a judgement, not a measurement.** Nobody has
+  yet observed how long this pod's sshd actually takes — 20260911-200558 died
+  at 60 s without ever succeeding, so the only datum is "more than 60". The
+  next run records `ssh_ready` with the real number, and that is what should
+  size the window. It is deliberately generous rather than tuned: the cost of
+  waiting too long is bounded by `max_hours`, and the cost of waiting too
+  little is a wasted create.
+- **(016d) `watch` does not probe readiness.** It reconnects to a pod that was
+  reachable when `up` left it, so the race this fixes does not arise there. But
+  a pod whose sshd restarts mid-run would hit the same wall with no retry.
+  Untouched: no brief asks, and I have not seen it happen.
 - **(016c) `watch` and `fetch` have not been exercised against a volume-less
   pod.** Nothing in them reads the volume — `fetch` pulls the declared outputs
   over scp and `state` now records `volume: None` — but the only proof is that
@@ -568,8 +686,9 @@ All task 016, on `main`.
 | `oneground/pod/plan.py` | **(016c)** `resolve_anywhere`, `_pick_gpu` shared by both paths, volume-less payload and rendering |
 | `oneground/pod/api.py` | **(016c)** `list_datacenters`, `gpu_prices_across_datacenters` (one aliased call) |
 | `oneground/pod/state.py` | **(016c)** records `volume: None` rather than crashing |
-| `oneground/pod/cli.py` | **(016c)** `mkdir -p` the mount path before the first scp |
-| `oneground/pod/test_pod.py` | **(016c)** +22 tests, `DcTransport` stub |
+| `oneground/pod/cli.py` | **(016c)** `mkdir -p` the mount path before the first scp; **(016d)** `_wait_ssh_ready` seam, `--ssh-ready-timeout`, `_redact_dict`, records `ssh_ready`/`ssh_error`/`last_ssh` |
+| `oneground/pod/test_pod.py` | **(016c)** +22 tests, `DcTransport` stub; **(016d)** +25, `RefusingSsh` stub |
+| `oneground/pod/sshx.py` | **(016d)** `wait_ready`, `SshNotReady`, `SshError.as_dict`, timeouts carry their command |
 | `sessions/stackexchange-build.yaml` | new — the pod session; **(016b)** no `SOURCE`, generic runner; **(016c)** `volume: none`, `disk_gb: 60` |
 | `sessions/stackexchange-shards.sha256` | new — 59 pinned shard digests |
 | `tasks/scratch/016-negative-control.py` | new (scratch is gitignored) |
@@ -598,3 +717,13 @@ All task 016, on `main`.
    the confirmation prompt will show what it actually resolved. And stock on the
    chosen card reads **Low**, so a create can fail outright — that costs
    nothing, but it means a retry rather than a queue.
+
+   **(016d) The first attempt already ran and is cleaned up.** Session
+   20260911-200558, pod `x514af1cflnw6m`, EU-CZ-1, RTX 4090 at $0.74/hr: it
+   created, reached RUNNING, and died on the first SSH command. Its record says
+   `terminated`, and `oneground pod ls` reports **0 pods on the account** —
+   checked just now, not assumed. Nothing is billing.
+
+   `up` now waits up to 180 s for sshd, logging each attempt, so a retry should
+   get past where that one stopped. It also records `ssh_ready` with the real
+   time sshd took, which is the number that should size the window.

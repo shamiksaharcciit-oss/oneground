@@ -41,6 +41,18 @@ def _client(args):
     return api.RunPodClient(timeout=args.timeout)
 
 
+def _redact_dict(d):
+    """`api.redact` over every string in a flat record fragment.
+
+    Session records are written to disk and read by a human later. Nothing
+    that goes through here should contain the API key -- ssh argv does not --
+    but the records are the one place a leak would persist, so they are
+    scrubbed on the way in rather than trusted.
+    """
+    return {k: (api.redact(v) if isinstance(v, str) else v)
+            for k, v in (d or {}).items()}
+
+
 def _fmt_hours(h):
     if h is None:
         return "-"
@@ -202,7 +214,14 @@ def cmd_up(args):
         return 1
     except Exception as e:
         print("\nFAILED after the pod was created: %s" % api.redact(str(e)))
-        state.mark(session_id, "running", root, last_error=api.redact(str(e)))
+        extra = {"last_error": api.redact(str(e))}
+        # Any SSH failure, not only the readiness probe, leaves the command
+        # behind. The timeout path used to record neither the command nor the
+        # streams, so session 20260911-200558's record could not say what had
+        # hung -- only that something had.
+        if isinstance(e, sshx.SshError):
+            extra["last_ssh"] = _redact_dict(e.as_dict())
+        state.mark(session_id, "running", root, **extra)
         _terminate(client, session_id, pod_id, root, "failed-after-create")
         return 1
     except BaseException:
@@ -212,6 +231,18 @@ def cmd_up(args):
         print("\nINTERRUPTED after the pod was created.")
         _terminate(client, session_id, pod_id, root, "interrupted")
         raise
+
+
+def _wait_ssh_ready(ssh, timeout, log=print):
+    """Seam for the readiness probe, so it can be stubbed like `_wait_running`.
+
+    A module-level function rather than a bare `ssh.wait_ready(...)` call
+    because this is the one post-create step that does real network work
+    before anything under test has happened: a harness driving `up` to a later
+    step would otherwise spend the full readiness window trying to reach a pod
+    that does not exist.
+    """
+    return ssh.wait_ready(timeout=timeout, log=log)
 
 
 def _run_session(client, args, s, p, root, session_id, pod_id, pod):
@@ -238,6 +269,24 @@ def _run_session(client, args, s, p, root, session_id, pod_id, pod):
 
     pod = _wait_running(client, pod_id, args.boot_timeout)
     ssh = sshx.PodSsh.from_pod(pod, key_path=args.ssh_key)
+
+    # RUNNING is the container's state, not sshd's. Session 20260911-200558
+    # went straight from RUNNING to an scp that hung for 60 s and died with
+    # nothing to show but the known-hosts line. Probe first, with a command
+    # that is allowed to fail, and record the attempt either way.
+    print("waiting for sshd on %s:%d ..." % (ssh.host, ssh.port))
+    try:
+        ready = _wait_ssh_ready(ssh, args.ssh_ready_timeout)
+    except sshx.SshNotReady as e:
+        print("\nSSH NEVER CAME UP: %s" % api.redact(str(e)))
+        state.mark(session_id, "running", root, ssh_host=ssh.host,
+                   ssh_port=ssh.port, ssh_ready=False,
+                   ssh_error=_redact_dict(e.as_dict()))
+        _terminate(client, session_id, pod_id, root, "ssh-never-ready")
+        return 1
+    state.mark(session_id, "running", root, ssh_host=ssh.host,
+               ssh_port=ssh.port, ssh_ready=ready)
+
     launch = _sync_and_start(ssh, s, root, session_id, pod_id)
     # The launch's own exit code and streams go in the session record, so a
     # run that did not start leaves evidence rather than a bare pid. Task
@@ -1053,6 +1102,12 @@ def build_parser():
     p = sub.add_parser("up", help="the only billable subcommand; prompts")
     p.add_argument("spec")
     p.add_argument("--boot-timeout", type=int, default=600)
+    p.add_argument("--ssh-ready-timeout", type=int,
+                   default=sshx.READY_TIMEOUT_SECONDS,
+                   help="wait this long for sshd after the pod reaches "
+                        "RUNNING, retrying with backoff (default %d). RUNNING "
+                        "is the container's state, not sshd's."
+                        % sshx.READY_TIMEOUT_SECONDS)
     p.add_argument("--log-timeout", type=int, default=180,
                    help="terminate if the run's log has not appeared within "
                         "this many seconds (default 180)")

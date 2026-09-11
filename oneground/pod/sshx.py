@@ -38,6 +38,7 @@ import shlex
 import subprocess
 import tarfile
 import tempfile
+import time
 
 SSH_OPTS = [
     "-o", "StrictHostKeyChecking=accept-new",
@@ -63,6 +64,26 @@ TRANSFER_BASE_SECONDS = 120
 TRANSFER_FLOOR_BYTES_PER_SECOND = 256 * 1024
 TRANSFER_MAX_SECONDS = 3600
 
+# How long to wait for sshd after the pod says RUNNING.
+#
+# RUNNING is the *container's* state, not sshd's. Session 20260911-200558
+# reached RUNNING, resolved its endpoint, and its first real command -- an
+# scp of the repo bundle -- hung for the full 60 s and died, having printed
+# only the known-hosts line. sshd was still starting. The pod was billing for
+# every second of it, and the session was torn down over a race that resolves
+# itself in a few seconds.
+#
+# So the first thing done over SSH is now a probe that is *allowed* to fail:
+# `ssh ... true`, retried with backoff. The per-attempt timeout is short
+# because a probe that hangs teaches nothing -- the answer "not yet" is worth
+# more than a complete connection attempt.
+READY_PROBE_SECONDS = 20
+READY_TIMEOUT_SECONDS = 180
+# Growing, then flat. The first few seconds are where this almost always
+# resolves, so the early retries are cheap and quick; after that there is no
+# point hammering it.
+READY_BACKOFF_SECONDS = (2, 3, 5, 8, 12, 15)
+
 
 def transfer_timeout(nbytes):
     """Seconds to allow for moving `nbytes`, from the constants above."""
@@ -82,12 +103,47 @@ class SshError(RuntimeError):
     """
 
     def __init__(self, message, returncode=None, stdout="", stderr="",
-                 command=""):
+                 command="", timed_out=False):
         super().__init__(message)
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
         self.command = command
+        self.timed_out = bool(timed_out)
+
+    def as_dict(self):
+        """What belongs in the session record.
+
+        `command` is the whole argv, not the first three words. The timeout
+        path used to record neither, so session 20260911-200558's record said
+        only that something timed out after 60 s -- the port number was the
+        entire evidence. Streams are tailed rather than dropped: a record is
+        for reading afterwards, when the pod is gone.
+        """
+        return {"command": self.command,
+                "returncode": self.returncode,
+                "timed_out": self.timed_out,
+                "stdout": tail_lines(self.stdout or "", ERROR_TAIL_LINES),
+                "stderr": tail_lines(self.stderr or "", ERROR_TAIL_LINES)}
+
+
+class SshNotReady(SshError):
+    """sshd did not accept a connection inside the readiness window.
+
+    Distinct from a command that failed: nothing has run yet, so there is no
+    remote state to reason about -- only a pod that is billing and cannot be
+    reached.
+    """
+
+    def __init__(self, message, attempts=0, waited=0.0, **kw):
+        super().__init__(message, **kw)
+        self.attempts = attempts
+        self.waited = waited
+
+    def as_dict(self):
+        d = super().as_dict()
+        d.update({"attempts": self.attempts, "waited_seconds": self.waited})
+        return d
 
 
 class LaunchFailed(SshError):
@@ -172,7 +228,9 @@ class PodSsh:
                 detail = "\n  (the command wrote nothing before the timeout)"
             raise SshError("timed out after %gs: %s%s"
                            % (timeout or self.timeout,
-                              " ".join(cmd[:3]), detail)) from None
+                              " ".join(cmd[:3]), detail),
+                           command=" ".join(cmd), stdout=out, stderr=err,
+                           timed_out=True) from None
         if check and p.returncode != 0:
             raise SshError(
                 "%s -> exit %d\n%s"
@@ -180,8 +238,84 @@ class PodSsh:
                    tail_lines(p.stderr or p.stdout or "",
                               ERROR_TAIL_LINES)),
                 returncode=p.returncode, stdout=p.stdout or "",
-                stderr=p.stderr or "", command=" ".join(cmd[:3]))
+                stderr=p.stderr or "", command=" ".join(cmd))
         return p
+
+    # -- readiness -----------------------------------------------------------
+    def wait_ready(self, timeout=READY_TIMEOUT_SECONDS,
+                   probe=READY_PROBE_SECONDS, log=None,
+                   sleep=time.sleep, now=time.monotonic):
+        """Block until sshd accepts a connection. Raises `SshNotReady`.
+
+        Call this once, before the first command that matters. `ssh ... true`
+        is the smallest thing that proves the whole path works -- endpoint,
+        port mapping, key, and a shell -- and it is cheap enough to throw away
+        as many times as needed.
+
+        Each attempt is bounded by `probe` rather than the session timeout: a
+        probe that hangs for 60 s teaches nothing that a probe that hangs for
+        20 s does not, and it burns the budget this wait is supposed to have.
+        The last attempt is clamped to whatever is left, so the wait never
+        overruns `timeout`.
+
+        `sleep` and `now` are injected so the tests can exercise the backoff
+        and the deadline without spending three real minutes doing it.
+        """
+        def _say(msg):
+            if log:
+                log(msg)
+
+        started = now()
+        deadline = started + timeout
+        attempts = 0
+        last = None
+
+        while True:
+            attempts += 1
+            remaining = deadline - now()
+            if remaining <= 0:
+                break
+            p = None
+            try:
+                p = self.run("true", timeout=max(1.0, min(probe, remaining)),
+                             check=False)
+            except SshError as e:
+                last = e
+            else:
+                if p.returncode == 0:
+                    waited = now() - started
+                    _say("  ssh ready after %d attempt(s), %.0fs"
+                         % (attempts, waited))
+                    return {"attempts": attempts, "waited_seconds": round(
+                        waited, 1)}
+                last = SshError(
+                    "ssh probe exited %d" % p.returncode,
+                    returncode=p.returncode, stdout=p.stdout or "",
+                    stderr=p.stderr or "", command="ssh ... true")
+
+            why = tail_lines(
+                (getattr(last, "stderr", "") or str(last)), 1).strip() \
+                or str(last)
+            back = READY_BACKOFF_SECONDS[min(attempts - 1,
+                                             len(READY_BACKOFF_SECONDS) - 1)]
+            if now() + back >= deadline:
+                break
+            _say("  sshd not ready yet (attempt %d, %.0fs elapsed): %s"
+                 % (attempts, now() - started, why[:120]))
+            _say("  retrying in %ds" % back)
+            sleep(back)
+
+        waited = now() - started
+        raise SshNotReady(
+            "sshd did not accept a connection within %gs (%d attempt(s)). The "
+            "pod reached RUNNING, which is the container's state and not "
+            "sshd's. Last: %s"
+            % (timeout, attempts, last if last else "no attempt completed"),
+            attempts=attempts, waited=round(waited, 1),
+            command=getattr(last, "command", "ssh ... true"),
+            stdout=getattr(last, "stdout", "") or "",
+            stderr=getattr(last, "stderr", "") or "",
+            timed_out=bool(getattr(last, "timed_out", False)))
 
     def run(self, command, timeout=None, check=True):
         """Run a shell command on the pod, return stdout."""

@@ -16,6 +16,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -1621,16 +1622,24 @@ def _up_failing_at(tmp, where, exc, spec=None):
     t = _transport({"/pods": created, "/pods/pod-1": created})
     orig = getattr(cli, where)
     orig_stdin = sys.stdin
+    # The readiness probe is real network work against a pod that does not
+    # exist, and it is not what any of these tests is about. Stubbed unless
+    # the test is deliberately failing at that step.
+    orig_ready = cli._wait_ssh_ready
 
     def boom(*a, **kw):
         raise exc
 
     setattr(cli, where, boom)
+    if where != "_wait_ssh_ready":
+        cli._wait_ssh_ready = lambda *a, **k: {"attempts": 1,
+                                               "waited_seconds": 0.0}
     sys.stdin = _Tty("y\n")
     try:
         code, out, _ = _run_cli(["up", spec or _spec_file(tmp)], t, tmp)
     finally:
         setattr(cli, where, orig)
+        cli._wait_ssh_ready = orig_ready
         sys.stdin = orig_stdin
     deleted = [c for c in t.calls if c[0] == "DELETE"]
     reasons = [r.get("finished_because") for r in statemod.load_all(tmp)]
@@ -1795,6 +1804,11 @@ class _FakeSsh:
 
     def run_is_finished(self, remote_log, marker="DONE"):
         return self._finished
+
+    def wait_ready(self, timeout=None, probe=None, log=None, **kw):
+        """Already up. A fake pod has no sshd to wait for, and modelling the
+        wait here would only test the fake."""
+        return {"attempts": 1, "waited_seconds": 0.0}
 
 
 def _watch_with(tmp, sizes, finished=False, stall_minutes=None, sid="w1"):
@@ -2398,6 +2412,311 @@ def test_the_state_record_notes_there_was_no_volume():
         rec = statemod.record_for(_anywhere_plan(tmp), "20260911-test", None)
     assert rec["volume"] is None
     assert rec["volume_id"] is None
+
+
+
+# ===================================================================
+# Waiting for sshd before the first real command (task 016d)
+# ===================================================================
+# Session 20260911-200558 (pod x514af1cflnw6m, volume: none) reached RUNNING,
+# resolved its endpoint, and its first real command hung for the full 60 s and
+# died having printed only the known-hosts line. RUNNING is the *container's*
+# state; sshd was still starting. The pod billed for all of it and the session
+# was torn down over a race that resolves itself in seconds.
+
+
+class _Proc:
+    """Just enough of subprocess.CompletedProcess for PodSsh._run's callers."""
+
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+class RefusingSsh(sshx.PodSsh):
+    """A pod whose sshd refuses the first `refusals` connections.
+
+    Overrides `_run`, not `run`, so the real argv construction, the real
+    `wait_ready` loop, the real backoff and the real deadline are all
+    exercised. `mode` picks how it refuses:
+
+        "refused"  -- connection refused, the ordinary "sshd not up yet"
+        "timeout"  -- the connection hangs, which is what 20260911-200558 saw
+    """
+
+    def __init__(self, *a, refusals=0, mode="refused", **kw):
+        super().__init__(*a, **kw)
+        self.refusals = refusals
+        self.mode = mode
+        self.attempts = []              # the argv of every attempt
+
+    def _run(self, cmd, timeout=None, check=True):
+        self.attempts.append((list(cmd), timeout))
+        if len(self.attempts) <= self.refusals:
+            if self.mode == "timeout":
+                raise sshx.SshError(
+                    "timed out after %gs: %s" % (timeout or 0,
+                                                 " ".join(cmd[:3])),
+                    command=" ".join(cmd), stdout="", stderr="",
+                    timed_out=True)
+            return _Proc(255, "", "ssh: connect to host port: "
+                                  "Connection refused")
+        return _Proc(0, "", "")
+
+
+class _Clock:
+    """Monotonic time the test controls; `sleep` advances it."""
+
+    def __init__(self):
+        self.t = 1000.0
+        self.slept = []
+
+    def now(self):
+        return self.t
+
+    def sleep(self, n):
+        self.slept.append(n)
+        self.t += n
+
+    def tick(self, n):
+        self.t += n
+
+
+def _ready_ssh(refusals=0, mode="refused"):
+    return RefusingSsh("1.2.3.4", 22222, refusals=refusals, mode=mode)
+
+
+def test_ssh_ready_returns_immediately_when_sshd_is_up():
+    ssh = _ready_ssh(refusals=0)
+    clock = _Clock()
+    out = ssh.wait_ready(sleep=clock.sleep, now=clock.now)
+    assert out["attempts"] == 1, out
+    assert clock.slept == []
+    assert len(ssh.attempts) == 1
+
+
+def test_ssh_ready_retries_until_sshd_accepts():
+    ssh = _ready_ssh(refusals=3)
+    clock = _Clock()
+    out = ssh.wait_ready(sleep=clock.sleep, now=clock.now, log=lambda m: None)
+    assert out["attempts"] == 4, out
+    assert len(ssh.attempts) == 4
+    # Three refusals, so three backoffs, taken from the front of the table.
+    assert clock.slept == list(sshx.READY_BACKOFF_SECONDS[:3]), clock.slept
+
+
+def test_ssh_ready_survives_a_hung_connection_not_just_a_refusal():
+    """20260911-200558 hung rather than being refused; both must retry."""
+    ssh = _ready_ssh(refusals=2, mode="timeout")
+    clock = _Clock()
+    out = ssh.wait_ready(sleep=clock.sleep, now=clock.now, log=lambda m: None)
+    assert out["attempts"] == 3, out
+
+
+def test_ssh_ready_logs_every_attempt():
+    lines = []
+    ssh = _ready_ssh(refusals=2)
+    clock = _Clock()
+    ssh.wait_ready(sleep=clock.sleep, now=clock.now, log=lines.append)
+    text = "\n".join(lines)
+    assert text.count("sshd not ready yet") == 2, text
+    assert text.count("retrying in") == 2, text
+    assert "ssh ready after 3 attempt(s)" in text, text
+
+
+def test_ssh_ready_gives_up_at_the_deadline_and_says_what_it_tried():
+    ssh = _ready_ssh(refusals=10_000)          # never comes up
+    clock = _Clock()
+    try:
+        ssh.wait_ready(timeout=30, sleep=clock.sleep, now=clock.now,
+                       log=lambda m: None)
+    except sshx.SshNotReady as e:
+        assert e.attempts >= 2, e.attempts
+        assert e.waited <= 30 + max(sshx.READY_BACKOFF_SECONDS), e.waited
+        assert "did not accept a connection within 30s" in str(e)
+        assert "the container's state" in str(e)
+        return
+    raise AssertionError("a pod that never came up was reported ready")
+
+
+def test_ssh_ready_never_overruns_its_deadline():
+    """The wait exists to bound a race, so it must itself be bounded."""
+    ssh = _ready_ssh(refusals=10_000)
+    clock = _Clock()
+    start = clock.now()
+    try:
+        ssh.wait_ready(timeout=60, sleep=clock.sleep, now=clock.now,
+                       log=lambda m: None)
+    except sshx.SshNotReady:
+        pass
+    assert clock.now() - start <= 60, clock.now() - start
+
+
+def test_each_probe_is_bounded_well_below_the_whole_wait():
+    """A probe that hangs for the full window teaches nothing and spends the
+    budget the retry loop needs."""
+    ssh = _ready_ssh(refusals=2)
+    clock = _Clock()
+    ssh.wait_ready(sleep=clock.sleep, now=clock.now, log=lambda m: None)
+    for _cmd, timeout in ssh.attempts:
+        assert timeout <= sshx.READY_PROBE_SECONDS, timeout
+        assert timeout < sshx.READY_TIMEOUT_SECONDS
+
+
+def test_the_probe_is_a_harmless_command():
+    """`true` changes nothing, so a probe that half-succeeds cannot matter."""
+    ssh = _ready_ssh(refusals=0)
+    clock = _Clock()
+    ssh.wait_ready(sleep=clock.sleep, now=clock.now)
+    argv = ssh.attempts[0][0]
+    assert argv[0] == "ssh"
+    assert argv[-1] == "true", argv[-1]
+    assert "root@1.2.3.4" in argv
+
+
+# ------------------------------------------- what the session file records
+def test_a_timed_out_command_is_recorded_in_full():
+    """The gap 20260911-200558 fell into: the timeout path recorded neither
+    the command nor the streams, so the record could not say what hung."""
+    ssh = _ready_ssh(refusals=10_000, mode="timeout")
+    clock = _Clock()
+    try:
+        ssh.wait_ready(timeout=30, sleep=clock.sleep, now=clock.now,
+                       log=lambda m: None)
+    except sshx.SshNotReady as e:
+        d = e.as_dict()
+        assert d["timed_out"] is True, d
+        assert d["command"].startswith("ssh "), d["command"]
+        assert d["command"].endswith("true"), d["command"]
+        assert "attempts" in d and d["attempts"] >= 1
+        assert "waited_seconds" in d
+        return
+    raise AssertionError("no SshNotReady raised")
+
+
+class _FakeSubprocess:
+    """Stands in for the `subprocess` name inside sshx.
+
+    The name in sshx's namespace is rebound, not the real module mutated:
+    patching `subprocess.run` process-wide also patches it for pytest and for
+    every other test in this file, which is a wedge rather than a stub.
+    """
+
+    TimeoutExpired = subprocess.TimeoutExpired
+
+    def __init__(self, run):
+        self.run = run
+
+
+def _with_fake_subprocess(run, fn):
+    real = sshx.subprocess
+    sshx.subprocess = _FakeSubprocess(run)
+    try:
+        return fn()
+    finally:
+        sshx.subprocess = real
+
+
+def test_a_real_command_timeout_also_carries_its_command():
+    """Not only the probe. Any ssh timeout now leaves the argv behind."""
+    ssh = sshx.PodSsh("1.2.3.4", 22222)
+
+    def boom(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+    def body():
+        try:
+            ssh.run("bash corpora/run_fixture_build.sh", timeout=5)
+        except sshx.SshError as e:
+            assert e.timed_out is True
+            assert "run_fixture_build.sh" in e.command, e.command
+            assert e.as_dict()["command"].endswith("run_fixture_build.sh")
+            return True
+        return False
+
+    assert _with_fake_subprocess(boom, body),         "a timed-out command raised nothing"
+
+
+def test_an_exit_code_failure_carries_the_whole_command_too():
+    ssh = sshx.PodSsh("1.2.3.4", 22222)
+
+    def nonzero(cmd, **kw):
+        return _Proc(3, "", "no such file")
+
+    def body():
+        try:
+            ssh.run("stat /workspace/nope", timeout=5)
+        except sshx.SshError as e:
+            assert e.timed_out is False
+            assert "/workspace/nope" in e.command, e.command
+            return True
+        return False
+
+    assert _with_fake_subprocess(nonzero, body),         "a non-zero command raised nothing"
+
+
+def test_ssh_not_ready_is_an_ssh_error():
+    """So the `up` guard's `except sshx.SshError` cannot miss it."""
+    assert issubclass(sshx.SshNotReady, sshx.SshError)
+
+
+
+def test_up_terminates_and_records_the_command_when_ssh_never_comes_up():
+    """The whole point, end to end: a pod that cannot be reached is stopped,
+    and the record says what was tried rather than that something timed out.
+
+    Session 20260911-200558 was terminated correctly but left a record whose
+    entire evidence was a port number.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        exc = sshx.SshNotReady(
+            "sshd did not accept a connection within 180s (7 attempt(s))",
+            attempts=7, waited=180.0, timed_out=True,
+            command="ssh -p 44089 -o BatchMode=yes root@10.0.0.1 true")
+        code, out, deleted, reasons = _up_failing_at(
+            tmp, "_wait_ssh_ready", exc)
+        assert code == 1, out
+        assert deleted, "a pod that could not be reached was left running"
+        assert reasons == ["ssh-never-ready"], reasons
+
+        rec = statemod.load_all(tmp)[0]
+        assert rec["ssh_ready"] is False, rec
+        err = rec["ssh_error"]
+        assert err["command"].endswith("true"), err["command"]
+        assert err["attempts"] == 7, err
+        assert err["waited_seconds"] == 180.0, err
+        assert err["timed_out"] is True, err
+        assert "SSH NEVER CAME UP" in out, out
+
+
+def test_a_successful_readiness_wait_is_recorded_too():
+    """Not only failures. How long sshd took is the number that says whether
+    the window is the right size."""
+    with tempfile.TemporaryDirectory() as tmp:
+        code, out, deleted, reasons = _up_failing_at(
+            tmp, "_sync_and_start",
+            sshx.SshError("stubbed: not what this test is about"))
+        assert code == 1, out
+        rec = statemod.load_all(tmp)[0]
+        assert rec["ssh_ready"] == {"attempts": 1, "waited_seconds": 0.0}, rec
+
+
+def test_any_ssh_failure_after_readiness_records_its_command():
+    """The generic guard, not only the probe: an scp that times out during the
+    sync leaves the argv in the record."""
+    with tempfile.TemporaryDirectory() as tmp:
+        exc = sshx.SshError(
+            "timed out after 120s: scp -P 44089",
+            command="scp -P 44089 bundle root@10.0.0.1:/workspace/x.bundle",
+            timed_out=True)
+        code, out, deleted, reasons = _up_failing_at(
+            tmp, "_sync_and_start", exc)
+        assert code == 1, out
+        assert reasons == ["failed-after-create"], reasons
+        rec = statemod.load_all(tmp)[0]
+        assert rec["last_ssh"]["timed_out"] is True, rec["last_ssh"]
+        assert "x.bundle" in rec["last_ssh"]["command"], rec["last_ssh"]
 
 _SKIP_EXCEPTIONS = [_Skipped]
 try:
