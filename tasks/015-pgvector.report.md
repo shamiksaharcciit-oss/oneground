@@ -440,6 +440,68 @@ Six tests pin it, including one that reconstructs a 12 KB progress stream and
 asserts the old head-truncation would have lost the error while the tail keeps
 it.
 
+### Step 5, second attempt: session 20260911-104406 (pod 3h0kpsgpxrb1zt)
+
+**The clone fix held.** The session record carries
+`repo_commit e7e85177268b53e83ef636662d9b8d450ff200d0`,
+`repo_branch task-015` — the pod ran the right code, which the first attempt
+would not have done even had it started. The corpus preflight passed with both
+digests matching `MANIFEST.sha256`.
+
+**It then stalled in `apt-get update` and never reached the install.** No
+measurement was taken. Terminated at 22 minutes, **~$0.21**; `pod ls` reports
+0 pods.
+
+There is **no `apt-cache madison` output to paste**: that diagnostic fires when
+`apt-get install` cannot satisfy the pins, and the run never got that far. The
+failure was upstream of it.
+
+**Diagnosed on the live pod before terminating.** Not a lock — `apt-get update`
+and its fetch methods were alive and working the whole time:
+
+    egress, measured from the pod
+      archive.ubuntu.com    191 KB/s          apt.postgresql.org  1.1 MB/s
+      github.com            fast (0.24 s)
+      /var/lib/apt/lists    75 MB and growing at ~16 KB/s after 15 minutes
+
+The image carries **four** apt sources — Ubuntu main (deb822
+`ubuntu.sources`), `security.ubuntu.com`, the deadsnakes PPA and NVIDIA's CUDA
+repo. A bare `apt-get update` refreshes every one of them, and on this link
+that is tens of minutes of index fetching before a single package is
+downloaded.
+
+**The step was never necessary.** The image ships those indices already; the
+only source this script adds is PGDG, which is fast. So the installer now
+refreshes PGDG **alone** and resolves dependencies against the indices already
+on disk:
+
+    apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/pgdg.list                    -o Dir::Etc::sourceparts=/dev/null                    -o APT::Get::List-Cleanup=0
+
+`List-Cleanup=0` is load-bearing: without it apt prunes every index it did not
+just fetch, and the install then finds no libssl, no libicu and no postgres.
+
+**Measured in an Ubuntu 24.04 container seeded with indices, which is the
+pod's situation:**
+
+| step | before | after |
+| --- | --- | --- |
+| refresh | full update, 4 sources, >20 min and unfinished | **1 second**, PGDG only |
+| indices retained | — | 51 MB → 53 MB (the other three kept) |
+| install | never reached | **succeeded**, `postgres (PostgreSQL) 16.15 (Ubuntu 16.15-1.pgdg24.04+2)` — exactly the pin |
+
+Two smaller changes came from the same session: the prerequisite install of
+`ca-certificates curl gnupg lsb-release` is gone (curl is already used earlier
+in the script, and the codename is hard-coded to `noble` rather than read from
+`lsb_release`, which is not installed — and is not a free choice anyway, since
+the `pgdg24.04` pins already fix it); and the install runs at `-q` rather than
+`-qq` so its `Get:` lines keep the 15-minute stall watchdog fed while
+dependency debs come down at 191 KB/s.
+
+**What is still unvalidated**: `initdb`, `pg_ctl start`, `CREATE EXTENSION` and
+an HNSW index build have not been run end to end anywhere. The install they
+depend on now has been. A container test of the remainder was still running
+when this was written and is not reported as evidence.
+
 ## Observed, not done
 
 **A nondeterministic native crash in the determinism harness.** *(Recorded at

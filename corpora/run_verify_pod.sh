@@ -97,6 +97,7 @@ ENGINES="${ONEGROUND_ENGINES:-qdrant}"
 PG_MAJOR="${PG_MAJOR:-16}"
 PG_VERSION_PIN="${PG_VERSION_PIN:-16.15-1.pgdg24.04+2}"
 PGVECTOR_VERSION_PIN="${PGVECTOR_VERSION_PIN:-0.8.6-1.pgdg24.04+1}"
+PG_CODENAME="${PG_CODENAME:-noble}"
 PG_PORT="${PG_PORT:-55432}"
 PG_USER="${PG_USER:-oneground}"
 PG_DB="${PG_DB:-oneground}"
@@ -319,37 +320,64 @@ if has_engine pgvector; then
     # exactly the kind of step that looks like a hang from outside. These
     # echoes are what keep a slow-but-working install from being killed --
     # and, if it does fail, what says which step it died on.
-    echo "  [1/7] apt-get update"
-    apt-get update -qq
-    echo "  [2/7] prerequisites"
-    apt-get install -y -qq --no-install-recommends         ca-certificates curl gnupg lsb-release >/dev/null
-    echo "  [3/7] PGDG signing key and source"
+    # WHY NOT `apt-get update`. Session 20260911-104406 spent 20 minutes in
+    # a plain `apt-get update` and never reached the install. Measured on the
+    # pod while it ran:
+    #
+    #     archive.ubuntu.com    191 KB/s      apt.postgresql.org  1.1 MB/s
+    #     github.com            fast          /var/lib/apt/lists  growing 16 KB/s
+    #
+    # The image carries FOUR apt sources -- Ubuntu main, security.ubuntu.com,
+    # the deadsnakes PPA and NVIDIA's CUDA repo -- and a bare `apt-get update`
+    # refreshes every one of them over that link. It had already pulled 75 MB
+    # of indices and was still going.
+    #
+    # None of that is needed. The image ships those indices already, and the
+    # only source this script adds is PGDG, which is fast. So refresh PGDG
+    # ALONE and resolve dependencies against the indices already on disk.
+    # `Dir::Etc::sourceparts=/dev/null` drops the other three; List-Cleanup=0
+    # keeps apt from discarding the lists it is not refreshing -- without it,
+    # apt prunes every index it did not just fetch and the install finds no
+    # libssl, no libicu, and no postgres.
+    echo "  [1/5] PGDG signing key and source (codename pinned: $PG_CODENAME)"
     install -d /usr/share/postgresql-common/pgdg
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
-    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main"         > /etc/apt/sources.list.d/pgdg.list
-    echo "  [4/7] apt-get update (with PGDG)"
-    apt-get update -qq
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $PG_CODENAME-pgdg main"         > /etc/apt/sources.list.d/pgdg.list
+    # The codename is hard-coded rather than read from `lsb_release`, which is
+    # not installed on this image -- and it is not a free choice anyway: the
+    # version pins below are `pgdg24.04` builds, so the codename is already
+    # decided by them. Reading it would only add a way for the two to disagree.
+
+    echo "  [2/5] refresh PGDG only (not the other three sources)"
+    t0=$(date +%s)
+    apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/pgdg.list                    -o Dir::Etc::sourceparts=/dev/null                    -o APT::Get::List-Cleanup=0
+    echo "        refreshed in $(( $(date +%s) - t0 ))s"
+
     # Pinned exactly. An unpinned install would drift the moment PGDG
     # publishes a point release, and the pod row would stop being comparable
     # to the local one without anything saying so.
-    echo "  [5/7] postgresql-$PG_MAJOR=$PG_VERSION_PIN"
+    echo "  [3/5] postgresql-$PG_MAJOR=$PG_VERSION_PIN"
     echo "        postgresql-$PG_MAJOR-pgvector=$PGVECTOR_VERSION_PIN"
+    t0=$(date +%s)
     if ! apt-get install -y -q --no-install-recommends         "postgresql-$PG_MAJOR=$PG_VERSION_PIN"         "postgresql-$PG_MAJOR-pgvector=$PGVECTOR_VERSION_PIN"; then
         echo "ERROR: the pinned PGDG packages could not be installed." >&2
         echo "  available postgresql-$PG_MAJOR-pgvector versions:" >&2
         apt-cache madison "postgresql-$PG_MAJOR-pgvector" >&2 || true
         echo "  available postgresql-$PG_MAJOR versions:" >&2
         apt-cache madison "postgresql-$PG_MAJOR" >&2 || true
-        echo "  This is the first pod run of this path (task 015). If the" >&2
-        echo "  pins have moved, the fix is to update PG_VERSION_PIN and" >&2
-        echo "  PGVECTOR_VERSION_PIN to versions listed above -- and to keep" >&2
-        echo "  them matched to oneground/verify/compose/pgvector.yml, or a" >&2
-        echo "  pod row stops being comparable to a local one." >&2
+        echo "  If the failure is a MISSING DEPENDENCY rather than a missing" >&2
+        echo "  version, the image's own apt indices are too old for these" >&2
+        echo "  pins. That needs a full \`apt-get update\`, which on this" >&2
+        echo "  link took over 20 minutes (session 20260911-104406) -- so it" >&2
+        echo "  is a decision to make deliberately, not a retry to bury here." >&2
         exit 1
     fi
-    echo "  [6/7] initdb + start"
+    echo "        installed in $(( $(date +%s) - t0 ))s"
+    echo "  [4/5] versions"
     PGBIN="/usr/lib/postgresql/$PG_MAJOR/bin"
     "$PGBIN/postgres" --version
+
+    echo "  [5/5] initdb + start"
 
     # Storage on the container disk, not the network volume, for the same
     # reason Qdrant's is: an engine's storage on a network mount measures the
@@ -366,7 +394,7 @@ if has_engine pgvector; then
     su postgres -c "$PGBIN/createuser -p $PG_PORT -s $PG_USER" || true
     su postgres -c "$PGBIN/createdb -p $PG_PORT -O $PG_USER $PG_DB" || true
     su postgres -c "$PGBIN/psql -p $PG_PORT -d $PG_DB -c         'CREATE EXTENSION IF NOT EXISTS vector'"
-    echo "  [7/7] extension"
+    echo "        extension"
     su postgres -c "$PGBIN/psql -p $PG_PORT -d $PG_DB -tAc         \"SELECT 'pgvector ' || extversion FROM pg_extension WHERE extname='vector'\""
 fi
 
