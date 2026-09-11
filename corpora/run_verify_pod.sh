@@ -468,11 +468,28 @@ if has_engine pgvector; then
     # two logs working is what makes the other look like a postgres fault.
     # Pre-create it with the right owner, so the log still ends up where
     # the session collects its outputs.
-    touch /workspace/postgres.log
-    chown postgres:postgres /workspace/postgres.log
-    if ! su postgres -c "$PGBIN/pg_ctl -D $PGDATA -l /workspace/postgres.log         -o '-p $PG_PORT -c maintenance_work_mem=512MB -c shared_buffers=256MB          -c max_parallel_workers_per_gather=0' -w start"; then
+    # /workspace is a NETWORK VOLUME and does not permit chown:
+    #
+    #   chown: changing ownership of '/workspace/postgres.log':
+    #          Operation not permitted
+    #
+    # which killed session 20260911-174648 under `set -e`, 23 seconds
+    # after the install finally succeeded. Pre-creating the file and
+    # giving it to postgres was the previous fix for the previous fault
+    # (postgres cannot create a file in root-owned /workspace) and it
+    # traded one unwritable path for one unchownable one.
+    #
+    # So do not fight the volume at all. The server writes its log to a
+    # directory postgres already owns, and the log is COPIED to
+    # /workspace afterwards by root, which can read it and write there.
+    # The copy is best-effort: a missing server log must never be the
+    # thing that fails a run whose measurements are already taken.
+    PG_LOG=/var/lib/postgresql/oneground-postgres.log
+    : > "$PG_LOG"
+    chown postgres:postgres "$PG_LOG"   # its own directory, not the volume
+    if ! su postgres -c "$PGBIN/pg_ctl -D $PGDATA -l $PG_LOG -o '-p $PG_PORT -c maintenance_work_mem=512MB -c shared_buffers=256MB -c max_parallel_workers_per_gather=0' -w start"; then
         echo "ERROR: postgres did not start; last 20 lines of its log:" >&2
-        tail -20 /workspace/postgres.log >&2
+        tail -20 "$PG_LOG" >&2
         exit 1
     fi
     su postgres -c "$PGBIN/createuser -p $PG_PORT -s $PG_USER" || true
@@ -555,6 +572,29 @@ echo
 echo "packaging outputs from $WORKDIR"
 PACKAGE_RC=0
 package_outputs "$WORKDIR" "$OUT_TARBALL" || PACKAGE_RC=$?
+
+
+# The postgres server log, carried to the volume for the receipt.
+#
+# It is written to a directory postgres owns rather than straight to
+# /workspace, because /workspace is a network volume: root can write there but
+# NOTHING can chown there, and postgres cannot create a file there itself.
+# Session 20260911-174648 died on that chown, 23 seconds after the install
+# finally succeeded -- the previous fix for the previous fault had traded an
+# unwritable path for an unchownable one.
+#
+# So the copy happens here instead, as root, after the measurements are
+# packaged. `|| true` on every line and no `set -e` exposure: a server log
+# that cannot be copied must never be the thing that fails a run whose
+# numbers are already taken and already in the tarball.
+if [ -n "${PG_LOG:-}" ] && [ -f "$PG_LOG" ]; then
+    if cp "$PG_LOG" /workspace/postgres.log 2>/dev/null; then
+        echo "  copied postgres server log -> /workspace/postgres.log"
+    else
+        echo "  could not copy $PG_LOG to /workspace (not fatal); it stays at"
+        echo "    $PG_LOG on the pod's own disk"
+    fi
+fi
 
 echo "  finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo

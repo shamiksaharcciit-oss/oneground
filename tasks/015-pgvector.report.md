@@ -670,6 +670,71 @@ Steps [1/5] through [4/5] are established by the install having run at all:
 it is gated behind the precheck, which is gated behind the scoped update
 having populated Ubuntu's indices.
 
+### Step 5, fourth attempt: session 20260911-174648 (pod nhmumibj1k4806)
+
+**The apt fix worked, and it worked well.** The scoped update and the pinned
+install, which the previous three sessions never got through:
+
+```
+        installed in 23s
+        versions
+postgres (PostgreSQL) 16.15 (Ubuntu 16.15-1.pgdg24.04+2)
+  [5/5] initdb + start
+chown: changing ownership of '/workspace/postgres.log': Operation not permitted
+```
+
+**23 seconds**, against the 9-to-113-minute range the container measurements
+bracketed. The link was not the problem; the four-source refresh was. That
+question is settled.
+
+Then the run died on the next line. Terminated at 7 minutes, **~$0.07**,
+0 pods. Still no measurements.
+
+**`/workspace` is a network volume with three separate properties**, and this
+task has now hit all three, one per fix:
+
+| property | the fault it caused |
+| --- | --- |
+| postgres cannot create a file there | `cannot create /workspace/postgres.log: Permission denied` (fault 4) |
+| nothing can chown there | `chown ... Operation not permitted` (fault 6) |
+| root *can* write there | why the other two looked like postgres faults rather than volume ones |
+
+Each of my first two fixes traded one of these for another. The third stops
+fighting the volume: **postgres writes its log to a directory it already
+owns** (`/var/lib/postgresql/oneground-postgres.log`), and **root copies it to
+`/workspace` after the measurements are packaged**, best-effort. No `chown`
+touches the volume anywhere in the script.
+
+Audited rather than asserted — every `chown` in the shipped script:
+
+    chown -R postgres:postgres "$PGDATA"     # /var/lib/postgresql/oneground-pgdata
+    chown postgres:postgres "$PG_LOG"        # /var/lib/postgresql/oneground-postgres.log
+
+and the only live mentions of `/workspace/postgres.log` are the copy itself
+and the line that reports it.
+
+**Verified in containers, both directions:**
+
+| test | result |
+| --- | --- |
+| **A** — the `[5/5]` block extracted verbatim + the copy, writable `/workspace` | initdb, `server started`, `CREATE EXTENSION`, `pgvector 0.8.6`, `copied postgres server log -> /workspace/postgres.log`, **exit 0** |
+| **B** — the copy alone, `/workspace` mounted **read-only** | `could not copy ... (not fatal); it stays at /var/lib/postgresql/...`, **exit 0** |
+
+B is the one that matters: a server log that cannot be copied does not fail a
+run whose numbers are already taken and already in the tarball.
+
+A Windows bind mount was tried first as a stand-in for the volume and
+**rejected as unfaithful** — it permits `chown`, so it would have proved
+nothing. The read-only mount tests the property that is actually load-bearing.
+
+**Four new tests** pin the rules in the suite rather than in this report,
+because the script is shell and nothing else checks it: no `chown` against
+`/workspace`; every `chown` targets a path postgres owns; `pg_ctl -l` is
+`$PG_LOG` and `$PG_LOG` is under `/var/lib/postgresql`; the copy swallows its
+own error, says so when it fails, and never exits non-zero. They read the
+shipped script and skip comment lines — the comments quote the failures
+verbatim, so a naive grep would match its own history and never go green.
+
 ## Observed, not done
 
 **A nondeterministic native crash in the determinism harness.** *(Recorded at
@@ -699,8 +764,9 @@ oneground measures no filtered search for any engine, so the comparison this
 task enables is narrower than the real choice a team faces, and `ADAPTER.md`
 says so.
 
-**A pre-baked pod image is the durable fix, and belongs to task 017.** Three
-sessions have now been spent on getting Postgres onto a pod, and every one of
+**A pre-baked pod image is the durable fix, and it is now one failure away
+from being this task's problem rather than 017's.** Four sessions have been
+spent on getting Postgres onto a pod, and every one of
 them failed in the installer rather than in anything oneground measures. The
 scoped update makes the install correct; it does not make it *fast*, and at
 the 16 KB/s end of the pod's measured range it would still not fit the cap.
