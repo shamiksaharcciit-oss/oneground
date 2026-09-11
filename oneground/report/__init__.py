@@ -188,7 +188,7 @@ def decision_log(options, not_run_rows, recommended, constraints,
 
     # Two engines, one environment, one configuration: the comparison the
     # same-environment and same-configuration rules exist to make safe.
-    for entry in compare_engines(options, env_id):
+    for entry in compare_engines(options, env_id, verify_info):
         add(entry["kind"], entry["text"], source=entry["source"])
 
     if recommended is None:
@@ -563,7 +563,39 @@ def _judged_constraint_names(options, constraints):
     return seen or _constraint_names(constraints)
 
 
-def compare_engines(options, env_id):
+def _tuning_note(verify_info, engines):
+    """One sentence on how the engines were configured.
+
+    Reads `engine_facts.runtime_settings.tuning` where an adapter or a
+    backfill recorded it, and says so plainly when nothing did -- an absent
+    tuning note must not read as "defaults confirmed".
+    """
+    blocks = {b.get("engine"): b for b in ((verify_info or {}).get("engines")
+                                           or [])}
+    notes, unknown = [], []
+    for name in engines:
+        rs = ((blocks.get(name) or {}).get("engine_facts") or {}).get(
+            "runtime_settings") or {}
+        t = rs.get("tuning")
+        if t:
+            notes.append(f"{name}: {t.split('.')[0].strip().lower()}")
+        else:
+            unknown.append(name)
+    parts = []
+    if notes:
+        parts.append("Both ran on engine defaults except where the receipt "
+                     "says otherwise -- " + "; ".join(notes)
+                     + " -- so this compares two default deployments, not "
+                       "two tuned ones, and a tuned row for either engine "
+                       "would be a different measurement")
+    if unknown:
+        parts.append(f"how {', '.join(unknown)} was configured is not "
+                     f"recorded in this run, so it is couldnt_check rather "
+                     f"than assumed to be default")
+    return (". ".join(parts) + ".") if parts else ""
+
+
+def compare_engines(options, env_id, verify_info=None):
     """Which engine met a constraint at a better number, where two were
     measured on the same configuration in the same environment.
 
@@ -609,6 +641,11 @@ def compare_engines(options, env_id):
             others = "; ".join(
                 f"{v.engine} {float(v.value):.2f}" for v in usable
                 if v is not best)
+            # Naming the tuning is not a courtesy. "qdrant beats pgvector"
+            # read without it is a claim about the engines; what was measured
+            # is a claim about two default deployments, and the gap between
+            # those two sentences is most of what a reader would do next.
+            tuning = _tuning_note(verify_info, [v.engine for v in usable])
             out.append({
                 "kind": "engine_comparison",
                 "text": (
@@ -618,7 +655,7 @@ def compare_engines(options, env_id):
                     f"{float(best.value):.2f} against {others}. Both were "
                     f"measured on the same sample, on the same host, "
                     f"sequentially, and both carry {best.outcome} against the "
-                    f"constraint"),
+                    f"constraint. {tuning}"),
                 "source": "verify.json:engines[*]"})
         if opt.engines_meeting:
             out.append({

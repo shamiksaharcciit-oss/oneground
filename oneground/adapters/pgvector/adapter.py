@@ -72,6 +72,17 @@ METRICS = {
 
 DEFAULT_BATCH = 512
 
+# Server settings that can move a measurement, read back from pg_settings
+# rather than echoed from what was requested. A tuned Postgres and a default
+# one produce different numbers from the same index, and a receipt that does
+# not say which was running cannot be compared to anything.
+RUNTIME_SETTINGS = (
+    "server_version", "shared_buffers", "work_mem", "maintenance_work_mem",
+    "max_connections", "max_parallel_workers_per_gather",
+    "max_parallel_maintenance_workers", "effective_cache_size",
+    "random_page_cost", "synchronous_commit", "jit",
+)
+
 # pgvector's own defaults, repeated here so a receipt says what was used even
 # when the caller passed nothing.
 DEFAULT_M = 16
@@ -107,6 +118,11 @@ class PgvectorAdapter:
         self._index_build_seconds: Dict[str, float] = {}
         self._requested_params: Dict[str, Dict[str, Any]] = {}
         self._metric_of: Dict[str, str] = {}
+        # The ef_search the last search() actually applied. The session value
+        # is RESET afterwards, so reading the GUC back later reports the
+        # server default -- 40 -- and a receipt saying 40 for a run made at
+        # 128 would be worse than one saying nothing.
+        self._last_ef_search = None
 
     # -- lifecycle ---------------------------------------------------------
     def connect(self, endpoint, credentials_env=None):
@@ -397,6 +413,7 @@ class PgvectorAdapter:
                 # reaching oneground's own next call with a different ef.
                 if ef is not None:
                     cur.execute(f"SET hnsw.ef_search = {int(ef)}")
+                    self._last_ef_search = int(ef)
                 try:
                     for i in range(n_q):
                         lit = _vec_literal(queries[i])
@@ -483,9 +500,59 @@ class PgvectorAdapter:
             metric=self._metric_of.get(ns),
             index_type="hnsw" if indexdef else None,
             index_params=params,
+            runtime_settings=self.runtime_settings(ns),
             # One database, one table, no sharding or replication of its own.
             # Reported as 1/1/1 rather than None: they are known, not unknown.
             shards=1, replicas=1, nodes=1, raw=raw)
+
+    def runtime_settings(self, ns=None):
+        """The engine's own configuration, as the engine reports it.
+
+        Read from `pg_settings`, not from what oneground asked for: Postgres
+        is free to clamp a value (shared_buffers is rounded to pages,
+        max_connections interacts with available semaphores), and the receipt
+        should carry what is running rather than what was requested.
+
+        `hnsw.ef_search` is included because it is a **session GUC**, not an
+        index property -- it is the one search parameter that will not appear
+        in `index_params` however hard a reader looks, and the value here is
+        whatever this connection currently has set.
+        """
+        conn = self._need()
+        out = {}
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT name, setting, unit FROM pg_settings "
+                    "WHERE name = ANY(%s)", (list(RUNTIME_SETTINGS),))
+                for name, setting, unit in cur.fetchall():
+                    out[name] = (f"{setting}{unit}" if unit else setting)
+                # Two different facts, and conflating them would misreport
+                # the run: `applied` is what the searches were made at,
+                # `session` is what the connection holds now -- which is the
+                # server default, because search() RESETs it in a finally.
+                out["hnsw.ef_search_applied"] = self._last_ef_search
+                try:
+                    cur.execute("SHOW hnsw.ef_search")
+                    out["hnsw.ef_search_session"] = cur.fetchone()[0]
+                except Exception:              # noqa: BLE001
+                    out["hnsw.ef_search_session"] = None
+                out["hnsw.ef_search_note"] = (
+                    "applied is the value oneground set for its searches; "
+                    "session is the connection's current value, which is the "
+                    "server default because search() resets it. ef_search is "
+                    "a session GUC and is never an index property.")
+        except Exception as e:                 # noqa: BLE001
+            out["error"] = f"could not read pg_settings: {e}"
+        out["index_build"] = "synchronous"
+        out["index_build_note"] = (
+            "CREATE INDEX does not return until the HNSW graph is built, so "
+            "pgvector's index cost is INSIDE the ingest phase. Qdrant indexes "
+            "in the background and reports it separately; the two engines' "
+            "ingest rates are not the same quantity until this is added.")
+        if ns is not None:
+            out["index_build_seconds"] = self._index_build_seconds.get(ns)
+        return out
 
     # -- scroll ------------------------------------------------------------
     def scroll(self, ns, limit):

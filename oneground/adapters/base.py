@@ -129,6 +129,13 @@ class EngineFacts:
     shards: Optional[int] = None
     replicas: Optional[int] = None
     nodes: Optional[int] = None
+    # The engine's own runtime configuration, read back from the engine.
+    # Task 015: "recall 0.9984 on pgvector" is not a portable claim without
+    # shared_buffers and work_mem beside it, any more than it is without the
+    # version. Every value here is DECLARED -- the engine's answer about
+    # itself, not something oneground measured -- and a value the engine
+    # would not give is absent rather than guessed.
+    runtime_settings: Dict[str, Any] = field(default_factory=dict)
     raw: Dict[str, Any] = field(default_factory=dict)
     kind: str = DECLARED
 
@@ -145,6 +152,11 @@ class EngineFacts:
             "shards": self.shards,
             "replicas": self.replicas,
             "nodes": self.nodes,
+            "runtime_settings": dict(self.runtime_settings),
+            # `raw` was dropped here until task 015, which made the field
+            # decorative: it exists so a later reader can check a claim this
+            # dataclass did not anticipate, and it never reached a receipt.
+            "raw": dict(self.raw),
             "kind": self.kind,
             "note": ("every field here is what the engine reported about "
                      "itself, not something oneground measured"),
@@ -179,6 +191,13 @@ class VectorEngine(Protocol):
         ...
 
     def describe(self, ns: str) -> EngineFacts:
+        """Facts about a namespace, including `runtime_settings`.
+
+        An adapter reports the engine settings that can move a measurement --
+        memory, concurrency, and any search-time parameter the engine holds
+        as session or server state rather than on the index. An engine with
+        no such settings returns an empty dict and says so in its ADAPTER.md.
+        """
         ...
 
     def scroll(self, ns: str, limit: int) -> Tuple[np.ndarray, np.ndarray]:

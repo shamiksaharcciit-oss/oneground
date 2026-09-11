@@ -914,3 +914,48 @@ under the cap — is a different measurement needing a ramp rather than one load
 phase. It is documented in `oneground/report/verdict.py` and deliberately not
 implemented. The engine's ceiling and the rate it sustained are not the same
 number and must never share a row.
+
+## Rule: a single run does not settle a latency verdict near its threshold
+
+*Recorded 2026-09-11, from two sessions measuring the same thing.*
+
+The same configuration — `single_node_hnsw[M=32,efConstruction=200,efSearch=128]`
+on arxiv-150k, Qdrant 1.19.1, concurrency 32, 200 qps offered, 5 minutes —
+measured **p95 under load** twice:
+
+| session | pod | p95 under load |
+|---|---|---|
+| 20260909-225058 | `tf8sd2usxbblsm` | **38.22 ms** |
+| 20260911-181410 | `z01d7n4buc1a6i` | **42.82 ms** |
+
+**12% apart.** Both are RTX PRO 4000 in EU-RO-1, both ran the same sample
+against the same engine version with the same parameters, and neither is
+wrong. Two different physical machines from the same pool, on two different
+days, simply do not produce the same p95.
+
+That spread is larger than the distance from either number to the 40 ms
+constraint those runs were judged against — and the constraint fell between
+them. The first session's verdict was `meets`; the second's was `fails`. **The
+architecture did not change. The machine did.**
+
+So:
+
+- **A latency verdict within ~15% of its threshold is not settled by one run.**
+  It is a sample of one from a distribution nobody has characterised, and the
+  report presents it with exactly the confidence it presents a number that is
+  nowhere near its threshold — which is too much.
+- The `environment_id` rule already stops a verdict crossing machines. It does
+  **not** stop a verdict being read as more precise than one sample can be.
+- Nothing in the tool currently reports a spread, because nothing has ever run
+  the same configuration twice on purpose.
+
+**What would fix it, and what is not done here.** Repeated runs of one
+configuration in one session, reported as a distribution rather than a point —
+median and spread, with the verdict taken against the spread rather than
+against a single p95. That is a change to what `verify` runs and to what
+`latency_p95` reads, and it costs pod minutes per repetition. It is **task 017
+work**, recorded here so the next reader of a near-threshold verdict knows the
+number's precision before acting on it.
+
+Until then, read a latency verdict whose value sits within about 15% of its
+threshold as *couldn't-check wearing a verdict's clothes*.

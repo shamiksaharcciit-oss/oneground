@@ -324,7 +324,44 @@ class QdrantAdapter:
             metric=vectors_cfg.get("distance"),
             index_type="hnsw",
             index_params={k: v for k, v in hnsw.items() if v is not None},
-            shards=shards, replicas=replicas, nodes=nodes, raw=raw)
+            shards=shards, replicas=replicas, nodes=nodes,
+            runtime_settings=self.runtime_settings(ns), raw=raw)
+
+    def runtime_settings(self, ns=None):
+        """Qdrant's own configuration for this collection, as it reports it.
+
+        Qdrant holds almost everything on the collection rather than as
+        server state, so this is largely a restatement of what
+        `get_collection` returns -- but stated in the same place as
+        pgvector's, so a reader comparing two engines finds both in one field
+        instead of knowing where each one hides its knobs.
+
+        `indexing_threshold` is here rather than only in `index_params`
+        because it is the setting that decides whether an HNSW graph is built
+        at all (task 009), and it is an optimizer setting, not an index one.
+        """
+        c = self._need()
+        out = {"index_build": "background",
+               "index_build_note": (
+                   "Qdrant builds its HNSW graph asynchronously, so the "
+                   "measured ingest rate excludes it; `wait_for_index` polls "
+                   "indexed_vectors_count until it catches up and the wait is "
+                   "reported separately.")}
+        try:
+            raw = _model_dump(c.get_collection(collection_name=ns))
+            cfg = raw.get("config") or {}
+            for key in ("hnsw_config", "optimizer_config", "wal_config",
+                        "quantization_config", "strict_mode_config"):
+                if cfg.get(key):
+                    out[key] = cfg[key]
+            params = cfg.get("params") or {}
+            for key in ("shard_number", "replication_factor",
+                        "write_consistency_factor", "on_disk_payload"):
+                if key in params:
+                    out[key] = params[key]
+        except Exception as e:                        # noqa: BLE001
+            out["error"] = f"could not read collection config: {e}"
+        return out
 
     # -- scroll ------------------------------------------------------------
     def scroll(self, ns, limit):
