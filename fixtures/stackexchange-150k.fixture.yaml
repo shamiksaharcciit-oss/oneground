@@ -1,0 +1,280 @@
+# stackexchange-150k — the second public fixture (task 016).
+#
+# Mirrors arxiv-150k in shape so the two can be read side by side: same size,
+# same model, same five measures, same tolerances, same two reference
+# configurations. Everything that differs, differs because the corpus does.
+#
+# This fixture exists to answer one question honestly: does a ground made of
+# short, heavily overlapping Q&A posts look different from a ground made of
+# paper abstracts? arxiv-150k has boundary crispness 0.036 and semantic
+# sharding loses on it. Whether that repeats here is the fixture's job to
+# report. Nothing in this spec was chosen to make it come out either way, and
+# the values below are TO_BE_FILLED precisely so that the choice of corpus,
+# rule and cutoff is fixed in writing *before* any number exists.
+#
+# status: planned — no artifact has been built. Every receipt value is
+# TO_BE_FILLED and `oneground fixture verify stackexchange-150k` will report
+# couldnt_check for all of them until the canonical build runs.
+
+fixture:
+  id: stackexchange-150k
+  version: 1
+  status: planned
+  license_notice: >
+    Stack Exchange user contributions are licensed under Creative Commons
+    BY-SA. The version applies per post — CC BY-SA 2.5, 3.0 or 4.0 depending on
+    when the post was written — and this fixture carries each record's own
+    `ContentLicense` value rather than asserting one licence for all of them;
+    the distribution over the built sample is published in `findings`.
+
+    ATTRIBUTION is satisfied two ways. Every record keeps its Stack Overflow
+    post `id`, from which the canonical post URL
+    (https://stackoverflow.com/q/<id>) and therefore the post's authors and
+    revision history are reachable — the attribution route the Stack Exchange
+    terms name for bulk reuse. And this notice, the upstream dataset, the
+    revision pinned in `source`, and the original Internet Archive Stack
+    Exchange data dump are named here and in docs/FIXTURES.md.
+
+    SHARE-ALIKE is satisfied by redistributing the sampled post text under the
+    same CC BY-SA licence each post carries, and by publishing the derived
+    artifacts (vectors.npy, queries.npy, ground_truth.npy, the ground-view
+    parquets) under CC BY-SA 4.0, which BY-SA 2.5 and 3.0 both permit as a
+    later version of the same licence.
+
+    Only `title` and the first 500 characters of the cleaned `body` are
+    redistributed, for the learner interface. No answers, no user names, no
+    reputation, no vote data.
+
+source:
+  name: Stack Overflow posts (Internet Archive Stack Exchange data dump)
+  provider: Hugging Face dataset `mikex86/stackoverflow-posts`
+  repo_id: mikex86/stackoverflow-posts
+  url: https://huggingface.co/datasets/mikex86/stackoverflow-posts
+  revision: 9e791fe8997879cf127e2a0b006bad3484bbda32
+  upstream: https://archive.org/download/stackexchange
+  license: CC BY-SA (2.5 / 3.0 / 4.0, per post, in the `ContentLicense` field)
+  license_declared_on_hub: other
+  license_note: >
+    The Hub's dataset card declares `license: other` because the licence varies
+    per post, not because the content is unlicensed: the card states that "the
+    license for a particular post is contained in the ContentLicense field",
+    and the upstream Internet Archive dump is the Stack Exchange CC BY-SA
+    release. This fixture therefore treats `ContentLicense` as authoritative
+    and records it per record.
+  snapshot_date: '2023-06-14'      # upstream cutoff stated by the dataset card
+  posts_total: 58329355            # measured; see below
+  shards: 59
+  shard_bytes_total: 34059151044
+  format: stackexchange_parquet
+  fields_used: [Id, PostTypeId, Title, Body, Tags, CreationDate, ContentLicense]
+  # Which source field plays each of the five roles the builder needs. The
+  # builder reads this rather than assuming arXiv's names; records keep their
+  # own field names, so no digest of any other fixture moves.
+  field_map:
+    id: id
+    title: title
+    body: body
+    categories: categories
+    date: creation_date
+  # sha256 over the sorted `<sha256>  <shard name>` manifest of the 59 parquet
+  # shards at the pinned revision, as `oneground.fixture.build.source_digest`
+  # computes it. Filled by the canonical build.
+  snapshot_sha256: TO_BE_FILLED
+  # Per-shard sha256 values come from the Hub's LFS metadata at the pinned
+  # revision and are verified on download by the pod session's setup step.
+  shard_digests: sessions/stackexchange-shards.sha256
+  kind: declared
+
+sampling:
+  target_size: 150000
+  rule: >
+    Questions only (PostTypeId = 1), stratified by year of CreationDate across
+    2008–2023 in proportion to each year's volume, then uniform within year.
+    No tag balancing: the real skew (javascript / python / java growth) is a
+    feature of the fixture, not noise.
+
+    One pass with a seeded reservoir per year rather than arXiv's two passes
+    over byte offsets: the source is 59 parquet shards, the chosen rows land in
+    every row group, and eligibility depends on the body, so a second pass
+    would re-read the expensive column in full and buy nothing. The pass counts
+    eligible questions per year exactly, so the proportional quota and its
+    largest-remainder rounding are identical to arxiv-150k's.
+  seed: 20260911
+  queries_seed_note: distinct from arxiv-150k's 20260908/20260909 pair
+  year_range: [2008, 2023]
+  min_body_chars: 200
+  body_chars: 500
+  reservoir_per_year: 60000
+  exclusions:
+    - answers, tag wikis and every other PostTypeId that is not 1
+    - posts with no title
+    - posts whose cleaned body is shorter than 200 characters
+    - posts outside 2008–2023 (the dump begins 2008-07-31 and ends 2023-03-05)
+  text_rule: >
+    `body` is the post's Markdown body reduced to one line of prose before
+    truncation, by a rule fixed in advance: drop fenced code blocks
+    (``` … ```), drop indented code blocks (four spaces or a tab at line
+    start), keep the text of a [label](url) link and drop the url, strip any
+    residual HTML tags, drop remaining backticks, collapse all whitespace to
+    single spaces. The first 500 characters of the result are kept.
+
+    Code is dropped rather than kept because it is the part of a Stack Overflow
+    post least like the natural-language question the title asks; a corpus
+    whose bodies were half stack traces would measure the embedding model's
+    behaviour on code rather than on Q&A text. See
+    `oneground.sample.stackexchange.clean_body`.
+  text_template: '{title}. {body}'
+  # The corpus is split here for the drift pair. 2017-01-01 is the year
+  # boundary closest to a 60/40 split: cumulative post volume measured from the
+  # parquet row-group statistics of all 59 shards reaches 56.6% by 2017-01-05
+  # and 65.1% by 2018-01-03, so 2017 is 3 points off and 2018 is 5. The split
+  # actually realised on the built sample (questions only, after exclusions) is
+  # published in `findings`.
+  drift_cutoff: '2017-01-01'
+  sample_sha256: TO_BE_FILLED
+  kind: receipt
+
+queries:
+  count: 2000
+  rule: >
+    Held out from the sample before ground truth: 1,000 drawn uniformly, 1,000
+    drawn from the top 5% tags by volume (query skew mirrors corpus skew).
+    Query text is the title only — which on Stack Overflow is already a
+    question — embedded with the same model, so queries are shorter than
+    documents, as in real search.
+  seed: 20260912
+  queries_sha256: TO_BE_FILLED
+  kind: receipt
+
+embedding:
+  model: BAAI/bge-base-en-v1.5
+  weights_sha256: TO_BE_FILLED
+  library: sentence-transformers
+  library_version: TO_BE_FILLED
+  max_seq_length: 512
+  normalize: true
+  dtype: float32
+  dimension: 768
+  batch_size: 128
+  device: cuda
+  torch_version: TO_BE_FILLED
+  torch_cuda: TO_BE_FILLED
+  cuda_device: TO_BE_FILLED
+  vectors_sha256: TO_BE_FILLED
+  kind: receipt
+
+ground_truth:
+  method: exact k-NN, brute force (faiss IndexFlatIP)
+  k: 100
+  metric: inner_product
+  base_excludes_queries: true
+  ground_truth_sha256: TO_BE_FILLED
+  kind: receipt
+
+# Tier 2 analogy: how a user's corpus is matched to this fixture.
+analogy:
+  kind: declared
+  corpus_type: qa
+  text_length: short
+  topics_trend: true
+  time_ordered: true
+  languages: [en]
+  dimension: 768
+  embedding_model: BAAI/bge-base-en-v1.5
+  model_family: bge
+
+characterization:
+  intrinsic_dimensionality:
+    estimator: TwoNN
+    value: TO_BE_FILLED
+    tolerance: 0.5
+  boundary_crispness:
+    definition: >
+      Fraction of base vectors whose second-nearest centroid distance exceeds
+      1.20 x their nearest centroid distance, under k-means with 256 centroids
+      (seed 20260911, 20 iterations). Higher is crisper.
+    value: TO_BE_FILLED
+    tolerance: 0.02
+  ambiguous_query_rate:
+    definition: fraction of queries with d2 <= 1.10 * d1 against the same centroids
+    value: TO_BE_FILLED
+    tolerance: 0.02
+  skew_top10_share:
+    definition: share of base vectors in the 10 largest centroid regions
+    value: TO_BE_FILLED
+    tolerance: 0.02
+  drift:
+    definition: >
+      Centroids trained on records with creation_date before 2017-01-01;
+      recall@10 at one-region routing measured separately on queries whose
+      source post is before / after that date. Reported as the pair.
+    value_before: TO_BE_FILLED
+    value_after: TO_BE_FILLED
+    tolerance: 0.02
+  kind: receipt
+
+# The same two configurations arxiv-150k publishes, at the same parameters, so
+# the two fixtures are comparable line for line.
+reference_results:
+  single_node_hnsw:
+    params: {M: 32, efConstruction: 200, efSearch: 128}
+    recall_at_10: TO_BE_FILLED
+    tolerance: 0.01
+  semantic_sharded:
+    params: {centroids: 256, epsilon: 0.2, probe: 2, M: 32, efSearch: 96}
+    recall_at_10: TO_BE_FILLED
+    routing_ceiling: TO_BE_FILLED
+    storage_amplification: TO_BE_FILLED
+    p50_copies: TO_BE_FILLED
+    p95_copies: TO_BE_FILLED
+    p99_copies_per_vector: TO_BE_FILLED
+    tolerance: 0.01
+  kind: receipt
+
+projection:
+  method: UMAP
+  params: {n_neighbors: 30, min_dist: 0.08, metric: cosine, seed: 20260911}
+  color_by: most frequent tag on the post
+  note: >
+    The projection is illustrative. Regions and closure bands drawn on it are
+    computed in the full 768-d space, then mapped onto the projection.
+  kind: declared
+
+artifacts:
+  directory: fixtures/stackexchange-150k/
+  files:
+    - sample.jsonl.zst
+    - vectors.npy
+    - queries.npy
+    - query_ids.json
+    - ground_truth.npy
+    - characterization.json
+    - build_info.json
+    - projection.npy
+    - ground_view_base.parquet
+    - ground_view_queries.parquet
+    - ground_view_centroids.parquet
+    - MANIFEST.sha256
+
+verification:
+  command: oneground fixture verify stackexchange-150k
+  passes_when: >
+    Every artifact digest matches MANIFEST.sha256, and every characterization
+    and reference_results value reproduces within its stated tolerance from a
+    local rebuild of ground truth and the two reference configurations.
+  outcomes: [verified, contradicted, couldnt_check]
+  note: >
+    couldnt_check is reported when a dependency version differs from the pinned
+    one; it is never rounded up to verified. While `status: planned`, every
+    value is TO_BE_FILLED and every check is couldnt_check by construction.
+
+changelog:
+  - build: 1-prep
+    date: '2026-09-11'
+    note: >
+      Specification written. Source resolved live and pinned to revision
+      9e791fe8997879cf127e2a0b006bad3484bbda32; 59 parquet shards,
+      58,329,355 posts, 2008-07-31 to 2023-03-05, measured from the shards'
+      parquet footers without downloading them. Canonical build pending.
+
+findings: []

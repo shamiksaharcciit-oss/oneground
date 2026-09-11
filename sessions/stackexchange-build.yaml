@@ -1,0 +1,83 @@
+# stackexchange-150k canonical build, as a pod session (task 016).
+#
+# Same shape as sessions/arxiv-build.yaml. Two things differ, both because the
+# corpus does:
+#
+#   * the source is not on the volume already. It is 59 parquet shards, ~34 GB,
+#     at a pinned revision of `mikex86/stackoverflow-posts`, fetched and
+#     digest-verified as step 1 of the run. arxiv-150k's 4 GB snapshot was
+#     uploaded by hand once and has lived on the volume since.
+#   * the sampling pass reads all 34 GB once (see the spec's `sampling.rule`),
+#     so the run is longer than arxiv-150k's 19 minutes and the caps are
+#     larger. They are still caps, not estimates: `watch` terminates at them.
+#
+#     python -m oneground.pod plan sessions/stackexchange-build.yaml
+#     python -m oneground.pod up   sessions/stackexchange-build.yaml   # asks first
+#     python -m oneground.pod watch <id>
+
+gpu:
+  # Display names, tried in order; the first actually offered in the volume's
+  # datacenter wins. arxiv-150k build 3 ran on an RTX PRO 4500 Blackwell, and
+  # the same list is used here so the two fixtures' embeddings come off
+  # comparable hardware where possible. `plan` resolves this live.
+  - RTX PRO 4500
+  - RTX PRO 6000
+  - RTX 6000 Ada
+  - RTX 4090
+
+volume: vecbench            # by name; datacenter derived from it
+volume_mount_path: /workspace
+
+# The same pinned tag as arxiv-build.yaml: CUDA 13.0 for torch 2.14.0+cu130,
+# ubuntu2404 for python 3.12.3. The image's own torch is irrelevant -- setup
+# builds a fresh venv without --system-site-packages and installs
+# requirements.txt exactly.
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+
+# Container disk, for the venv at /root/.venv. The 34 GB of shards go to the
+# network volume at /workspace, not here.
+disk_gb: 20
+
+env:
+  HF_HOME: /workspace/hf
+  FIXTURE: stackexchange-150k
+  SOURCE: /workspace/stackexchange-posts
+
+setup: corpora/POD_SETUP.md      # executed as the venv-on-local-disk script
+run: bash corpora/run_stackexchange_build.sh
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-session.log
+done_marker: DONE                # run_fixture_build.sh prints this near the end
+
+outputs:
+  # The review bundle: small enough for the repo.
+  - {remote: /workspace/stackexchange-150k-small.tgz, local: ./, extract: true}
+  # The release asset: deliberately outside the repo, as arxiv-150k's is.
+  - {remote: /workspace/stackexchange-150k-large.tgz,
+     local: ../oneground-assets/}
+
+# The stall watchdog: `watch` terminates if the run's log stops growing for
+# this long. Every phase here logs progress -- the fetch prints per shard, the
+# sampling pass prints per shard, embedding prints per batch -- so the longest
+# legitimate quiet period is a single 500 MB shard download. 20 minutes is the
+# same value arxiv-build.yaml uses and is generous for that.
+stall_minutes: 20
+
+caps:
+  # The brief's caps, not an estimate of the run. Budgeted at the TOP of the
+  # live price range rather than its floor: at $0.72/hr (the rate task 006b was
+  # actually billed) 1.5 hours is $1.08, inside max_usd with room for a more
+  # expensive card if the cheap ones are not offered.
+  #
+  # What has to fit inside 1.5 hours: ~34 GB fetched and sha256'd, one pass
+  # over the same 34 GB of parquet, 152k texts embedded on the GPU, exact k-NN
+  # for 2,000 queries against 150k vectors, and the two reference
+  # configurations. arxiv-150k did the last three in 19 minutes. The fetch and
+  # the parquet pass are the parts with no precedent in this repo, and they are
+  # the reason this is a measurement rather than a prediction -- if the run
+  # hits the cap, the report says so and says where the time went. The cap is
+  # not raised to make it fit.
+  max_hours: 1.5
+  max_concurrent: 1
+  max_usd: 2.50

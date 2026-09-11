@@ -33,6 +33,7 @@ https://www.kaggle.com/datasets/Cornell-University/arxiv . The file's sha256 is
 recorded as the `source.snapshot_sha256` declared value.
 """
 
+import hashlib
 import json
 import os
 import platform
@@ -50,7 +51,8 @@ from ..measures.skew import skew_top10_share
 from ..receipts import (append_manifest, library_versions, round_floats,
                         sha256_array, sha256_file, write_json_stable,
                         write_manifest)
-from ..sample.arxiv import sample_records, split_queries
+from ..sample import sample_for_spec, split_queries
+from ..sample.fields import drift_cutoff, field_map
 from ..truth import exact_knn
 from .reference import ref_semantic_sharded, ref_single_node
 
@@ -60,6 +62,29 @@ from .reference import ref_semantic_sharded, ref_single_node
 RECEIPT_ARTIFACTS = ["sample.jsonl.zst", "vectors.npy", "queries.npy",
                      "query_ids.json", "ground_truth.npy",
                      "characterization.json", "build_info.json"]
+
+
+def source_digest(source):
+    """sha256 of the source: of the file, or of a sharded source's manifest.
+
+    arXiv is one 4 GB JSONL and hashes directly. A Stack Exchange dump is 59
+    parquet shards with no single byte stream, so its digest is taken over the
+    sorted `<sha256>  <relative path>` lines of its shards. That value moves if
+    any shard's bytes change, if one is added or removed, or if one is renamed
+    -- which is everything `source.snapshot_sha256` is for.
+    """
+    if os.path.isfile(source):
+        return sha256_file(source)
+    lines = []
+    for root, _dirs, files in os.walk(source):
+        for fn in sorted(files):
+            full = os.path.join(root, fn)
+            rel = os.path.relpath(full, source).replace(os.sep, "/")
+            lines.append(f"{sha256_file(full)}  {rel}")
+    if not lines:
+        raise FileNotFoundError(f"source directory holds no files: {source}")
+    manifest = "".join(f"{line}\n" for line in sorted(lines))
+    return hashlib.sha256(manifest.encode()).hexdigest()
 
 
 def log(msg):
@@ -80,6 +105,11 @@ def characterize(base, queries, base_recs, q_recs, gt, spec):
     Order is load-bearing: faiss k-means consumes the seed, so moving the
     drift block above the main k-means would change the centroids and every
     value derived from them.
+
+    The drift pair reads its date from the field the spec's `source.field_map`
+    names, and splits at `sampling.drift_cutoff`. Both default to arXiv's
+    values (`update_date`, 2019-01-01), so a spec that declares neither is
+    characterized exactly as it was before task 016.
     """
     out = {}
     log("characterize: TwoNN LID")
@@ -93,11 +123,12 @@ def characterize(base, queries, base_recs, q_recs, gt, spec):
     out["ambiguous_query_rate"] = ambiguous_query_rate(d_q)
     out["skew_top10_share"] = skew_top10_share(r_b[:, 0], len(base))
 
-    log("characterize: drift pair (centroids trained pre-2019)")
-    cutoff = "2019-01-01"
-    pre_mask = np.array([r["update_date"] < cutoff for r in base_recs])
+    date_key = field_map(spec)["date"]
+    cutoff = drift_cutoff(spec)
+    log(f"characterize: drift pair (centroids trained pre-{cutoff[:4]})")
+    pre_mask = np.array([r[date_key] < cutoff for r in base_recs])
     gt10 = gt[:, :10]
-    q_pre = np.array([r["update_date"] < cutoff for r in q_recs])
+    q_pre = np.array([r[date_key] < cutoff for r in q_recs])
     out.update(drift_pair(base, queries, pre_mask, q_pre, gt10,
                           spec["sampling"]["seed"]))
     return out, cents
@@ -125,15 +156,18 @@ def build(spec_path, source, out="fixtures", skip_projection=False):
     n_base = spec["sampling"]["target_size"]
     n_q = spec["queries"]["count"]
 
+    fm = field_map(spec)
+
     # ---- source receipt ----
     log("hashing source snapshot")
-    src_sha = sha256_file(source)
+    src_sha = source_digest(source)
 
     # ---- sample + split ----
-    records = sample_records(source, spec, n_base + n_q,
-                             spec["sampling"]["seed"], log=log)
+    records = sample_for_spec(source, spec, n_base + n_q,
+                              spec["sampling"]["seed"], log=log)
     base_recs, q_recs, hot_cats = split_queries(records, n_q,
-                                                spec["queries"]["seed"])
+                                                spec["queries"]["seed"],
+                                                cat_field=fm["categories"])
     log(f"base {len(base_recs):,} · queries {len(q_recs):,} · "
         f"hot categories {len(hot_cats)}")
 
@@ -158,7 +192,7 @@ def build(spec_path, source, out="fixtures", skip_projection=False):
     log("embedding base (title + abstract)")
     base = embed(model, [tmpl.format(**r) for r in base_recs], emb["batch_size"])
     log("embedding queries (title only)")
-    queries = embed(model, [r["title"] for r in q_recs], emb["batch_size"])
+    queries = embed(model, [r[fm["title"]] for r in q_recs], emb["batch_size"])
     log(f"embedding done in {fmt_dur(time.time() - t_emb)} "
         f"({len(base_recs) + len(q_recs):,} texts)")
     np.save(os.path.join(outdir, "vectors.npy"), base)

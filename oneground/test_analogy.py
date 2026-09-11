@@ -214,15 +214,28 @@ def test_a_papers_declaration_matches_arxiv_150k_real_specs():
     assert a.score == 1.0, a.score
 
 
-def test_a_ticket_queue_gets_no_analogy_from_a_papers_fixture_real_specs():
-    """The shipped state, and the honest answer: with only arxiv-150k
-    available there is no analogy for a support-ticket corpus."""
+def test_a_ticket_queue_gets_no_analogy_from_the_shipped_fixtures_real_specs():
+    """The honest answer: no shipped fixture is a support-ticket corpus, so
+    there is no analogy for one.
+
+    *Which* fixture comes nearest is deliberately not asserted -- it moves as
+    fixtures are added, and task 016 moved it from arxiv-150k to
+    stackexchange-150k because a Q&A corpus is genuinely nearer to a ticket
+    queue than paper abstracts are. What must not move is the verdict: below
+    the floor `choose` returns nothing, names the nearest and its score, and
+    refuses to dress a default up as an analogy.
+    """
     a, why = A.choose({"corpus_type": "support_tickets", "text_length": "short",
                        "topics_trend": True, "time_ordered": True,
                        "dimension": 768,
                        "embedding_model": "BAAI/bge-base-en-v1.5"})
     assert a is None, a.fixture if a else None
-    assert "arxiv-150k" in why and "default, not an analogy" in why, why
+    assert "default, not an analogy" in why, why
+    assert f"floor of {A.MIN_SCORE:.2f}" in why, why
+    assert "differs on corpus_type" in why, why
+    # The nearest is named, and it is one of the shipped fixtures.
+    shipped = {fid for fid, _an, _p, _s in A.load_fixture_analogies()}
+    assert any(fid in why for fid in shipped), (why, sorted(shipped))
 
 
 def _main():

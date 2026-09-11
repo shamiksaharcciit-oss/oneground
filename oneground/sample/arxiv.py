@@ -102,20 +102,25 @@ def sample_records(source, spec, n_total, seed, log=None):
     return records
 
 
-def split_queries(records, n_queries, seed, hot_share=0.05):
+def split_queries(records, n_queries, seed, hot_share=0.05,
+                  cat_field="categories"):
     """1/2 uniform, 1/2 from the top hot_share categories by volume.
+
+    `cat_field` is the record key holding the category label -- `categories`
+    for arXiv, and whatever the spec's `source.field_map` says for another
+    source. The records are never renamed; see `oneground.sample.fields`.
 
     Half the queries come from the busiest categories on purpose: a query set
     drawn uniformly would under-represent exactly the traffic that stresses a
     partition, and the fixture would flatter semantic sharding.
     """
     rng = np.random.default_rng(seed)
-    counts = Counter(primary_category(r["categories"]) for r in records)
+    counts = Counter(primary_category(r[cat_field]) for r in records)
     n_hot_cats = max(1, int(len(counts) * hot_share))
     hot = {c for c, _ in counts.most_common(n_hot_cats)}
     idx = np.arange(len(records))
     hot_idx = np.array([i for i in idx
-                        if primary_category(records[i]["categories"]) in hot])
+                        if primary_category(records[i][cat_field]) in hot])
     n_hot = n_queries // 2
     q_hot = rng.choice(hot_idx, size=n_hot, replace=False)
     rest = np.setdiff1d(idx, q_hot)

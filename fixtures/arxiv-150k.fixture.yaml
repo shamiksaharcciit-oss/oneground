@@ -25,6 +25,16 @@ source:
   snapshot_date: "2026-09-05"          # date of the metadata dump used
   snapshot_sha256: 99dc9b05b10f5ddf4726e09f57ede4fa25aae6151fe0b93ff4048b9f8d54ef7b
   fields_used: [id, title, abstract, categories, update_date]
+  # Which source field plays each of the five roles the builder needs (task
+  # 016). These are arXiv's own names and are also the builder's defaults, so
+  # declaring them changes nothing: the smoke fixture rebuilds byte-identically
+  # with this block present and absent.
+  field_map:
+    id: id
+    title: title
+    body: abstract
+    categories: categories
+    date: update_date
   kind: declared                       # upstream bytes are frozen, not re-derivable by us
 
 sampling:
