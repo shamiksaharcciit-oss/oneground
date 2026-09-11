@@ -1354,6 +1354,47 @@ def test_setsid_is_optional_and_reported_synthetic():
     assert "setsid=$" in cmd, "the confirmation does not say which was used"
 
 
+def _bash_that_shares_this_filesystem(probe_dir):
+    """A bash that can see `probe_dir`, or None. Task 015b.
+
+    `shutil.which("bash")` is not enough on Windows. `C:\\Windows\\System32\\
+    bash.exe` is the WSL launcher: a real bash, but one that runs in a
+    different filesystem namespace, where a Windows temp path simply does not
+    exist. It writes the log somewhere this process cannot read, so the test
+    waited out its 20-second deadline and failed on an empty string -- which
+    reads like the feature is broken, and it is not.
+
+    Which bash `which` returns depends on the PATH of the shell that launched
+    pytest: Git Bash's own comes first from a Git Bash prompt, WSL's comes
+    first from PowerShell. So this test quietly changed what it was testing
+    depending on how it was started, and only failed one of those ways. Ask
+    each candidate whether it can see the directory instead of assuming.
+    """
+    import shutil
+    import subprocess
+    candidates = []
+    found = shutil.which("bash")
+    if found:
+        candidates.append(found)
+    for p in (r"C:\Program Files\Git\bin\bash.exe",
+              r"C:\Program Files\Git\usr\bin\bash.exe",
+              r"C:\Program Files (x86)\Git\bin\bash.exe"):
+        if os.path.exists(p) and p not in candidates:
+            candidates.append(p)
+    posix = probe_dir.replace("\\", "/")
+    for b in candidates:
+        try:
+            r = subprocess.run(
+                [b, "-c", 'test -d "%s" && echo SHARED' % posix],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if "SHARED" in (r.stdout or ""):
+            return b
+    return None
+
+
 def test_start_command_actually_works_in_a_real_shell():
     """Run the generated line locally and check the env prefix took effect.
 
@@ -1363,10 +1404,11 @@ def test_start_command_actually_works_in_a_real_shell():
     import shutil
     import subprocess
     import tempfile
-    bash = shutil.which("bash")
-    if bash is None:
-        pytest.skip("no bash on this machine")
     with tempfile.TemporaryDirectory() as tmp:
+        bash = _bash_that_shares_this_filesystem(tmp)
+        if bash is None:
+            pytest.skip("no bash that can see this process's filesystem "
+                        "(a WSL bash cannot read a Windows temp path)")
         log = os.path.join(tmp, "run.log").replace("\\", "/")
         cmd = sshx.build_start_command(
             tmp.replace("\\", "/"),

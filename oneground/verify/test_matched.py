@@ -1209,11 +1209,33 @@ def test_the_real_arxiv_workdir_gives_one_option_the_measurement_needs_local_run
         assert m == 32 and efc == 200, (engine, ip)
         assert einfo["engine_params"]["hnsw_ef"] == 128, einfo["engine_params"]
 
-    # Task 015: both engines ran, in one environment, sequentially.
-    assert data.get("engines_measured") == ["qdrant", "pgvector"], data.get(
-        "engines_measured")
-    assert data.get("sequential") is True
-    assert data.get("environment_id")
+    # Task 015b: what this file records about its own shape must be true of
+    # it. Which engines a local workdir happens to hold is not a rule -- it is
+    # whichever run the developer last did. Asserting `["qdrant", "pgvector"]`
+    # made a green suite depend on that, and an 011-shape workdir (one engine,
+    # no `engines` list) is exactly as legitimate an artifact as a fresh
+    # clone's absent one, which this test already skips for. `engine_blocks`
+    # reads both shapes on purpose; so does this.
+    measured = [e for e, _ in vd.engine_blocks(data)]
+    assert measured and all(measured), measured
+
+    declared = data.get("engines_measured")
+    if declared is None:
+        # Pre-015 file: it declares no engine list, so there is nothing to
+        # check against. Couldn't-check, and it is not rounded up to a pass.
+        assert data.get("engines") is None, (
+            "a file with an `engines` list must also declare "
+            "`engines_measured`: %r" % (data.get("engines"),))
+    else:
+        assert declared == measured, (declared, measured)
+        # Only a multi-engine run makes a claim about ordering.
+        if len(measured) > 1:
+            assert data.get("sequential") is True, data.get("sequential")
+
+    # Either shape has to say where it ran; the same-environment rule is the
+    # whole point of this workdir, and it is what `latency_p95` gates on above.
+    assert data.get("environment_id") or all(
+        b.get("environment_id") for _, b in vd.engine_blocks(data))
 
 
 def _main():
