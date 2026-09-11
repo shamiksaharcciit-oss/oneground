@@ -527,7 +527,37 @@ def _sync_and_start(ssh, s, root, session_id, pod_id=None):
         print("  a bundle carries commits, not the working tree.")
     remote_bundle = "/workspace/oneground.bundle"
     ssh.put(bundle, remote_bundle)
-    ssh.run(sshx.clone_command(remote_bundle, s.remote_repo), timeout=600)
+
+    # The pod must run the commit that was bundled, and must say so. Session
+    # 20260911-001111 failed here on a hard-coded `git checkout master` after
+    # the branch was renamed; worse, while that line worked it would have
+    # checked out the DEFAULT branch, so a task branch's session measured code
+    # the task had not written. See sshx.clone_command.
+    commit, branch = sshx.head_commit(root)
+    print("  bundling %s at %s" % (branch or "(detached)", (commit or "?")[:12]))
+    try:
+        p = ssh.run(sshx.clone_command(remote_bundle, s.remote_repo,
+                                       commit=commit or None), timeout=600)
+    except sshx.SshError as e:
+        # Everything the clone said, kept where a later reader can find it.
+        # The exception message carries only the tail.
+        if session_id:
+            state.mark(session_id, "clone_failed", repo_root=root,
+                       clone_stdout=getattr(e, "stdout", ""),
+                       clone_stderr=getattr(e, "stderr", ""),
+                       clone_tail=sshx.tail_lines(
+                           getattr(e, "stderr", "")
+                           or getattr(e, "stdout", ""), 20),
+                       clone_returncode=getattr(e, "returncode", None),
+                       repo_commit=commit, repo_branch=branch)
+        raise
+    # `run` returns a CompletedProcess in the real client; a test double may
+    # return nothing, and the confirmation line is not worth a crash.
+    for ln in sshx.tail_lines(getattr(p, "stdout", "") or "", 3).splitlines():
+        print("    %s" % ln)
+    if session_id:
+        state.mark(session_id, "cloned", repo_root=root,
+                   repo_commit=commit, repo_branch=branch)
     print("  cloned to %s" % s.remote_repo)
 
     _upload_inputs(ssh, s, root)

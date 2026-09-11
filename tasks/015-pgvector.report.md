@@ -361,9 +361,89 @@ methods are now named in the protocol. Nothing was merged to master.
   is a statement about how much of each number was the path, not about the
   engines. A pod is what settles it.
 
+### Step 5, first attempt: session 20260911-001111 (pod hlz1jqzo6zwfyc)
+
+The run was reported as *"git clone exited 1 during Updating files: 31%
+(119/381)"*, with the captured output truncated at `Upda`. The pod
+self-terminated; cost was cents.
+
+**None of the three suspects was the cause.** Diagnosed without a pod:
+
+| suspect | ruled out by |
+| --- | --- |
+| a path the bundle carries that fails on the pod's filesystem | all 381 files check out cleanly on Linux; no path over 61 characters, none non-ASCII, none with shell-special or reserved characters |
+| a bundle referencing objects it does not include | `git bundle verify`: *"The bundle records a complete history"*; the clone itself exits **0** |
+| the 40 GB container disk filling | the tree is 47.3 MB across 381 files — and the clone target is `/workspace`, the **50 GB network volume**, not the container disk a reader would assume |
+
+**The actual cause.** `clone_command` ran
+`git clone … && cd … && git checkout master`, and `master` no longer exists —
+it was renamed `main` in task 014. Reproduced in a Linux container against
+this worktree's own bundle:
+
+```
+CLONE_RC=0                       # 381 files, HEAD = task-015 at 6fdebcb
+error: pathspec 'master' did not match any file(s) known to git
+CHECKOUT_MASTER_RC=1
+```
+
+The clone never failed. The `&&` chain's exit 1 came from the checkout, and
+the error message had already been thrown away.
+
+**Why the message was thrown away**, which is the defect worth more than the
+branch name. `_run` reported `(p.stderr or p.stdout or "")[:800]` — the
+**first** 800 characters. Git writes clone progress as *one logical line* with
+carriage returns rather than newlines, so a 381-file clone is a single ~12 KB
+line. The first 800 characters of that are entirely progress, and the cut
+lands mid-word: hence `Upda`. Measured on a reconstructed stream: 12,205
+characters, and `error:` is **not** in the first 800.
+
+**A second bug, larger than the one that failed.** Even while
+`git checkout master` worked, it was wrong. `git clone` from a bundle already
+checks out the bundle's HEAD — the commit the operator bundled — so the extra
+checkout could only move the pod *away* from the code meant to run. A task
+branch's session would have cloned at the task's HEAD and then switched to the
+default branch. **Task 015 would have run without the pgvector adapter it
+exists to measure, and nothing in the receipt would have said so.** That
+failure produces measurements, not errors, which makes it the more dangerous
+of the two.
+
+**The fixes.**
+
+1. `tail_lines(text, n)` collapses each carriage-return run to its final state
+   and returns the last *n* lines. `SshError` now carries the full `stdout`,
+   `stderr`, `returncode` and `command`; the message shows the tail.
+2. The sync step writes the clone's **full stderr**, its **last 20 lines**,
+   and the return code into the session record under state `clone_failed`,
+   alongside the commit and branch it tried to run.
+3. `clone_command` checks out **no branch by default** and never mentions
+   `master`. When given a commit it asserts `git rev-parse HEAD` matches and
+   exits 1 if not, so a pod running code nobody chose fails before measuring.
+   It prints the commit either way, so the log says what ran even on success.
+4. It runs `df -h` on the clone's target filesystem first, so "the disk was
+   full" is answered by the log rather than guessed at.
+
+**Verified end to end in a Linux container**, running the exact command the
+pod will run, against this worktree's own bundle:
+
+```
+disk before clone:
+Filesystem                Size      Used Available Use% Mounted on
+overlay                1006.9G     16.2G    939.4G   2% /
+pod repo at 6fdebcb693c6066936b31212229d40f979059299
+RC=0
+branch: task-015   files: 381
+oneground/adapters/pgvector/adapter.py present
+sessions/verify-arxiv-150k-two-engines.yaml: ONEGROUND_ENGINES: qdrant,pgvector
+```
+
+Six tests pin it, including one that reconstructs a 12 KB progress stream and
+asserts the old head-truncation would have lost the error while the tail keeps
+it.
+
 ## Observed, not done
 
-**A nondeterministic native crash in the determinism harness.** Two runs of
+**A nondeterministic native crash in the determinism harness.** *(Recorded at
+the developer's instruction, not chased in this task.)* Two runs of
 `tasks/scratch/015-sharded-determinism.py` died with Windows exception
 `0xC000070A` after the arxiv-smoke section, with no Python traceback; a third
 and fourth ran to completion. A 20-build stress test that alternates

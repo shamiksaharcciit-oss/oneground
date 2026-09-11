@@ -72,7 +72,22 @@ def transfer_timeout(nbytes):
 
 
 class SshError(RuntimeError):
-    """A remote command or transfer failed."""
+    """A remote command or transfer failed.
+
+    Carries the full stdout and stderr, not only the message. Session
+    20260911-001111 reported `git clone exited 1 during Updating files:
+    31% (119/381)` and the real error -- a `git checkout` of a branch that
+    no longer existed -- was gone, because the message kept the first 800
+    characters of a stream whose first 800 characters are always progress.
+    """
+
+    def __init__(self, message, returncode=None, stdout="", stderr="",
+                 command=""):
+        super().__init__(message)
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.command = command
 
 
 class LaunchFailed(SshError):
@@ -159,9 +174,13 @@ class PodSsh:
                            % (timeout or self.timeout,
                               " ".join(cmd[:3]), detail)) from None
         if check and p.returncode != 0:
-            raise SshError("%s -> exit %d\n%s"
-                           % (" ".join(cmd[:3]), p.returncode,
-                              (p.stderr or p.stdout or "")[:800]))
+            raise SshError(
+                "%s -> exit %d\n%s"
+                % (" ".join(cmd[:3]), p.returncode,
+                   tail_lines(p.stderr or p.stdout or "",
+                              ERROR_TAIL_LINES)),
+                returncode=p.returncode, stdout=p.stdout or "",
+                stderr=p.stderr or "", command=" ".join(cmd[:3]))
         return p
 
     def run(self, command, timeout=None, check=True):
@@ -348,6 +367,54 @@ def build_start_command(repo_dir, command, remote_log, env=None):
     ).format(log=log, payload=shlex.quote(payload))
 
 
+# How many lines of a failed command's output go in the exception message.
+# The full text is on the exception and in the session record; this is only
+# what a human sees first.
+ERROR_TAIL_LINES = 20
+
+
+def tail_lines(text, n=ERROR_TAIL_LINES):
+    """The last `n` meaningful lines, with carriage-return progress collapsed.
+
+    Written after session 20260911-001111. Two things were wrong with the old
+    `[:800]`:
+
+    **It took the head.** The useful part of a failed command is its end. The
+    first 800 characters of a git clone are always progress.
+
+    **It did not collapse carriage returns.** Git writes progress as one
+    enormous line -- `Updating files: 1% ... 100%` separated by carriage
+    returns, no newlines -- so 800 characters is a few percent of a single
+    line and the cut lands mid-word. That is why the captured output ended at
+    `Upda`: not a crash mid-write, a slice through a progress line.
+
+    Each carriage-return run is reduced to its final state, which is what a
+    terminal would have shown, and blank fragments are dropped.
+    """
+    if not text:
+        return ""
+    out = []
+    for raw in str(text).split("\n"):
+        frag = raw.split("\r")[-1].rstrip()
+        if frag:
+            out.append(frag)
+    return "\n".join(out[-int(n):])
+
+
+def head_commit(repo_root="."):
+    """(commit, branch) of the tree being bundled.
+
+    The pod must run *this* commit. Recorded at bundle time and checked on the
+    pod, because "the pod ran code you did not expect" is a failure that
+    produces measurements rather than errors.
+    """
+    def git(*args):
+        p = subprocess.run(["git", "-C", repo_root, *args],
+                           capture_output=True, text=True)
+        return (p.stdout or "").strip() if p.returncode == 0 else ""
+    return git("rev-parse", "HEAD"), git("rev-parse", "--abbrev-ref", "HEAD")
+
+
 def bundle_repo(repo_root=".", out_path=None):
     """`git bundle create --all`, and warn if the working tree is dirty.
 
@@ -433,7 +500,50 @@ def tar_to_absolute_paths(pairs, out_path=None, on_file=None):
     return out_path, total, count
 
 
-def clone_command(bundle_remote, repo_dir, branch="master"):
-    """The remote shell line that turns an uploaded bundle into a checkout."""
-    return ("rm -rf {d} && git clone {b} {d} && cd {d} && "
-            "git checkout {br}").format(d=repo_dir, b=bundle_remote, br=branch)
+def clone_command(bundle_remote, repo_dir, branch=None, commit=None):
+    """The remote shell line that turns an uploaded bundle into a checkout.
+
+    **No branch is checked out by default, and `master` is never assumed.**
+    `git clone` from a bundle already checks out the bundle's HEAD, which is
+    the commit the operator bundled -- so an extra checkout can only move the
+    pod *away* from the code that was meant to run.
+
+    This used to be `git checkout master`, unconditionally and with the branch
+    argument never passed by its one caller. Two things were wrong with it:
+
+    1. `master` was renamed `main` in task 014, so the command started failing
+       outright -- session 20260911-001111, reported as a clone failure
+       because the error was truncated away (see `tail_lines`).
+    2. Even while it worked it was wrong. A task branch's session would clone
+       the bundle at the task's HEAD and then check out the default branch,
+       so the pod measured code the task had not written. Task 015 would have
+       run without the pgvector adapter it exists to measure, and the receipt
+       would have said nothing.
+
+    `commit`, when given, is asserted after the checkout: the run refuses to
+    start on a commit nobody chose. A `git checkout` is still available for a
+    caller that genuinely wants a different ref, and it has to ask for it.
+    """
+    # Free space on the filesystem the clone lands on, BEFORE it starts. The
+    # repo is ~47 MB so this has never been the cause, but a checkout that
+    # dies part way through looks exactly like a full disk and guessing cost
+    # a session once. `dirname` because the directory itself is about to be
+    # removed. Note the target is /workspace -- the network volume -- not the
+    # container disk, which is the one a reader is likely to assume.
+    parts = ['echo "disk before clone:"; df -h "$(dirname {d})" | tail -2'
+             .format(d=repo_dir),
+             "rm -rf {d}".format(d=repo_dir),
+             "git clone {b} {d}".format(b=bundle_remote, d=repo_dir),
+             "cd {d}".format(d=repo_dir)]
+    if branch:
+        parts.append("git checkout {br}".format(br=branch))
+    if commit:
+        # Printed either way, so the log says which commit the pod is running
+        # even when it is the right one.
+        parts.append(
+            'got="$(git rev-parse HEAD)"; echo "pod repo at $got"; '
+            '[ "$got" = "{c}" ] || {{ echo "ERROR: expected {c}" >&2; '
+            'exit 1; }}'.format(c=commit))
+    else:
+        parts.append('echo "pod repo at $(git rev-parse HEAD)"')
+    return " && ".join(parts)
