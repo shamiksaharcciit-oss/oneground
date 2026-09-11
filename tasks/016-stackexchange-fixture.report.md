@@ -1,7 +1,8 @@
 # Report: 016-stackexchange-fixture
 
-**Status: steps 1–4 complete, step 5 (the build) waiting on one `y`.**
-Steps 6–9 depend on artifacts that do not exist yet.
+**Status: steps 1–4 complete. Step 5 (the build) RAN AND WAS LOST** — killed
+at its cap 21 minutes from the finish, with no network volume to survive on.
+Steps 5–8 have no artifacts and are not done; step 9 (`docs/POD.md`) is.
 
 Two commits. `e29b622` built steps 1–4 and reported a planned fixture matching
 at 1.00. This revision, after review, makes two changes the reviewer asked for:
@@ -585,6 +586,17 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 | **(016e)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **171 passed, 1 skipped**, 15.2 s |
 | **(016e)** Full suite | `python -m pytest -q` | **596 passed, 1 skipped** in 260.8 s (+16) |
 | **(016e)** GraphQL blips | two `plan` runs in a row | HTTP 500 twice, then fine; the aliased query re-probed OK at every size 2..33, so transient server-side |
+| **(016f)** Session | 20260911-220320, pod `demdanrfl4y0gb` | A40 / CA-MTL-1, $0.49/hr true, `volume: none`, **fallback candidate** (planned RTX 4090) |
+| **(016f)** ssh-ready | session record `ssh_ready` | **1.5 s, 1 attempt** |
+| **(016f)** Streamed pass | build log, 22:08:27 -> 22:55:23 | **46m 56s**, 59 shards, ~34.06 GB, **~12.1 MB/s**, 47.7 s/shard |
+| **(016f)** Eligible questions | same pass, counted exactly | **20,388,803** of 58,329,355 posts (**35.0%**), 16 years |
+| **(016f)** Sample | build log | 150,000 base + 2,000 queries, **199 hot categories** |
+| **(016f)** Embed on A40 | build log, 22:55:45 -> 23:02:00 | **6m 14s / 152,000 texts** (~406 texts/s) |
+| **(016f)** Reference configs | build log | single-node HNSW 3m 06s; semantic-sharded 2m 32s |
+| **(016f)** UMAP projection | build log | 4m 24s |
+| **(016f)** Unfinished tail | 23:13:10 -> cap | **20m 21s** in `fixture verify` + ground-view + tar |
+| **(016f)** Outcome | `finished_because` | **cap**; neither tarball present; **nothing recovered**; $0.73 |
+| **(016f)** Pods left | `oneground pod ls` after terminate | **0** |
 | **(016d)** Baseline note | `git log` | task 015 merged into `main` at 21:58, **after** 016c's commit at 21:44, so the 555 and 580 figures are not the same baseline — hence the collect-only delta above |
 | **(016d)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **155 passed, 1 skipped**, 7.7 s (+15 from this change) |
 | **(016d)** Suite runtime before the seam | same command | **hung** past 400 s — two harnesses retrying a pod at 10.0.0.1 for the full window |
@@ -636,6 +648,10 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 - **(016c)** A volume-less resolve makes **no** volume lookup and **no**
   billable call, and the volume-derived path's payload and rendering are
   unchanged.
+- **(016f)** The whole `up` -> `watch` -> fetch -> terminate path worked on a
+  real billing pod: the fallthrough deployed the A40, the readiness wait
+  returned in 1.5 s, the stall watchdog correctly did not fire on an 11.7 min
+  quiet stretch, and the cap terminated the pod and left **0** on the account.
 - **(016d)** The readiness wait retries a refusing remote and a *hanging* one,
   logs every attempt, gives up exactly at its deadline and never overruns it,
   probes with a harmless `true`, and records the full command on failure —
@@ -651,6 +667,15 @@ embedding with the box down to 289 MB available, where its only outcome was the
 same `0xC0000005`. The layers past embedding remain couldn't-check, unchanged.
 
 **Couldn't check.**
+
+- **(016f) Every published value of stackexchange-150k.** Crispness, ambiguity,
+  skew, the drift pair and both reference recalls were computed on the pod and
+  destroyed with it. The spec stays `status: planned`, every value
+  `TO_BE_FILLED`, and the changelog records the attempt. Nothing is read off
+  the progress log into the spec.
+- **(016f) Steps 6, 7 and 8** — simulate, the decision log, the findings, the
+  ground-view parquets and `fixture verify --asset`. All need the artifacts.
+  There is no decision log to paste because no decision was measured.
 
 - Byte-identity of `vectors.npy`, `queries.npy`, `ground_truth.npy` and
   `characterization.json` for `arxiv-smoke`. The rebuild cannot finish in
@@ -778,7 +803,125 @@ All task 016, on `main`.
 | `tasks/scratch/016-reservoir-footprint.py` | new (scratch is gitignored) |
 | `tasks/scratch/016b-stream-probe.py`, `016b-schema-probe.py`, `016b-stream-feasibility.py`, `016b-no-disk-probe.py`, `016b-no-disk-probe2.py` | **(016b)** the source probes (scratch is gitignored) |
 
+### (016f) The build ran, and the cap killed it 21 minutes from the finish
+
+Session **20260911-220320**, pod `demdanrfl4y0gb`, **A40 in CA-MTL-1** at
+$0.49/hr — the fallback candidate, deployed without a second `y`, exactly as
+016e intended. `finished_because: cap`. Neither tarball existed when `watch`
+went to fetch, and with `volume: none` the container disk went with the pod.
+**Nothing was recovered. Cost $0.73.**
+
+Steps 5, 6, 7 and 8 are therefore **not done**: there are no artifacts to
+publish values from, nothing to simulate against, no decision log and no
+findings. The values were computed on that pod and are gone. I am not
+publishing numbers read off a progress log rather than off the artifact they
+belong to — `kind: receipt` exists to prevent exactly that.
+
+**The three numbers the brief asked for did survive**, because the log carries
+them:
+
+| | |
+|---|---|
+| ssh-ready | **1.5 s, 1 attempt** — the 016d wait never had to retry |
+| streamed pass | **46m 56s**, 59 shards, **~12.1 MB/s** sustained, nothing stored |
+| embed on the A40 | **6m 14s for 152,000 texts** (~406 texts/s) |
+
+and so did the sampling frame: **20,388,803 eligible questions** across 16
+years, 35.0% of the 58,329,355 posts, sampled to 150,000 base + 2,000 queries
+over **199 hot categories**. Source verified as
+`a656730c7671…de1207` from LFS metadata in ~1 s, before any content moved.
+
+#### Where the 90 minutes went
+
+| phase | elapsed | share of cap |
+|---|---|---|
+| pod create → run start (image pull, venv, clone, setup) | 5m 01s | 5.6% |
+| source verify (metadata only) | 1s | — |
+| **streamed sampling pass, 59 shards** | **46m 56s** | **52.1%** |
+| sample write + split | 22s | 0.4% |
+| embed 152k texts | 6m 14s | 6.9% |
+| exact ground truth | 15s | 0.3% |
+| characterize (TwoNN, k-means 256, drift) | 49s | 0.9% |
+| reference: single-node HNSW | 3m 06s | 3.4% |
+| reference: semantic-sharded | 2m 32s | 2.8% |
+| **MANIFEST written — receipts complete** | **at 23:08:44** | **24m 38s before the cap** |
+| UMAP projection | 4m 24s | 4.9% |
+| `fixture verify` + ground-view export + tar | **20m 21s, unfinished** | 22.6% |
+
+Two things that table says.
+
+**The streamed pass is half the budget.** 47 minutes for ~32 GB of column
+chunks is the irreducible cost of not storing the source, and it is the thing
+that makes a 1.5 h cap the wrong size for this build — not any of the
+measurement steps, which together came to under 14 minutes.
+
+**And the tail re-did work the build had already done.** `fixture verify` runs
+as the next step after the builder, and
+[verify.py:473](oneground/fixture/verify.py#L473) and
+[verify.py:487](oneground/fixture/verify.py#L487) recompute `ref_single_node`,
+a fresh `kmeans(base, 256)` and `ref_semantic_sharded` — **unconditionally**,
+whether or not the spec has a value to compare against. This spec is
+`status: planned` with every value `TO_BE_FILLED`, so those ~6–8 minutes of
+recomputation could only ever produce `couldnt_check` rows, every one of them
+knowable from the spec before a single vector was read. On the first build of
+a planned fixture the verify step has nothing to verify: the build's own output
+is what fills the values.
+
+#### What I would change, and what I did not
+
+I did **not** touch `caps.max_hours`. It is a spec value; rule 3 says a gate
+does not move to make something pass, and the brief says not to raise caps.
+The options are the developer's to pick, and they are not equal:
+
+1. **Package the receipts as soon as the MANIFEST exists.** The strongest fix,
+   and independent of the cap. At 23:08:44 every receipt artifact was on disk
+   and complete; the run then spent 24 minutes on the projection, a verify that
+   could not verify anything, and a ground-view export — and lost all of it for
+   want of a `tar` that had not happened yet. A small tarball built immediately
+   after the manifest would have survived this run.
+2. **Skip `fixture verify` when every published value is `TO_BE_FILLED`.**
+   Recovers ~6–8 minutes and removes a step that, on a first build, is
+   guaranteed to report nothing.
+3. **Raise `max_hours`.** The honest reading of the table is that this build
+   needs ~100–105 minutes, not 90. That is a real number now rather than an
+   estimate — but it is a cap, and moving it is your call, not mine.
+4. **Give the session a volume.** It would have made this failure survivable:
+   the artifacts would still be on `vecbench` and fetchable. But it re-pins the
+   region to the volume's stock, which is what 016c removed for good reason —
+   and that reason has not gone away.
+
+(1) and (2) together would have brought this run home inside the existing cap
+with room to spare. I have not implemented either: both change the build
+runner, and neither was in this brief.
+
+#### Also worth recording
+
+`watch` behaved correctly throughout. It never tripped the stall watchdog —
+peak idle was 11.7 min against a 20 min `stall_minutes`, during the verify
+recomputation — and at the cap it tried to fetch before terminating, reported
+`couldn't-check: not present on the pod` for both outputs rather than claiming
+success, and left zero pods on the account.
+
 ## Blocked on developer
+
+**(016f) The item that matters now: the build needs ~100–105 minutes and its
+cap is 90.** That is measured, not estimated — the phase table above accounts
+for all 90 minutes of the killed run. Four ways forward, in the order I would
+rank them, none of which I have taken because all four are yours:
+
+   a. **Package the receipts the moment the MANIFEST is written.** Independent
+      of the cap, and it would have saved *this* run: every receipt artifact
+      was complete 24m 38s before the terminate, and was lost for want of a
+      `tar` that had not happened yet.
+   b. **Skip `fixture verify` when every published value is `TO_BE_FILLED`.**
+      ~6–8 minutes of recomputation that can only report `couldnt_check` on a
+      first build.
+   c. **Raise `caps.max_hours`** to ~2.0. I did not: rule 3, and the brief.
+   d. **Give the session a volume**, which would make a cap-kill survivable —
+      at the cost of re-pinning the region to that volume's stock, which is
+      what 016c removed and why.
+
+   (a) and (b) together bring the run home inside the existing 1.5 h.
 
 1. **Push `444c250`** (task 014d). One commit. I do not push.
 2. **Dispatch the calibration workflow** for run #6. Still open from 014c/014d,

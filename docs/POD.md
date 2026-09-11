@@ -3,8 +3,9 @@
 How `oneground pod` works, where the money boundary is, what the caps do, and
 how to recover a pod nobody is watching.
 
-Heavy jobs — the canonical fixture builds — run on a RunPod GPU pod with the
-network volume mounted at `/workspace`. Before task 006 every session was the
+Heavy jobs — the canonical fixture builds — run on a RunPod GPU pod, usually
+with the network volume mounted at `/workspace` (see `volume: none` below for
+the sessions that need no volume at all). Before task 006 every session was the
 developer pasting the twelve steps in `corpora/POD_SETUP.md` into a browser
 terminal. `oneground pod` makes a session one command driven by the build
 agent, without moving the decision about spending money.
@@ -179,6 +180,90 @@ and its global price would be a fiction.
 that datacenter wins. `plan` prints the whole list with what each resolved to,
 so an unavailable first choice is visible rather than silent.
 
+### `volume: none` — when the region is chosen instead of derived
+
+`volume:` is required, and it decides how the datacenter is picked. Naming a
+volume derives the region from it, as above. `none` says this session needs no
+network volume:
+
+```yaml
+gpu: ["RTX PRO 4500", "RTX 6000 Ada", "RTX 4090", "L4", "A40"]
+volume: none                     # no network volume; region chosen by stock
+volume_mount_path: /workspace    # an ordinary directory on the container disk
+disk_gb: 60                      # everything the run writes lives here
+```
+
+|  | `volume: <name>` | `volume: none` |
+|---|---|---|
+| datacenter | **derived** from the volume | **chosen** by GPU availability |
+| `volume_mount_path` | the mount | a directory on the container disk |
+| survives the pod | yes | **no** |
+| `disk_gb` sizes | the venv | the venv *and* everything the run writes |
+
+The choosing rule is **the cheapest listed datacenter offering the first
+available GPU in the list**. Preference order is honoured first — a cheap
+region for a card the session did not ask for is a different answer, not a
+better one — and only then does price choose between the regions offering that
+card. Ties break on datacenter id, so two `plan` runs cannot silently move the
+pod. Unlisted datacenters are skipped; the volume-derived path never consults
+that list at all, so a session pinned to a volume keeps working in a region
+that has stopped taking new pods.
+
+One asymmetry to know before reading a price: `securePrice` — the number this
+project confirms against — is reported **globally**, not per datacenter. Only
+the `lowestPrice` floor varies by region. So "cheapest datacenter" is decided
+on the floor, while the confirmed rate is the same everywhere, and `plan` says
+so rather than implying a saving that is not there.
+
+```
+  volume     : none   (nothing outlives the pod)
+  datacenter : US-WA-1   (chosen by GPU availability, 33 searched)
+               cheapest of 1 offering RTX 6000 Ada, at $0.84/hr
+  disk       : 60 GB container disk; /workspace is on it, not a volume
+
+  datacenters offering RTX 6000 Ada, cheapest first:
+    US-WA-1     $0.74 - $0.84/hr   stock Low   <- chosen
+```
+
+**Use it when nothing needs to outlive the pod.** The stackexchange-150k build
+streams its 34 GB source instead of storing it and returns both outputs as
+tarballs, so it holds nothing worth keeping — and pinning it to a volume would
+have pinned it to that region's stock. That is not hypothetical: `up` was
+refused in EU-RO-1, where `vecbench` lives, because the only cards on offer
+there were an over-cap B200 and an AMD MI300X our CUDA build cannot use.
+
+**Do not use it for anything you would mind losing.** The container disk dies
+with the pod. `arxiv-150k` still names `vecbench`, because its 4 GB source
+snapshot lives there and re-uploading it by hand is the thing the volume
+exists to avoid.
+
+### When a create is refused for want of capacity
+
+`up` confirms a **rate**, not a card — the prompt names a price and a total and
+no GPU. So when RunPod answers a create with *"there are no instances currently
+available"*, `up` moves to the next `(datacenter, GPU)` from the plan and tries
+again **without re-prompting**, as long as that candidate's confirmed worst
+case is at or under the rate already agreed. Each attempt is logged. A dearer
+candidate is never tried silently: it is reported as skipped, and the run ends
+telling you what a second `y` would buy.
+
+Only that one refusal is retried. Any other failed create may have produced a
+pod whose id this process never saw, and retrying it could put two pods behind
+one `y`, so those are raised rather than worked around. The session record
+names the card that actually exists, with `planned_gpu` set when it differs
+from the plan's first choice.
+
+### Waiting for sshd
+
+`RUNNING` is the *container's* state, not sshd's. Before the first command that
+matters, `up` probes with `ssh … true`, retried with backoff for up to 180 s
+(`--ssh-ready-timeout`), logging each attempt; the probe is allowed to fail, so
+a few seconds of "connection refused" costs nothing. A pod that never becomes
+reachable is terminated with `finished_because: ssh-never-ready`. How long it
+actually took is recorded as `ssh_ready` in the session file, and any SSH
+failure now records the full command it was running rather than the first three
+words of the argv.
+
 ### What `plan` prints
 
 `plan` is the dry run, and it is the *same code path* `up` uses to decide what
@@ -283,6 +368,11 @@ The container disk does not survive termination, so the venv is rebuilt every
 session. Nothing that must outlive the pod goes there — artifacts are written
 under `/workspace`, which is the volume.
 
+Under `volume: none` that last sentence does not hold: `/workspace` *is* the
+container disk, so nothing written there survives either, and `disk_gb` has to
+be big enough for the whole run. Such a session must return everything it
+produces as declared `outputs`, which `watch` fetches before it terminates.
+
 ---
 
 ## Labels, and recovering an orphan
@@ -321,6 +411,11 @@ is just out of date.
 Keep the network volume: it holds `vectors.npy`, `queries.npy` and
 `sample.jsonl.zst`, which are the release asset and are not in any tarball.
 Terminating a pod never touches the volume.
+
+For a `volume: none` session there is nothing to keep and nothing to protect:
+terminating discards everything on the pod. Fetch the outputs first if the run
+got far enough to write them — `oneground pod fetch <id>` — because after the
+terminate they are gone.
 
 ---
 
