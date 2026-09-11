@@ -320,25 +320,36 @@ if has_engine pgvector; then
     # exactly the kind of step that looks like a hang from outside. These
     # echoes are what keep a slow-but-working install from being killed --
     # and, if it does fail, what says which step it died on.
-    # WHY NOT `apt-get update`. Session 20260911-104406 spent 20 minutes in
-    # a plain `apt-get update` and never reached the install. Measured on the
-    # pod while it ran:
+    # WHY A SCOPED `apt-get update`, AND WHY NOT NONE AT ALL.
     #
-    #     archive.ubuntu.com    191 KB/s      apt.postgresql.org  1.1 MB/s
-    #     github.com            fast          /var/lib/apt/lists  growing 16 KB/s
+    # Two sessions established the shape of this, each by being wrong:
     #
-    # The image carries FOUR apt sources -- Ubuntu main, security.ubuntu.com,
-    # the deadsnakes PPA and NVIDIA's CUDA repo -- and a bare `apt-get update`
-    # refreshes every one of them over that link. It had already pulled 75 MB
-    # of indices and was still going.
+    #   20260911-104406  a bare `apt-get update` refreshed all four sources
+    #                    and had not finished after 20 minutes.
+    #   20260911-164815  "refresh PGDG only" then failed the install --
+    #                    locales, ssl-cert, libllvm19, libxslt1.1 and
+    #                    postgresql-common were "not installable".
     #
-    # None of that is needed. The image ships those indices already, and the
-    # only source this script adds is PGDG, which is fast. So refresh PGDG
-    # ALONE and resolve dependencies against the indices already on disk.
-    # `Dir::Etc::sourceparts=/dev/null` drops the other three; List-Cleanup=0
-    # keeps apt from discarding the lists it is not refreshing -- without it,
-    # apt prunes every index it did not just fetch and the install finds no
-    # libssl, no libicu, and no postgres.
+    # The second failed because the INDICES ARE ABSENT, not stale. The pod
+    # image strips /var/lib/apt/lists, as almost every Docker image does, so
+    # the 75 MB seen growing in the first session was apt building them from
+    # empty -- not the image shipping them. Confirmed on the pod: after the
+    # PGDG-only refresh, /var/lib/apt/lists held 1.9 MB and five entries, all
+    # of them PGDG.
+    #
+    # So Ubuntu's indices must be fetched. What can be skipped is the two
+    # sources nothing here needs: NVIDIA's CUDA repo and the deadsnakes PPA.
+    # Measured in an ubuntu:24.04 container with lists stripped, which is the
+    # pod's state:
+    #
+    #   scoped index fetch (Ubuntu + PGDG)    33.9 MB
+    #   dependency .debs, 28 packages         76.9 MB
+    #   total                                110.8 MB
+    #   cuda index alone, skipped              7.7 MB (1.8 MB gzipped)
+    #
+    # Scoping is done by pointing apt at a directory holding only the sources
+    # to refresh, which is plainer than a pile of -o overrides and leaves the
+    # real sources.list.d untouched for anything else on the pod.
     echo "  [1/5] PGDG signing key and source (codename pinned: $PG_CODENAME)"
     install -d /usr/share/postgresql-common/pgdg
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
@@ -348,16 +359,54 @@ if has_engine pgvector; then
     # version pins below are `pgdg24.04` builds, so the codename is already
     # decided by them. Reading it would only add a way for the two to disagree.
 
-    echo "  [2/5] refresh PGDG only (not the other three sources)"
+    echo "  [2/5] scoped apt-get update: Ubuntu + PGDG (CUDA and deadsnakes skipped)"
+    rm -rf /etc/apt/oneground.sources.d
+    mkdir -p /etc/apt/oneground.sources.d
+    for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+        [ -s "$f" ] && cp "$f" /etc/apt/oneground.sources.d/
+    done
+    cp /etc/apt/sources.list.d/pgdg.list /etc/apt/oneground.sources.d/
+    echo "        refreshing: $(ls /etc/apt/oneground.sources.d/ | tr '
+' ' ')"
     t0=$(date +%s)
-    apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/pgdg.list                    -o Dir::Etc::sourceparts=/dev/null                    -o APT::Get::List-Cleanup=0
+    # NOT -qq. The `Get:` lines are what let the 15-minute stall watchdog tell
+    # a slow fetch from a hung one; at the rate this link has shown, the
+    # difference decides whether the session survives. ~110 MB over the two
+    # steps: about 9 minutes at the 191 KB/s a single-stream curl measured on
+    # the pod, far longer if apt's effective rate is the ~16 KB/s that the
+    # same session's index growth suggested. The log will say which.
+    apt-get update         -o Dir::Etc::sourcelist=/dev/null         -o Dir::Etc::sourceparts=/etc/apt/oneground.sources.d         -o APT::Get::List-Cleanup=0
     echo "        refreshed in $(( $(date +%s) - t0 ))s"
+
+    echo "  [3/5] dependency availability, before attempting the install"
+    # The five that were "not installable" last time. Printed BEFORE the
+    # install so the log distinguishes "the index fetch did not give us what
+    # we need" from "the install broke for some other reason" -- last session
+    # those looked identical until the madison output was read carefully.
+    missing=0
+    for pkg in locales ssl-cert libllvm19 libxslt1.1 postgresql-common; do
+        cand=$(apt-cache policy "$pkg" 2>/dev/null                | awk '/Candidate:/{print $2}')
+        case "${cand:-none}" in
+            none|"(none)") echo "        $pkg: NOT AVAILABLE" >&2; missing=1 ;;
+            *) echo "        $pkg: $cand" ;;
+        esac
+    done
+    if [ "$missing" = 1 ]; then
+        echo "ERROR: Ubuntu dependencies are unavailable after the scoped" >&2
+        echo "  update, so the install cannot succeed. The indices are" >&2
+        echo "  ABSENT rather than stale -- this image strips" >&2
+        echo "  /var/lib/apt/lists -- so this means the scoped update did" >&2
+        echo "  not actually fetch Ubuntu's. What it refreshed:" >&2
+        ls /var/lib/apt/lists/ 2>/dev/null | grep -v partial | sed 's/^/    /' >&2
+        exit 1
+    fi
 
     # Pinned exactly. An unpinned install would drift the moment PGDG
     # publishes a point release, and the pod row would stop being comparable
     # to the local one without anything saying so.
-    echo "  [3/5] postgresql-$PG_MAJOR=$PG_VERSION_PIN"
+    echo "  [4/5] postgresql-$PG_MAJOR=$PG_VERSION_PIN"
     echo "        postgresql-$PG_MAJOR-pgvector=$PGVECTOR_VERSION_PIN"
+    echo "        (~77 MB of .debs across 28 packages)"
     t0=$(date +%s)
     if ! apt-get install -y -q --no-install-recommends         "postgresql-$PG_MAJOR=$PG_VERSION_PIN"         "postgresql-$PG_MAJOR-pgvector=$PGVECTOR_VERSION_PIN"; then
         echo "ERROR: the pinned PGDG packages could not be installed." >&2
@@ -365,15 +414,14 @@ if has_engine pgvector; then
         apt-cache madison "postgresql-$PG_MAJOR-pgvector" >&2 || true
         echo "  available postgresql-$PG_MAJOR versions:" >&2
         apt-cache madison "postgresql-$PG_MAJOR" >&2 || true
-        echo "  If the failure is a MISSING DEPENDENCY rather than a missing" >&2
-        echo "  version, the image's own apt indices are too old for these" >&2
-        echo "  pins. That needs a full \`apt-get update\`, which on this" >&2
-        echo "  link took over 20 minutes (session 20260911-104406) -- so it" >&2
-        echo "  is a decision to make deliberately, not a retry to bury here." >&2
+        echo "  The five Ubuntu dependencies were checked above and were" >&2
+        echo "  available, so this is NOT the absent-index failure of" >&2
+        echo "  session 20260911-164815. Read the apt output above." >&2
         exit 1
     fi
     echo "        installed in $(( $(date +%s) - t0 ))s"
-    echo "  [4/5] versions"
+
+    echo "        versions"
     PGBIN="/usr/lib/postgresql/$PG_MAJOR/bin"
     "$PGBIN/postgres" --version
 

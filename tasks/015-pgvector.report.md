@@ -555,6 +555,121 @@ CREATE INDEX t_hnsw ON public.t USING hnsw (embedding vector_ip_ops)
 Every step of the pod's pgvector path has now run somewhere. What has still
 never run on a pod is the path as a whole, on that machine, over that link.
 
+### Step 5, third attempt: session 20260911-164815 (pod b0xvaxqf1msj48)
+
+Failed at the install, terminated at 10 minutes, **~$0.10**, 0 pods left. No
+measurements. **The cause was my own previous fix.**
+
+The step's log said the pins were present and the dependencies were not:
+
+```
+  [2/5] refresh PGDG only (not the other three sources)
+Fetched 1306 kB in 1s (2437 kB/s)
+        refreshed in 1s
+  [3/5] postgresql-16=16.15-1.pgdg24.04+2
+The following packages have unmet dependencies:
+ postgresql-16 : Depends: locales but it is not installable or
+                          locales-all but it is not installable
+                 Depends: postgresql-common (>= 252~) but it is not going to be installed
+                 Depends: ssl-cert but it is not installable
+                 Depends: libllvm19 but it is not installable
+                 Depends: libxslt1.1 (>= 1.1.25) but it is not installable
+E: Unable to correct problems, you have held broken packages.
+```
+
+`apt-cache madison` confirmed **both pins available**. Checked on the pod
+before terminating:
+
+    /var/lib/apt/lists   1.9 MB, 5 entries, all of them PGDG
+
+**The premise was wrong, not the pins.** In session 20260911-104406 I saw
+`/var/lib/apt/lists` at 75 MB "and growing" and read it as *the image ships
+these indices*. It was apt **building them from empty** — the image strips
+apt lists, as almost every Docker image does. So that session's 20 minutes
+was the genuinely necessary Ubuntu index download, and "refresh PGDG only"
+removed the one thing that made the install possible.
+
+### The mechanism, measured before being trusted
+
+Reproduced in `ubuntu:24.04` with lists stripped and the pod's other two
+sources added, then measured:
+
+| | bytes | on this laptop |
+| --- | --- | --- |
+| **(a)** scoped index fetch — Ubuntu + PGDG, CUDA and deadsnakes excluded | **33.9 MB** | 15 s |
+| **(b)** pinned install, `--download-only`, 28 packages | **76.9 MB** | 29 s |
+| **total transfer** | **110.8 MB** | |
+| CUDA index alone, skipped | 7.7 MB (1.8 MB gzipped) | not fetched |
+
+The exclusion is verified rather than assumed: after the scoped update,
+`ls /var/lib/apt/lists | grep -cE 'nvidia|launchpad'` returns **0**, and all
+twelve Ubuntu `Packages.lz4` files plus PGDG's are present.
+
+All five dependencies then resolve:
+
+    locales              2.39-0ubuntu8.9
+    ssl-cert             1.1.2ubuntu1
+    libllvm19            1:19.1.1-1ubuntu1~24.04.2
+    libxslt1.1           1.1.39-0exp1ubuntu0.24.04.3
+    postgresql-common    293.pgdg24.04+1
+
+**What this predicts for the pod, and the honest uncertainty.** The sizes
+transfer; the times do not. Two throughput figures were measured on the pod in
+session 20260911-104406 and they disagree by more than tenfold:
+
+| rate, as measured on the pod | 110.8 MB would take |
+| --- | --- |
+| 191 KB/s — single-stream `curl` from archive.ubuntu.com | **~9 minutes** |
+| ~16 KB/s — observed growth of `/var/lib/apt/lists` under apt | **~113 minutes** |
+
+Nine minutes fits the 1-hour cap comfortably; 113 does not. Which one governs
+is not something a container on a different link can settle. What the fix can
+do — and now does — is make the log say which, from the first `Get:` line
+onward, instead of going silent and looking like a hang.
+
+*(An arithmetic slip caught before it reached this report: the measurement
+script divided bytes by bytes-per-second and labelled the result "min",
+producing "280 min" for the index fetch. The correct figure is ~3 minutes at
+191 KB/s.)*
+
+### What changed in the installer
+
+1. **Scoped update**, not none and not all four sources. Apt is pointed at a
+   directory holding only `ubuntu.sources` and `pgdg.list`, which leaves the
+   pod's real `sources.list.d` untouched.
+2. **Progress printing** — `-q`, not `-qq`, on both the update and the
+   install, so the 15-minute stall watchdog can tell a slow fetch from a hung
+   one. At the rates above that distinction decides whether the session
+   survives.
+3. **Corrected diagnostic wording.** The old text said the indices were "too
+   old"; they are **absent**. A reader following that sentence would have gone
+   looking for a staleness problem that does not exist.
+4. **A dependency precheck before the install** — the five packages that
+   failed last time, printed with their candidate versions, and a hard exit
+   naming the real cause and listing what the update actually fetched if any
+   is missing. Last session those two failure modes were indistinguishable
+   until the madison output was read carefully.
+
+**Verified end to end** by extracting the pgvector block verbatim from
+`corpora/run_verify_pod.sh` — not retyped — and running it in `ubuntu:24.04`
+with lists stripped and the CUDA source present:
+
+```
+        installed in 420s
+        versions
+postgres (PostgreSQL) 16.15 (Ubuntu 16.15-1.pgdg24.04+2)
+  [5/5] initdb + start
+waiting for server to start.... done
+server started
+CREATE EXTENSION
+        extension
+pgvector 0.8.6
+```
+
+Steps [1/5] through [4/5] are established by the install having run at all:
+it is gated behind the precheck, which is gated behind the scoped update
+having populated Ubuntu's indices.
+
 ## Observed, not done
 
 **A nondeterministic native crash in the determinism harness.** *(Recorded at
@@ -583,6 +698,17 @@ against a dedicated vector store is that a `WHERE` clause is just SQL.
 oneground measures no filtered search for any engine, so the comparison this
 task enables is narrower than the real choice a team faces, and `ADAPTER.md`
 says so.
+
+**A pre-baked pod image is the durable fix, and belongs to task 017.** Three
+sessions have now been spent on getting Postgres onto a pod, and every one of
+them failed in the installer rather than in anything oneground measures. The
+scoped update makes the install correct; it does not make it *fast*, and at
+the 16 KB/s end of the pod's measured range it would still not fit the cap.
+Baking `postgresql-16` + `postgresql-16-pgvector` into a pinned image moves
+the whole 110.8 MB out of billed time and off the critical path, and turns the
+engine version into a property of a digest rather than of an apt transaction
+on the day. That is a new artifact to build, publish and pin — a task, not a
+paragraph in this one. **Recorded for 017, deliberately not done here.**
 
 **Neither engine is tuned.** No `COPY`, no unlogged tables, no
 `synchronous_commit=off`, no Qdrant gRPC path, no quantization — for either,
