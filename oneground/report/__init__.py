@@ -899,6 +899,37 @@ def _kind_of(name, workdir):
 # the command
 # --------------------------------------------------------------------------
 
+def qps_max_lines(verify_data):
+    """Decision-log entries for the measured ceiling. Task 017 item 5.
+
+    A separate row on purpose. `qps` is a sustain check -- did the engine hold
+    the rate it was offered -- and `qps_max` is a ceiling found by removing the
+    throttle and ramping until the engine degrades. They are different
+    questions, and the reason `qps_max` went unimplemented until now is that
+    the cheap way to produce one is to read the achieved rate off a throttled
+    run, which reports the offer back as if it were the capacity.
+
+    So this is never a verdict: there is no `qps_max` constraint, nothing is
+    judged against it, and `latency_p95`/`qps` never read it.
+    """
+    lines = []
+    for engine, block in vd.engine_blocks(verify_data):
+        ceiling = (block or {}).get("qps_max")
+        if not isinstance(ceiling, dict) or ceiling.get("qps_max") is None:
+            continue
+        who = f"{engine}: " if engine else ""
+        lines.append({
+            "kind": "qps_max",
+            "text": (f"{who}{ceiling['qps_max']:.1f} qps at concurrency "
+                     f"{ceiling['at_concurrency']} (p99 "
+                     f"{ceiling.get('p99_ms_at_max') or 0:.1f} ms). Ramp "
+                     f"stopped because {ceiling['stopped_because']}. "
+                     f"{ceiling.get('caveat', '')}"),
+            "source": "verify.json:qps_max",
+        })
+    return lines
+
+
 def _prices_postdate_the_run(prices, verify_info):
     """Why this price table may not price this run, or None. Task 017 item 6.
 
@@ -994,6 +1025,10 @@ def run(requirements_path, log_fn=log, env_stamp=None):
     recommended = vd.recommend(options, k=k)
     dlog = decision_log(options, not_run_rows, recommended, constraints,
                         verify_info, k=k, env_id=env_id)
+    # Appended rather than built inside `decision_log`, which is given the
+    # judged options and not the raw verify document. The ceiling is not a
+    # judgement of any option -- it is a property of the engine on this host.
+    dlog.extend(qps_max_lines(verify_data))
 
     inputs = _input_digests(workdir)
     counts = {o: sum(1 for x in options if x.outcome == o)
