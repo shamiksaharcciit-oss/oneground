@@ -54,3 +54,65 @@ def embed(model, texts, batch, show_progress_bar=True):
     v = model.encode(texts, batch_size=batch, show_progress_bar=show_progress_bar,
                      convert_to_numpy=True, normalize_embeddings=True)
     return v.astype(np.float32)
+
+
+TRUNCATION_ADVICE = (
+    "if these are documents rather than chunks, chunk them first -- "
+    "everything past the limit was discarded before a single number was "
+    "computed, and no measurement downstream can tell you it happened")
+
+
+def count_truncated(model, texts, max_seq_length=None, batch=1000):
+    """How many records the model will silently cut. Task 017 item 3.
+
+    A transformer takes a fixed number of tokens and drops the rest. It does
+    not fail, it does not warn, and the vector it returns is a perfectly good
+    vector -- of the first `max_seq_length` tokens. Every measurement built on
+    it then describes a corpus the user does not have: recall against ground
+    truth computed from the same truncated vectors is self-consistent and
+    says nothing about whether the tail mattered.
+
+    Counted with the model's own tokenizer, the one `encode` is about to use,
+    so this is what will actually happen rather than an estimate from
+    characters or whitespace.
+
+    Returns None when the count cannot be taken -- couldn't-check, which the
+    caller records as such rather than reporting zero truncated.
+    """
+    tok = getattr(model, "tokenizer", None)
+    if tok is None:
+        return None
+    limit = int(max_seq_length if max_seq_length is not None
+                else getattr(model, "max_seq_length", 0) or 0)
+    if limit <= 0:
+        return None
+
+    n, truncated, longest = 0, 0, 0
+    try:
+        for i in range(0, len(texts), batch):
+            chunk = [str(t) for t in texts[i:i + batch]]
+            encoded = tok(chunk, add_special_tokens=True, truncation=False,
+                          padding=False)["input_ids"]
+            for ids in encoded:
+                n += 1
+                ln = len(ids)
+                if ln > longest:
+                    longest = ln
+                if ln > limit:
+                    truncated += 1
+    except Exception:                                 # tokenizer-specific
+        return None
+
+    return {
+        "model": getattr(model, "_oneground_name", None),
+        "max_seq_length": limit,
+        "n_records": n,
+        "truncated_count": truncated,
+        "truncated_fraction": (truncated / n) if n else 0.0,
+        "longest_tokens": longest,
+        "counted_with": "the model's own tokenizer, add_special_tokens=True",
+        "note": ("records whose tokenized length exceeds max_seq_length. The "
+                 "model truncates them to the limit and returns a vector "
+                 "without reporting it; this is the count of how often that "
+                 "happened. " + TRUNCATION_ADVICE),
+    }
