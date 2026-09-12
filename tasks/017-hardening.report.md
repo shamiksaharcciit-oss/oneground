@@ -302,8 +302,9 @@ happened
 
 ### Item 4, the scan against this tree
 
-270 tracked files scanned. Identifiers on this machine: `desktop-hagopqc`,
-`polo2`.
+270 tracked files scanned. Two identifiers resolve on this machine — a
+`DESKTOP-` hostname and an account name — which are deliberately not written
+out here, for the reason in the postscript below.
 
 | | |
 |---|---|
@@ -401,6 +402,27 @@ running server's own `pg_extension`, neither read from a package index.
 
 Both versions are the pins the local compose files run, which is the property
 that makes a pod row and a laptop row comparable at all.
+
+### Postscript: the scan caught this report
+
+The first draft of the section above named both identifiers, in the course of
+explaining that identifiers must not be named. The suite went red on the next
+run:
+
+```
+FAILED oneground/test_environment.py::test_no_tracked_file_carries_a_machine_identifier
+  tasks/017-hardening.report.md:305  [DESKTOP- hostname]
+  tasks/017-hardening.report.md:306  [machine identifier 'polo2']
+```
+
+Fixed by rewriting the sentence, not by adding the file to the allowlist —
+which was the available shortcut and is the one that would have made the
+allowlist start growing. It is worth recording for two reasons. The leak came
+from a **report**, not from code, which is the route 016 took as well: prose
+quoting a path it was describing. And it happened to the person who had just
+spent an hour writing the guard, about half an hour after writing it, which is
+a fair estimate of how much attentiveness is worth against this class of thing
+compared to a test.
 
 ## Observed, not done
 
