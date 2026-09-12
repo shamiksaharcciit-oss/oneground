@@ -19,6 +19,7 @@ import sys
 import tempfile
 
 import numpy as np
+import pytest
 import yaml
 
 sys.path.insert(0, os.path.normpath(
@@ -360,14 +361,48 @@ class _FakeEngine:
             raise RuntimeError("not up yet")
 
 
-def _restart(engine, cfg, name, env=None, **kw):
+class _Ready200:
+    """A server that answers 200, so a restart can legitimately succeed.
+
+    Task 017c: the tests below used to point at `http://localhost:1` -- nothing
+    listening -- and still assert "restarted via ...". They passed because the
+    old reconnect loop claimed reachability on `connect()` alone, which is the
+    overstatement 017c removed. Asserting a successful restart now requires
+    something that actually answers, which is exactly the point.
+    """
+
+    def __enter__(self):
+        import http.server
+        import threading
+
+        class _H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):                              # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+
+        self.srv = http.server.HTTPServer(("127.0.0.1", 0), _H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        return "http://127.0.0.1:%d" % self.srv.server_port
+
+    def __exit__(self, *exc):
+        self.srv.shutdown()
+        return False
+
+
+def _restart(engine, cfg, name, env=None, endpoint=None, **kw):
     old = os.environ.get("ONEGROUND_ENGINE_RESTART_COMMAND")
     if env is None:
         os.environ.pop("ONEGROUND_ENGINE_RESTART_COMMAND", None)
     else:
         os.environ["ONEGROUND_ENGINE_RESTART_COMMAND"] = env
     try:
-        return verify.restart_engine(engine, cfg, name, "http://localhost:1",
+        return verify.restart_engine(engine, cfg, name,
+                                     endpoint or "http://localhost:1",
                                      log_fn=lambda m: None, **kw)
     finally:
         if old is None:
@@ -377,11 +412,18 @@ def _restart(engine, cfg, name, env=None, **kw):
 
 
 def test_the_session_env_var_supplies_the_restart_command():
-    """How a pod sets it: there is no container to fall back on."""
+    """How a pod sets it: there is no container to fall back on.
+
+    Task 017c: the endpoint is now a server that answers, because claiming a
+    successful restart requires a probe that succeeded.
+    """
     e = _FakeEngine()
-    note = _restart(e, {}, "qdrant", env=sys.executable + ' -c "pass"')
+    with _Ready200() as ep:
+        note = _restart(e, {}, "qdrant", env=sys.executable + ' -c "pass"',
+                        endpoint=ep)
     assert note.startswith("restarted via"), note
-    assert e.connects == 1, "it did not wait for the engine to answer"
+    assert "reachable again" in note and "-> 200" in note, note
+    assert e.connects == 1, "it did not reconnect the adapter"
 
 
 def test_the_engine_name_is_substituted():
@@ -389,14 +431,21 @@ def test_the_engine_name_is_substituted():
     command that ignored which engine it was restarting would restart the
     wrong one and report success anyway."""
     script = sys.executable + ' -c "import sys; sys.exit(0)" # {engine}'
-    note = _restart(_FakeEngine(), {}, "pgvector", env=script)
-    assert "pgvector" in note, note
-    assert "{engine}" not in note, note
+    # `pgvector` has no probe that an HTTP stub can satisfy, so this asserts
+    # the substitution on the failure path: the command name is echoed back
+    # either way, and that is what is under test here.
+    with pytest.raises(verify.VerifyError) as exc:
+        _restart(_FakeEngine(), {}, "pgvector", env=script, timeout=2.0)
+    msg = str(exc.value)
+    assert "pgvector" in msg, msg
+    assert "{engine}" not in msg, msg
 
 
 def test_the_requirements_block_wins_over_the_environment():
     cfg = {"engine_restart_command": sys.executable + ' -c "pass"'}
-    note = _restart(_FakeEngine(), cfg, "qdrant", env="exit 1")
+    with _Ready200() as ep:
+        note = _restart(_FakeEngine(), cfg, "qdrant", env="exit 1",
+                        endpoint=ep)
     assert note.startswith("restarted via"), note
 
 
@@ -415,18 +464,25 @@ def test_a_failing_restart_command_is_reported_not_swallowed():
     assert "exited 3" in note, note
 
 
-def test_an_engine_that_never_comes_back_is_not_a_successful_restart():
-    """The command succeeding and the engine coming back are two facts, and
-    the note carries both: "restarted via X, but it did not answer within N s".
-    What must not happen is a clean success claim -- the next load run would
-    then be measured against an engine that is not up, and the spread would be
-    a measurement of that.
+def test_an_engine_that_never_comes_back_fails_the_run():
+    """Task 017c: this used to return a sentence and carry on.
+
+    A sentence in `load_restarts` is not a control-flow mechanism. The run
+    continued into its next load phase against an engine that had not come
+    back, produced a p95 from it, and left the explanation in a field nobody
+    reads until after the report has been believed. It now raises.
     """
     e = _FakeEngine(fail_times=99)
-    note = _restart(e, {}, "qdrant", env=sys.executable + ' -c "pass"',
-                    timeout=2.0)
-    assert "did not answer" in note, note
-    assert "reachable again" not in note, note
+    with pytest.raises(verify.VerifyError) as exc:
+        _restart(e, {}, "qdrant", env=sys.executable + ' -c "pass"',
+                 timeout=2.0)
+    msg = str(exc.value)
+    assert "qdrant" in msg, msg
+    assert "readiness probe" in msg, msg
+    assert "reachable" not in msg, msg
+    # The elapsed time, because "it did not come back" and "it did not come
+    # back within two seconds" are different claims.
+    assert " s" in msg, msg
 
 
 def test_the_two_named_sessions_carry_the_restart_command():
@@ -460,3 +516,120 @@ def test_every_session_that_names_the_baked_image_names_it_by_digest():
             continue                      # still on the documented base image
         assert "@sha256:" in img, (os.path.basename(path), img)
         assert img == podimage.reference(root), (os.path.basename(path), img)
+
+
+# ------------- readiness probes: a real request, not a constructed client
+# Task 017c. `connect()` returning is not evidence. Qdrant's client is lazy --
+# constructing it touches no socket -- so the old loop printed "reachable again
+# after 0.1 s" against a server it had never spoken to. Two pod sessions in a
+# row died of an engine that was not serving, and nothing at the verify layer
+# had asked it anything.
+
+def test_a_lazy_client_does_not_count_as_reachable():
+    """The property, stated directly: an engine object that connects without
+    touching the network must not produce a "reachable" claim.
+
+    `_FakeEngine.connect` is exactly that lazy client -- it returns without
+    doing anything. With nothing listening on the endpoint the probe must fail
+    and the run must stop, NOT report the 0.1 s reconnect as readiness.
+    """
+    e = _FakeEngine()                       # connect() always succeeds
+    # Port 1 has nothing on it; an http probe cannot succeed.
+    old = os.environ.get("ONEGROUND_ENGINE_RESTART_COMMAND")
+    os.environ["ONEGROUND_ENGINE_RESTART_COMMAND"] = sys.executable + ' -c "pass"'
+    try:
+        with pytest.raises(verify.VerifyError) as exc:
+            verify.restart_engine(e, {}, "qdrant", "http://127.0.0.1:1",
+                                  log_fn=lambda m: None, timeout=2.0)
+    finally:
+        if old is None:
+            os.environ.pop("ONEGROUND_ENGINE_RESTART_COMMAND", None)
+        else:
+            os.environ["ONEGROUND_ENGINE_RESTART_COMMAND"] = old
+    assert e.connects > 0, "the adapter was never reconnected"
+    assert "readiness probe" in str(exc.value), str(exc.value)
+
+
+def test_the_qdrant_probe_sends_a_real_request_and_needs_200():
+    """Against a server that answers 200, and one that answers 500."""
+    import http.server
+    import threading
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        code = 200
+
+        def do_GET(self):                                  # noqa: N802
+            self.send_response(self.code)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *a):                         # quiet
+            pass
+
+    def _serve(code):
+        _Handler.code = code
+        srv = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+
+    srv = _serve(200)
+    try:
+        got = verify.probe_ready("qdrant",
+                                 "http://127.0.0.1:%d" % srv.server_port)
+        assert "-> 200" in got, got
+        assert "/readyz" in got or "/collections" in got, got
+    finally:
+        srv.shutdown()
+
+    srv = _serve(500)
+    try:
+        with pytest.raises(verify.VerifyError) as exc:
+            verify.probe_ready("qdrant",
+                               "http://127.0.0.1:%d" % srv.server_port)
+        assert "500" in str(exc.value), str(exc.value)
+    finally:
+        srv.shutdown()
+
+
+def test_the_qdrant_probe_fails_when_nothing_is_listening():
+    with pytest.raises(verify.VerifyError):
+        verify.probe_ready("qdrant", "http://127.0.0.1:1", timeout=1.0)
+
+
+def test_the_pgvector_probe_fails_when_nothing_is_listening():
+    """It must fail, and not by importing something that is absent."""
+    with pytest.raises(verify.VerifyError):
+        verify.probe_ready(
+            "pgvector",
+            "postgresql://nobody:nobody@127.0.0.1:1/nothing", timeout=1.0)
+
+
+def test_the_pgvector_probe_executes_select_1_not_pg_isready():
+    """What the probe sends, asserted on the source.
+
+    `pg_isready` reports that the postmaster accepts connections, which is
+    true seconds before the database will run a statement -- and that gap is
+    the state the failed sessions needed to tell apart from "serving".
+    """
+    import inspect
+    src = inspect.getsource(verify._probe_pgvector)
+    assert "SELECT 1" in src, src
+    assert "pg_isready" not in src.split('"""')[2], "it shells out to pg_isready"
+
+
+def test_an_engine_with_no_probe_is_couldnt_check_not_reachable():
+    got = verify.probe_ready("someenginenobodywrote", "http://localhost:1")
+    assert got.startswith("couldnt_check"), got
+    assert "reachable" not in got, got
+
+
+def test_every_registered_engine_has_a_probe():
+    """A new adapter with no probe would silently get the couldnt_check path,
+    and its restarts would stop being checked at all."""
+    from oneground.adapters import engines
+    for name in engines():
+        if name == "stub":
+            continue
+        assert name in verify.PROBES, (
+            "%s has no readiness probe; its restarts would go unchecked" % name)

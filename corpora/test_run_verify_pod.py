@@ -25,8 +25,26 @@ this asserts what the script DOES -- which commands it reaches, in which
 order, under the baked and unbaked images -- without installing postgres.
 
 **Synthetic in its effects, real in its control flow**: nothing here proves
-postgres works (task 017 proved that by running the image), only that the
-script tries to start it.
+postgres works (task 017c proves that by running the real image), only that
+the script tries to start it.
+
+IF YOU EDIT run_verify_pod.sh, READ THIS
+----------------------------------------
+This file finds the code it tests by matching an **exact line** of the script:
+
+    _extract("if has_engine pgvector; then")
+
+That anchor is a literal string. Rename the condition, reflow it, or merge the
+stanza into another block, and `_extract` raises "no matching terminator" --
+which is a confusing way to be told that the anchor moved, and which fails
+every test in this file at once rather than the one you broke. If you change
+that line, change it here too.
+
+It is deliberately a line match and not a line number, because line numbers
+rot on every edit above them and silently test the wrong block. It is
+deliberately not a smarter parser either: task 017c's brief says keep this
+test as it is, and a shell parser good enough to find the stanza structurally
+is a larger thing than the bug it would be guarding.
 """
 
 import os
