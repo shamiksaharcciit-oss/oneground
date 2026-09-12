@@ -274,3 +274,65 @@ def _main():
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# ------------------- a price table may not postdate the run (task 017 item 6)
+# `as_of` later than the measurements means the estimate quotes prices that did
+# not exist when the numbers were taken. It happens the ordinary way: refresh
+# prices.yaml, re-run `report` over an older verify.json, and the output looks
+# current with nothing saying the two came from different weeks.
+
+class _Prices:
+    """Only the attribute the check reads. A real PriceTable needs a whole
+    node-type table to construct, none of which this rule looks at."""
+
+    def __init__(self, as_of):
+        self.as_of = as_of
+
+
+def test_a_price_table_dated_after_the_run_is_refused():
+    note = rep._prices_postdate_the_run(
+        _Prices("2026-09-20"), {"run_at": "2026-09-11T18:37:56Z"})
+    assert note, "a table dated after the run was accepted"
+    assert "2026-09-20" in note and "2026-09-11" in note, note
+
+
+def test_a_price_table_dated_on_or_before_the_run_is_kept():
+    """Same-day is the ordinary case and must not be refused."""
+    for as_of in ("2026-09-11", "2026-09-10", "2025-01-01"):
+        assert rep._prices_postdate_the_run(
+            _Prices(as_of), {"run_at": "2026-09-11T18:37:56Z"}) is None, as_of
+
+
+def test_an_unknown_date_is_couldnt_check_not_a_rejection():
+    """A date nobody can parse is a reason to say nothing, not to drop costs.
+
+    `load_prices` defaults `as_of` to the string "unknown", so this is the
+    path a table with no date actually takes.
+    """
+    vi = {"run_at": "2026-09-11T18:37:56Z"}
+    for prices in (_Prices("unknown"), _Prices(""), _Prices("not-a-date"),
+                   _Prices(None)):
+        assert rep._prices_postdate_the_run(prices, vi) is None
+    # With no verify run there is nothing for the table to postdate.
+    assert rep._prices_postdate_the_run(_Prices("2030-01-01"), {}) is None
+    assert rep._prices_postdate_the_run(_Prices("2030-01-01"), None) is None
+
+
+def test_the_real_arxiv_report_prices_do_not_postdate_its_run():
+    """Not synthetic: the run the rule was written against.
+
+    `runs/` is gitignored, so an absent workdir is an absent artifact rather
+    than a failure -- the name says it needs a local run.
+    """
+    wd = "runs/arxiv-150k-via-characterize"
+    if not os.path.exists(os.path.join(wd, "verify_info.json")):
+        return                      # no local workdir; nothing to check
+    with open(os.path.join(wd, "verify_info.json"), encoding="utf-8") as f:
+        info = json.load(f)
+    with open(os.path.join(wd, "report.json"), encoding="utf-8") as f:
+        report = json.load(f)
+    table = report.get("price_table")
+    if not table:
+        return                      # this report carries no price table
+    assert rep._prices_postdate_the_run(_Prices(table["as_of"]), info) is None
