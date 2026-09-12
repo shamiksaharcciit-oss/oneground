@@ -412,8 +412,11 @@ run:
 ```
 FAILED oneground/test_environment.py::test_no_tracked_file_carries_a_machine_identifier
   tasks/017-hardening.report.md:305  [DESKTOP- hostname]
-  tasks/017-hardening.report.md:306  [machine identifier 'polo2']
+  tasks/017-hardening.report.md:306  [machine identifier '<the account name>']
 ```
+
+(and then a second time, because the first version of this very code block
+pasted the real failure output verbatim, identifier and all)
 
 Fixed by rewriting the sentence, not by adding the file to the allowlist —
 which was the available shortcut and is the one that would have made the
