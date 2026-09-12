@@ -1,4 +1,4 @@
-python  C:\Users\polo2\projects\oneground\.venv\Scripts\python.exe  (venv)
+python  C:\Users\<developer>\projects\oneground\.venv\Scripts\python.exe  (venv)
 [14:27:13] report 'stackexchange-150k-via-characterize': 8 rows, 3 constraints, no verify run
 
 ================================================================================================
@@ -59,6 +59,6 @@ report -- stackexchange-150k-via-characterize
     no engine was verified in this run, so there is no engine calibration to cite
     family single_node_hnsw: last calibrated 2026-09-10 on glove-100-angular as single_node_hnsw[M=16,efConstruction=200,efSearch=400] -- couldnt_check, no reference to compare against
 
-  report.json + manifest.yaml + report.html in C:\Users\polo2\projects\oneground\runs\stackexchange-150k-via-characterize
+  report.json + manifest.yaml + report.html in C:\Users\<developer>\projects\oneground\runs\stackexchange-150k-via-characterize
   (0.1 s)
 

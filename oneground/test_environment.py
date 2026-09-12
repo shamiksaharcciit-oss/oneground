@@ -434,3 +434,72 @@ def test_no_module_reaches_for_platform_node_for_an_identifier():
     assert not offenders, (
         "these modules call platform.node(); use "
         "oneground.environment.environment_id() instead: " + ", ".join(offenders))
+
+
+# ------------------------------- the tracked tree, scanned (task 017 item 4)
+# 014's guards all assert on what is about to be written. This is the other
+# side: what is already committed. 015 found the gap by grepping after a
+# rebase; 016 then published two absolute developer paths in
+# tasks/016-decision-log.txt without anything noticing.
+
+def test_no_tracked_file_carries_a_machine_identifier():
+    """The guard 015 found missing, against the tree as it stands."""
+    findings = env.identifier_findings()
+    if findings is None:
+        pytest.skip("not a git checkout; nothing to scan")
+    assert findings == [], "\n".join(
+        "%s:%s  %s\n    %s" % f for f in findings)
+
+
+def test_the_scan_actually_reads_the_tree():
+    """A scan that silently checked nothing would pass the test above.
+
+    `identifier_findings` returning `[]` is only meaningful if it looked at
+    something, so pin the floor rather than trusting the empty list.
+    """
+    paths = env.tracked_files()
+    if paths is None:
+        pytest.skip("not a git checkout; nothing to scan")
+    assert len(paths) > 100, len(paths)
+    assert "oneground/environment.py" in [p.replace("\\", "/") for p in paths]
+
+
+def test_the_scan_catches_an_injected_path_and_hostname():
+    """The acceptance criterion: it fails on an injected path.
+
+    Asserted against a string rather than by writing into the checkout, so the
+    test cannot leave a developer path behind if it fails half way.
+    """
+    idents = {"someuser"}
+    for probe, why in (
+            (r"TARBALL=C:\Users\someuser\projects\x", "windows path"),
+            ("path: C:/Users/someuser/projects/x", "windows path, posix slashes"),
+            ("cd /home/someuser/work", "linux home"),
+            ("cd /Users/someuser/work", "macos home"),
+            ("environment: local:DESKTOP-HAGOPQC", "hostname"),
+            ("ran as someuser on the box", "bare identifier"),
+    ):
+        hits = env.scan_text(probe, identifiers=idents)
+        assert len(hits) == 1, (why, probe, hits)
+
+
+def test_the_scan_leaves_the_redacted_forms_alone():
+    r"""A guard that flagged `C:\Users\<developer>` would teach people to
+    stop redacting, which is the opposite of what 014 established."""
+    idents = {"someuser"}
+    for probe in (r"C:\Users\<developer>\projects\x",
+                  "C:/Users/<name>/oneground-assets",
+                  "C:/Users/.../runs",
+                  "%USERNAME%",
+                  "$HOME/work",
+                  "~/oneground-assets",
+                  "/home/runner/work/oneground",      # every CI job
+                  "/root/pgdata",
+                  "local:windows-amd64"):
+        assert env.scan_text(probe, identifiers=idents) == [], probe
+
+
+def test_a_generic_account_name_is_not_an_identifier():
+    """`runner` is every GitHub Actions job and an English word besides."""
+    assert "runner" not in env.machine_identifiers()
+    assert "root" not in env.machine_identifiers()

@@ -35,6 +35,7 @@ measurement, and failing a run over it would train people to pass
 """
 
 import os
+import re
 import sys
 
 REQUIREMENTS = "requirements.txt"
@@ -347,3 +348,172 @@ def add_argument(parser):
         help="run even though this interpreter's numpy/faiss/scikit-learn "
              "differ from requirements.txt. The artifact is stamped "
              f"`{UNPINNED_NOTE}`.")
+
+
+# ----------------------------------------------- the tracked-tree identifier
+# scan (task 017)
+#
+# Task 014 redacted the developer's hostname and home directory out of the
+# tree and added guards so they could not come back. Every one of those guards
+# asserts on what is about to be WRITTEN -- `stamp()`, the calibration history
+# id, and an AST check that no module reaches for `platform.node()`. Nothing
+# looked at what was already committed.
+#
+# Task 015 found the hole the hard way: a branch forked before the redaction
+# carried four occurrences of a hostname and a home path back toward the public
+# tree through a green suite, and a grep found them rather than a test. Task
+# 016 then landed `tasks/016-decision-log.txt` with two absolute developer
+# paths in it, onto main, published. Both were invisible for the same reason.
+#
+# This closes it from the other side: walk what is tracked and read it.
+
+# Account names that identify nobody, so flagging them produces noise instead
+# of findings. `runner` is every GitHub Actions job's username and an ordinary
+# English word besides; the rest name a role rather than a person.
+GENERIC_ACCOUNTS = frozenset({
+    "runner", "root", "user", "users", "home", "admin", "administrator",
+    "ubuntu", "debian", "docker", "build", "builder", "public", "default",
+    "vagrant", "vsts", "azureuser", "github", "actions", "shared", "guest",
+    "all users", "defaultuser", "containeradministrator",
+})
+
+# Files that quote the trap by name and have to keep doing so. Each entry says
+# why: an allowlist nobody can audit is a hole with a comment on it.
+IDENTIFIER_SCAN_ALLOWLIST = {
+    "oneground/environment.py":
+        "this scan; the patterns it looks for are written out here",
+    "oneground/test_environment.py":
+        "the scan's own tests, which inject the patterns on purpose",
+    "tasks/017-hardening.md":
+        "the brief commissioning the scan quotes the patterns to specify it",
+    "tasks/T3-hosting.report.md":
+        "reports the `DESKTOP-` occurrence count from T2b's redaction pass",
+}
+
+# A file whose bytes are not text. Reading a .npy as utf-8 finds nothing and
+# costs the whole array.
+_BINARY_SUFFIXES = (
+    ".npy", ".npz", ".h5", ".hdf5", ".parquet", ".png", ".jpg", ".jpeg",
+    ".gif", ".ico", ".pdf", ".zip", ".gz", ".tgz", ".zst", ".bin", ".so",
+    ".pyd", ".dll", ".exe", ".woff", ".woff2", ".ttf", ".otf",
+)
+
+# `C:\Users\<who>`, `/home/<who>`, `/Users/<who>`. Both separators, because
+# the paths this is looking for are written on Windows and quoted on Linux.
+#
+# The captured name excludes `<`, `%`, `$`, `~`, a backtick and a dot-only run,
+# so a placeholder -- `C:\Users\<developer>`, `%USERNAME%`, `$HOME`,
+# `C:/Users/...` -- does not match at all. That is the point: the redacted form
+# is what the docs are supposed to say, and a scan that flagged it would be
+# telling people to stop redacting.
+_HOME_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/]{1,2}Users|/home|/Users)[\\/]{1,2}"
+    r"([^\\/\s\"'<>:*?|%$~,)\];`]+)")
+
+# The Windows default hostname shape, which is what the developer's box has.
+_DESKTOP_RE = re.compile(r"DESKTOP-[A-Z0-9]{5,}", re.I)
+
+
+def machine_identifiers():
+    """Every string that would identify this machine or the person on it.
+
+    Short and generic values are dropped: they are not identifying, and a scan
+    that flags `root` or `runner` teaches people to ignore it.
+    """
+    import platform
+    out = set()
+    try:
+        node = platform.node()
+    except Exception:                                 # pragma: no cover - env
+        node = None
+    for value in (node, os.environ.get("COMPUTERNAME"),
+                  os.environ.get("HOSTNAME"), os.environ.get("USERNAME"),
+                  os.environ.get("USER"),
+                  os.path.basename(os.path.expanduser("~"))):
+        text = str(value).strip().lower() if value else ""
+        if len(text) > 3 and text not in GENERIC_ACCOUNTS:
+            out.add(text)
+    return out
+
+
+def scan_text(text, identifiers=None):
+    """[(line_number, kind, line)] for one file's text.
+
+    Separate from the walk so the rule can be tested on a string rather than
+    on whatever happens to be committed today.
+    """
+    idents = machine_identifiers() if identifiers is None else set(identifiers)
+    found = []
+    for n, line in enumerate(text.splitlines(), 1):
+        # One finding per line. The rules overlap on purpose -- an absolute
+        # developer path usually carries the account name too -- and reporting
+        # a line twice makes a short list look like a long one.
+        kind = None
+        for m in _HOME_PATH_RE.finditer(line):
+            who = m.group(1)
+            if set(who) <= {"."}:       # `C:/Users/...` is an elision
+                continue
+            if who.lower() not in GENERIC_ACCOUNTS:
+                kind = f"home directory of {who!r}"
+                break
+        if kind is None and _DESKTOP_RE.search(line):
+            kind = "DESKTOP- hostname"
+        if kind is None:
+            low = line.lower()
+            for ident in sorted(idents):
+                if ident in low:
+                    kind = f"machine identifier {ident!r}"
+                    break
+        if kind is not None:
+            found.append((n, kind, line.strip()))
+    return found
+
+
+def tracked_files(root=None):
+    """Every path `git ls-files` reports, or None when git cannot answer.
+
+    None rather than an empty list: "there are no tracked files" and "this is
+    not a checkout" are different answers, and only one of them means the scan
+    checked something.
+    """
+    import subprocess
+    try:
+        r = subprocess.run(["git", "ls-files", "-z"], cwd=root or ".",
+                           capture_output=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):     # pragma: no cover - env
+        return None
+    if r.returncode != 0:
+        return None
+    return [p for p in r.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
+def identifier_findings(root=None, allowlist=None):
+    """Scan the tracked tree. [(path, line_number, kind, line)], newest rule.
+
+    Returns an empty list when the tree is clean and a populated one when it
+    is not; raising is left to the caller so the same function can be used to
+    print a list as to fail a test.
+    """
+    allow = IDENTIFIER_SCAN_ALLOWLIST if allowlist is None else allowlist
+    paths = tracked_files(root)
+    if paths is None:
+        return None
+    idents = machine_identifiers()
+    out = []
+    for rel in paths:
+        if rel.replace("\\", "/") in allow:
+            continue
+        if rel.lower().endswith(_BINARY_SUFFIXES):
+            continue
+        full = os.path.join(root or ".", rel)
+        try:
+            with open(full, "rb") as f:
+                raw = f.read()
+        except OSError:
+            continue                    # deleted or unreadable; not a finding
+        if b"\0" in raw[:8192]:
+            continue                    # binary without a telling suffix
+        text = raw.decode("utf-8", "replace")
+        for n, kind, line in scan_text(text, idents):
+            out.append((rel.replace("\\", "/"), n, kind, line[:200]))
+    return out
