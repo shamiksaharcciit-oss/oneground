@@ -540,7 +540,23 @@ def _prepare_runpod(req, cfg, workdir, requirements_path, log_fn):
             f"{requirements_path}: no pod endpoint for "
             f"{', '.join(missing_endpoints)}. Set verify.pod_endpoints so the "
             "pod-side run knows where to reach each engine.")
-    image = str(cfg.get("image") or POD_IMAGE)
+    # Task 017: prefer the pre-baked image, by digest, when the lock has one.
+    # An explicit `verify.image` still wins -- someone naming an image means
+    # it. When the lock has no digest the session runs the documented fallback
+    # and the log says which, because "which image did this run on" is a
+    # question the receipt has to answer without the reader guessing.
+    from ..pod import image as podimage
+    if cfg.get("image"):
+        image = str(cfg["image"])
+        log_fn(f"pod image: {image} (named in verify.image)")
+    elif podimage.is_baked():
+        image = podimage.reference()
+        log_fn(f"pod image: {image} (pre-baked, pinned by digest)")
+    else:
+        image = POD_IMAGE
+        log_fn(f"pod image: {image} -- the pre-baked image has no digest in "
+               "docker/pod/IMAGE.lock yet, so this session installs Postgres, "
+               "pgvector, Qdrant and the venv at run time")
     path = runpod_target.write_session(req, workdir, cfg, engines, image,
                                        path=cfg.get("session_path"),
                                        log_fn=log_fn)

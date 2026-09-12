@@ -311,7 +311,27 @@ echo "--------------------------------------------------------------"
 
 has_engine() { case ",$ENGINES," in *,"$1",*) return 0 ;; *) return 1 ;; esac; }
 
-if has_engine pgvector; then
+# Task 017: the pre-baked image carries Postgres, pgvector and Qdrant already,
+# at the same pins this script would install. The marker is what says so, and
+# it carries the versions so the run can record WHICH image it ran on as an
+# engine fact -- read from the image rather than from apt at run time.
+BAKED_MARKER=/opt/oneground-image/BAKED
+if [ -f "$BAKED_MARKER" ]; then
+    ONEGROUND_BAKED=1
+    echo "--------------------------------------------------------------"
+    echo "pre-baked image detected; skipping apt and the qdrant download"
+    cat "$BAKED_MARKER"
+    # shellcheck disable=SC1090
+    . "$BAKED_MARKER"
+    QDRANT_VERSION="${qdrant_version:-$QDRANT_VERSION}"
+    PG_VERSION_PIN="${pg_version:-$PG_VERSION_PIN}"
+    PGVECTOR_VERSION_PIN="${pgvector_version:-$PGVECTOR_VERSION_PIN}"
+else
+    ONEGROUND_BAKED=0
+fi
+export ONEGROUND_BAKED
+
+if has_engine pgvector && [ "$ONEGROUND_BAKED" = "0" ]; then
     echo "--------------------------------------------------------------"
     echo "installing postgresql-$PG_MAJOR + pgvector from apt.postgresql.org"
     export DEBIAN_FRONTEND=noninteractive
@@ -500,6 +520,12 @@ if has_engine pgvector; then
 fi
 
 if has_engine qdrant; then
+# The baked image already has the binary, at the pinned version, on the
+# container disk rather than the network volume.
+if [ "$ONEGROUND_BAKED" = "1" ] && [ -x "${qdrant_dir:-/opt/qdrant}/qdrant" ]; then
+    ENGINE_DIR="${qdrant_dir:-/opt/qdrant}"
+    echo "qdrant from the baked image: $ENGINE_DIR"
+else
 ENGINE_DIR=/workspace/engines/qdrant
 mkdir -p "$ENGINE_DIR"
 if [ ! -x "$ENGINE_DIR/qdrant" ]; then
@@ -512,6 +538,7 @@ if [ ! -x "$ENGINE_DIR/qdrant" ]; then
     tar -xzf /tmp/qdrant.tgz --no-same-owner --no-same-permissions \
         -C "$ENGINE_DIR"
     chmod +x "$ENGINE_DIR/qdrant"
+fi
 fi
 "$ENGINE_DIR/qdrant" --version || true
 

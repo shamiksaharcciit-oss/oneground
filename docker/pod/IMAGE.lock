@@ -1,0 +1,35 @@
+# The pod image, pinned by digest. Task 017 item 1.
+#
+# A digest and not a tag, for the reason the compose files refuse
+# `qdrant:latest`: a tag is a name that can be moved, and two sessions naming
+# the same tag can run different bytes with nothing in either receipt saying
+# so. `reference` is what a session spec uses and what `pod plan` prints.
+#
+# HOW THIS GETS FILLED
+# --------------------
+# `.github/workflows/pod-image.yml` builds the image on any change to
+# docker/pod/** or requirements.txt. On the default branch it pushes to GHCR
+# and prints the digest in the job summary. Copy it here and commit. The same
+# workflow then fails on the next push if this file and the built image
+# disagree, so the pin cannot quietly rot.
+#
+# It is filled by a human on purpose. A workflow that pushed this file to the
+# branch it builds from could move the pin it exists to hold still.
+#
+# STATE: NOT YET BUILT
+# --------------------
+# The image has never been built, because the workflow builds on push and this
+# branch has not been pushed. Until `digest` below is a real sha256, no
+# session can reference this image -- `oneground.pod.image` raises rather than
+# falling back to a tag, which would be the exact substitution this file
+# exists to prevent.
+
+image=ghcr.io/shamiksaharcciit-oss/oneground-pod
+digest=
+tag=
+reference=
+
+# The fallback until the digest exists. This is the image every session
+# through task 016 actually ran, resolved live from Docker Hub and pinned in
+# oneground/verify/__init__.py as POD_IMAGE.
+fallback_image=runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404

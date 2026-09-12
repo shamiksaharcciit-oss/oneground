@@ -51,6 +51,15 @@ SKIP_PROJECTION="${SKIP_PROJECTION:-}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
+# Task 017: this script installs nothing itself -- the venv is built (or, on
+# the pre-baked image, symlinked) by the session setup step. It says which of
+# the two it got, because "3 minutes faster" is only a measurement if the log
+# says which path produced it.
+if [ -f /opt/oneground-image/BAKED ]; then
+    echo "pre-baked image: the venv is the image's, nothing to install"
+    cat /opt/oneground-image/BAKED
+fi
+
 if [ -f .venv/bin/activate ]; then
     # shellcheck disable=SC1091
     . .venv/bin/activate                      # Linux pod
