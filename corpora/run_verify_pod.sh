@@ -331,7 +331,24 @@ else
 fi
 export ONEGROUND_BAKED
 
-if has_engine pgvector && [ "$ONEGROUND_BAKED" = "0" ]; then
+if has_engine pgvector; then
+if [ "$ONEGROUND_BAKED" = "1" ]; then
+    # The image HAS postgres and pgvector. It does not have a running server:
+    # the Dockerfile creates PGDATA with the right owner and stops there,
+    # because a data directory initialised at build time would bake a cluster
+    # into the image and every pod would share its identity.
+    #
+    # So exactly the install is skipped here and [5/5] below still runs. This
+    # was wrong in task 017: the whole block was gated on the image, install
+    # AND start together, so postgres was present and never started, and
+    # sessions 20260912-171431 and -175800 both died on
+    # "pgvector: connection refused" -- the second one after the engine-list
+    # drift had been fixed, which is what made it look like the same bug twice.
+    echo "--------------------------------------------------------------"
+    echo "postgresql-$PG_MAJOR + pgvector from the baked image; skipping apt"
+    PGBIN="/usr/lib/postgresql/$PG_MAJOR/bin"
+    "$PGBIN/postgres" --version
+else
     echo "--------------------------------------------------------------"
     echo "installing postgresql-$PG_MAJOR + pgvector from apt.postgresql.org"
     export DEBIAN_FRONTEND=noninteractive
@@ -444,6 +461,8 @@ if has_engine pgvector && [ "$ONEGROUND_BAKED" = "0" ]; then
     echo "        versions"
     PGBIN="/usr/lib/postgresql/$PG_MAJOR/bin"
     "$PGBIN/postgres" --version
+fi
+    # ---- from here on, baked or not: the server has to be started either way
 
     echo "  [5/5] initdb + start"
 

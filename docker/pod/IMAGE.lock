@@ -27,6 +27,36 @@
 #
 # The tag is recorded for tracing a digest back to the commit that built it.
 # Nothing references the tag, and nothing should: `reference` is the digest.
+#
+# THE BUILD IS NOT REPRODUCIBLE, AND THIS DIGEST IS NOT UPDATED (task 017b)
+# ------------------------------------------------------------------------
+# Run #4 (34709757290) rebuilt the same Dockerfile from the same
+# requirements.txt, uncached, and produced a DIFFERENT digest:
+#
+#     locked (run #1)   sha256:81567d58615f41e708c5aff8eb3e32af1cd4121daac4a9dddd3dbbadf9d388ce
+#     run #4            sha256:12bd6a3ecc2e0ba490bb3946da205fa3506d1cfee6991a4f050458ca47f123cf
+#
+# Not the base image moving: both runs resolved
+# runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404 to the same
+# sha256:c7ff5829fb34e42557edf949396d3875a74b3a896f7835268670cc62fdd3e60a.
+# The difference is in our own layers -- apt and pip fetch from services that
+# do not promise byte-identical responses over time, and layer metadata
+# carries build timestamps regardless.
+#
+# The digest above is LEFT ALONE on purpose. It names an image that exists,
+# that was pushed, and that two pod sessions have now pulled and run. Nothing
+# about it is stale; the rebuild simply produced a second, equally valid
+# image. Overwriting the pin every time CI runs would defeat the pin.
+#
+# The consequence is that the lock check as written cannot pass in a steady
+# state: any push touching docker/pod/** or requirements.txt rebuilds, gets a
+# new digest, and disagrees with whatever is committed here. The check is
+# doing what it was designed to do; the design assumed reproducible builds.
+# See the report -- the shape that would work is (a) verify the locked digest
+# still exists and is pullable, and (b) require the lock to change in the same
+# commit as the Dockerfile, rather than requiring a rebuild to reproduce it.
+# Not changed here: that is a redesign, not a fix, and the developer should
+# choose it.
 
 image=ghcr.io/shamiksaharcciit-oss/oneground-pod
 digest=sha256:81567d58615f41e708c5aff8eb3e32af1cd4121daac4a9dddd3dbbadf9d388ce
