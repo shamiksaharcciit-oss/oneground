@@ -702,7 +702,13 @@ def _sync_and_start(ssh, s, root, session_id, pod_id=None):
 
     setup_script = _setup_script(s)
     if setup_script:
-        print("running setup (venv on local disk) ...")
+        # Not "venv on local disk" any more: with the baked image this step
+        # symlinks a venv that is already there, and the script itself decides
+        # which. Saying the wrong one here was actively misleading in session
+        # 20260912-165508, where it read as evidence that the pre-image path
+        # had run -- it had not; the script died in its own env exports,
+        # before it ever looked for the marker.
+        print("running setup (the script reports which venv it used) ...")
         ssh.run(setup_script, timeout=3600)
         print("  setup complete")
 
@@ -723,15 +729,18 @@ def _sync_and_start(ssh, s, root, session_id, pod_id=None):
 
 
 def _setup_script(s):
-    """The venv-on-local-disk setup, as POD_SETUP.md now documents it.
+    """The venv setup: symlinked from the baked image, or built on local disk.
 
-    The venv is built at /root/.venv -- container disk -- and symlinked into
-    the repo. Populating it on the network volume took ~30 minutes; local disk
-    is minutes. `--copies` matters: a symlinked venv on a network mount is
-    where much of that time went.
+    Without the baked image the venv is built at /root/.venv -- container disk
+    -- and symlinked into the repo. Populating it on the network volume took
+    ~30 minutes; local disk is minutes. `--copies` matters: a symlinked venv on
+    a network mount is where much of that time went.
+
+    The env is exported through `sshx.export_lines`, the same function the
+    launch uses. It used to have its own unquoted copy, which is what killed
+    session 20260912-165508 at line 5 of this script.
     """
-    env_lines = "\n".join("export %s=%s" % (k, v)
-                          for k, v in sorted(s.env.items()))
+    env_lines = sshx.export_lines(s.env)
     return """set -euo pipefail
 {env}
 cd {repo}

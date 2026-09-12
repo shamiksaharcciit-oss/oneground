@@ -34,6 +34,7 @@ silently shipping something older than what the developer is looking at.
 """
 
 import os
+import re
 import shlex
 import subprocess
 import tarfile
@@ -430,6 +431,45 @@ class PodSsh:
                 "returncode": p.returncode, "launched": True}
 
 
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def export_lines(env, sep="\n", trailing=False):
+    """`export NAME=value` for each variable, every value shell-quoted.
+
+    ONE function, because there were two sites and only one of them was
+    tested. Task 011 quoted the launch export and proved it with a round trip
+    through a real shell; `_setup_script` grew its own unquoted copy, and in
+    session 20260912-165508 the setup step died on
+
+        bash: line 5: export: 'corpora/restart_engine.sh': not a valid identifier
+        bash: line 5: export: '{engine}': not a valid identifier
+
+    because `ONEGROUND_ENGINE_RESTART_COMMAND=bash corpora/restart_engine.sh
+    {engine}` split on its spaces. The value was well-formed; the export was
+    not. Two sites doing the same job, one of them tested, is the shape of
+    that bug, so there is now one of them.
+
+    The name is validated rather than quoted. A value can be any bytes and
+    `shlex.quote` handles it, but a NAME is not quotable -- `export 'a b'=x`
+    is a syntax error, not a variable -- so a malformed one has to be refused
+    here rather than become a shell error on a pod that is already billing.
+    """
+    out = []
+    for k, v in sorted((env or {}).items()):
+        name = str(k)
+        if not _ENV_NAME_RE.match(name):
+            raise ValueError(
+                "%r is not a usable environment variable name. A name must be "
+                "letters, digits and underscores and must not start with a "
+                "digit; unlike a value, it cannot be quoted into one."
+                % (name,))
+        out.append("export %s=%s" % (name, shlex.quote(str(v))))
+    if not out:
+        return ""
+    return sep.join(out) + (sep if trailing else "")
+
+
 def build_start_command(repo_dir, command, remote_log, env=None):
     """The remote line that launches a session command detached.
 
@@ -469,9 +509,7 @@ def build_start_command(repo_dir, command, remote_log, env=None):
     # profile. `up` already knows the session's env locally, so it exports it
     # into the payload and the run stops depending on how the image wires
     # sshd.
-    exports = "".join(
-        "export %s=%s; " % (k, shlex.quote(str(v)))
-        for k, v in sorted((env or {}).items()))
+    exports = export_lines(env, sep="; ", trailing=True)
     payload = "cd %s && %s%s" % (shlex.quote(repo_dir), exports, command)
     log = shlex.quote(remote_log)
     return (

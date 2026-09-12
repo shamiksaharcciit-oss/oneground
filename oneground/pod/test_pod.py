@@ -3168,3 +3168,119 @@ def test_the_server_log_copy_is_best_effort():
     assert "else" in block, "a failed copy must say so rather than be silent"
     # and it must not be the last word on the run
     assert "exit 1" not in block
+
+
+# ---------- one quoting function, both sites (task 017b)
+# Task 011 quoted the LAUNCH export and proved it with a round trip through a
+# real shell. `_setup_script` had its own unquoted copy, untested, and session
+# 20260912-165508 died on it at line 5:
+#
+#   bash: line 5: export: 'corpora/restart_engine.sh': not a valid identifier
+#   bash: line 5: export: '{engine}': not a valid identifier
+#
+# The value was well-formed; the export was not.
+
+TRICKY_ENV = {
+    # The value that actually broke it: spaces and braces.
+    "ONEGROUND_ENGINE_RESTART_COMMAND": "bash corpora/restart_engine.sh {engine}",
+    "ONEGROUND_NOTE": "two words",
+    "ONEGROUND_Q": "a'b",
+    "ONEGROUND_BRACE": "{engine} ${NOPE} `false` $(false)",
+}
+
+
+def _setup_spec(env):
+    class _S:
+        pass
+    s = _S()
+    s.remote_repo = "/workspace/oneground"
+    s.env = dict(env)
+    return s
+
+
+def test_the_setup_export_is_quoted_at_all_synthetic():
+    """The regression, asserted on the text before any shell is involved."""
+    script = cli._setup_script(_setup_spec(TRICKY_ENV))
+    assert ("export ONEGROUND_ENGINE_RESTART_COMMAND="
+            "'bash corpora/restart_engine.sh {engine}'") in script, script
+
+
+def test_both_export_sites_use_the_one_function_synthetic():
+    """A third unquoted copy is the way this comes back."""
+    import inspect
+    raw = "export " + "%s=%s"        # split, so this line is not itself a hit
+    for fn in (cli._setup_script, sshx.build_start_command):
+        src = inspect.getsource(fn)
+        assert "export_lines" in src, fn.__name__
+        assert raw not in src, (
+            "%s builds its own export line instead of using export_lines"
+            % fn.__name__)
+    # And the shared function really does quote, rather than both sites
+    # agreeing to call something that does not.
+    assert sshx.export_lines({"A": "two words"}) == "export A='two words'"
+
+
+def test_a_name_that_cannot_be_a_variable_is_refused_synthetic():
+    """A value is quotable; a name is not. `export 'a b'=x` is a syntax
+    error, so it has to be refused here rather than on a billing pod."""
+    for bad in ("a b", "2LEGIT", "has-dash", "", "a;b", "{engine}"):
+        with pytest.raises(ValueError):
+            sshx.export_lines({bad: "x"})
+    assert sshx.export_lines({"OK_1": "x"}) == "export OK_1=x"
+    assert sshx.export_lines({}) == ""
+
+
+def test_setup_env_values_survive_a_real_shell_synthetic():
+    """The round trip, on the SETUP path this time.
+
+    Task 011's round trip covered the launch only. This runs the setup
+    script's own export block through a real shell and reads every value back,
+    including the one that broke session 20260912-165508.
+    """
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        bash = _bash_that_shares_this_filesystem(tmp)
+        if bash is None:
+            pytest.skip("no bash that can see this process's filesystem")
+        # The export block exactly as _setup_script emits it.
+        script = cli._setup_script(_setup_spec(TRICKY_ENV))
+        exports = "\n".join(ln for ln in script.splitlines()
+                            if ln.startswith("export "))
+        probe = "\n".join(
+            'printf "%s=[%s]\n" ' % (k, "%s") + '"$%s"' % k
+            for k in sorted(TRICKY_ENV))
+        r = subprocess.run([bash, "-c", "set -euo pipefail\n" + exports
+                            + "\n" + probe],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        assert "not a valid identifier" not in r.stderr, r.stderr
+        for k, v in sorted(TRICKY_ENV.items()):
+            assert "%s=[%s]" % (k, v) in r.stdout, (k, v, r.stdout)
+
+
+def test_launch_env_values_still_survive_after_the_refactor_synthetic():
+    """The launch site kept its behaviour when the two were merged."""
+    cmd = sshx.build_start_command(
+        "/repo", "run.sh", "/tmp/x.log",
+        env={"ONEGROUND_REQUIREMENTS": "requirements.smoke.yaml",
+             "ONEGROUND_CONCURRENCY": "8"})
+    assert "export ONEGROUND_REQUIREMENTS=requirements.smoke.yaml" in cmd
+    assert "export ONEGROUND_CONCURRENCY=8" in cmd
+    payload_start = cmd.index("nohup bash -c '") + len("nohup bash -c '")
+    payload = cmd[payload_start:cmd.index("' >>", payload_start)]
+    assert payload.index("cd /repo") < payload.index("export ")
+    assert payload.rstrip().endswith("run.sh")
+
+
+def test_the_setup_script_checks_the_marker_after_the_exports_synthetic():
+    """Where the marker check sits relative to the exports is why session
+    20260912-165508 never reached it: the script died in its own env block,
+    so `running setup ...` in the local log said nothing about which venv
+    path ran. Pinned so the ordering is deliberate rather than incidental."""
+    script = cli._setup_script(_setup_spec(TRICKY_ENV))
+    assert script.index("export ONEGROUND_") < script.index(
+        "/opt/oneground-image/BAKED")
+    # And the script, not the caller, is what reports which path it took.
+    assert "baked image detected" in script
