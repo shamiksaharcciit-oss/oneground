@@ -196,6 +196,11 @@ def _surface():
 # `test_every_declared_guard_string_is_real` checks.
 GUARDS_ON_USE = {
     "oneground fixture verify", "oneground fixture build",
+    # `project` writes a manifested artifact, so it is guarded exactly as
+    # `build` is -- the same `guard_or_exit` call, which now takes the action
+    # name. It exists because task 016g split the projection out of the
+    # builder so the receipts can be packaged before UMAP runs.
+    "oneground fixture project",
     "oneground calibrate fixture", "oneground calibrate layers",
     "oneground calibrate curve", "oneground calibrate engine",
 }

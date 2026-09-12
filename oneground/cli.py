@@ -149,11 +149,23 @@ def _fixture_parser():
     envmod.add_argument(b)
     b.add_argument("--requirements", default=envmod.REQUIREMENTS,
                    help="the pinned requirements the guard checks against")
+
+    # The projection as its own step. `build --skip-projection` then
+    # `fixture project` is the same work in the same order as `build` alone;
+    # splitting it lets the runner package the receipts in between, so a run
+    # killed during UMAP still has a tarball to fetch.
+    pr = sub.add_parser("project",
+                        help="add projection.npy to an already-built fixture")
+    pr.add_argument("--spec", required=True)
+    pr.add_argument("--out", default="fixtures")
+    envmod.add_argument(pr)
+    pr.add_argument("--requirements", default=envmod.REQUIREMENTS,
+                    help="the pinned requirements the guard checks against")
     return ap
 
 
 def _cmd_fixture(argv):
-    """`fixture verify` and `fixture build`."""
+    """`fixture verify`, `fixture build` and `fixture project`."""
     ap = _fixture_parser()
     args = ap.parse_args(argv)
     if args.action == "verify":
@@ -169,10 +181,15 @@ def _cmd_fixture(argv):
     # while for characterize/simulate/verify/report it is the user's
     # requirements.yaml. `_guard` must never confuse the two.
     _stamp, code = envmod.guard_or_exit(
-        "oneground fixture build", args.requirements,
+        "oneground fixture %s" % args.action, args.requirements,
         allow_unpinned=args.allow_unpinned)
     if code:
         return code
+    if args.action == "project":
+        from .fixture.build import project_fixture
+        project_fixture(args.spec, out=args.out)
+        return 0
+
     from .fixture.build import build
     build(args.spec, args.source, out=args.out,
           skip_projection=args.skip_projection)

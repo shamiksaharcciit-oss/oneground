@@ -359,6 +359,23 @@ def _asset_paths(fixture_id, assets_dir, fixture_dir=None, asset=None):
     return (os.path.join(d, "vectors.npy"), os.path.join(d, "queries.npy"), d)
 
 
+def _anything_published(published, refs, wanted, ref_rows):
+    """True when at least one value the run would compare is a real number.
+
+    Deliberately generous: one filled value anywhere is enough to make the
+    recomputation worth doing, because that one value can still be
+    contradicted. It is only the all-placeholder case -- a spec whose first
+    canonical build has not happened -- that has nothing to learn.
+    """
+    candidates = [(published.get(f) or {}).get("value") for f in wanted]
+    drift = published.get("drift") or {}
+    candidates += [drift.get("value_before"), drift.get("value_after")]
+    for name, fam in ref_rows:
+        entry = refs.get(fam) or {}
+        candidates.append(entry.get(name.split(".", 1)[1]))
+    return any(_as_number(c)[0] is not None for c in candidates)
+
+
 def verify_values(fixture_id, fixture_dir, spec, assets_dir,
                   requirements_path="requirements.txt", log_fn=print,
                   asset=None):
@@ -385,6 +402,25 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
         if "drift" in published:
             rows.append(("drift", COULDNT_CHECK, reason))
         return rows
+
+    # Nothing published yet -> nothing to verify, and the recomputation is
+    # pure cost. A `status: planned` spec carries TO_BE_FILLED throughout, so
+    # every row below would be couldnt_check whatever the recomputation found
+    # -- and the recomputation is exact k-NN, a fresh k-means over the whole
+    # base, and both HNSW reference configurations. On the first canonical
+    # build of stackexchange-150k that was 6-8 minutes of pod time spent
+    # producing rows that were knowable from the spec before a vector was
+    # read, and the run was killed at its cap 21 minutes from the finish.
+    #
+    # `_as_number` decides what counts as published, so this test and
+    # `_compare` cannot disagree about which values are real.
+    if not _anything_published(published, refs, wanted, ref_rows):
+        log_fn("  every published value is a placeholder - nothing to "
+               "recompute against")
+        return all_couldnt_check(
+            "the spec publishes no value for this field yet, so there is "
+            "nothing to reproduce. The recomputation was skipped rather "
+            "than run against placeholders.")
 
     build_info = {}
     bi_path = os.path.join(fixture_dir, "build_info.json")

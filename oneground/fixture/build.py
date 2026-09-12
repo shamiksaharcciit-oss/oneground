@@ -296,31 +296,68 @@ def build(spec_path, source=None, out="fixtures", skip_projection=False):
     if skip_projection:
         log("projection skipped (--skip-projection)")
     else:
-        log("UMAP projection")
-        t_proj = time.time()
-        try:
-            proj = project(base, spec["projection"]["params"])
-            if proj is None:
-                # project() returns None when umap-learn is not installed; it
-                # has already said so. Record it rather than leaving the
-                # artifact's absence unexplained.
-                log(f"projection unavailable after {fmt_dur(time.time() - t_proj)}")
-                build_info["projection"] = "unavailable"
-                write_json_stable(os.path.join(outdir, "build_info.json"),
-                                  build_info)
-                write_manifest(outdir, RECEIPT_ARTIFACTS)  # build_info changed
-            else:
-                np.save(os.path.join(outdir, "projection.npy"), proj)
-                append_manifest(outdir, "projection.npy")
-                log(f"projection done in {fmt_dur(time.time() - t_proj)}")
-        except Exception:
-            traceback.print_exc()
-            print(f"PROJECTION FAILED - fixture is complete without it "
-                  f"(after {fmt_dur(time.time() - t_proj)})", flush=True)
-            build_info["projection"] = "failed"
-            write_json_stable(os.path.join(outdir, "build_info.json"), build_info)
-            # build_info.json changed, so its manifest line must be reissued.
-            write_manifest(outdir, RECEIPT_ARTIFACTS)
+        add_projection(spec, outdir, base=base, build_info=build_info)
 
     print(f"\nartifacts written to {outdir}   ({(time.time() - t0) / 60:.1f} min)")
     return outdir
+
+
+def add_projection(spec, outdir, base=None, build_info=None):
+    """Produce `projection.npy` for a fixture whose receipts already exist.
+
+    Split out of `build()` so it can also be run as its own step, which is how
+    `corpora/run_fixture_build.sh` now drives it: the builder stops once the
+    MANIFEST is written, the runner packages the receipts, and only then does
+    the projection run. Session 20260911-220320 was killed at its cap 24
+    minutes after its MANIFEST was complete and lost everything, because the
+    only tarball was built at the very end.
+
+    `base` and `build_info` are passed in by `build()`, which already holds
+    them; a standalone call reads both from `outdir`. Either way the work and
+    the failure handling are the same code -- the projection is *declared*, so
+    a failure here must leave the receipts standing rather than fail the run.
+    """
+    if base is None:
+        base = np.load(os.path.join(outdir, "vectors.npy"))
+    bi_path = os.path.join(outdir, "build_info.json")
+    if build_info is None:
+        with open(bi_path, encoding="utf-8") as f:
+            build_info = json.load(f)
+
+    log("UMAP projection")
+    t_proj = time.time()
+    try:
+        proj = project(base, spec["projection"]["params"])
+        if proj is None:
+            # project() returns None when umap-learn is not installed; it has
+            # already said so. Record it rather than leaving the artifact's
+            # absence unexplained.
+            log(f"projection unavailable after {fmt_dur(time.time() - t_proj)}")
+            build_info["projection"] = "unavailable"
+            write_json_stable(bi_path, build_info)
+            write_manifest(outdir, RECEIPT_ARTIFACTS)   # build_info changed
+        else:
+            np.save(os.path.join(outdir, "projection.npy"), proj)
+            append_manifest(outdir, "projection.npy")
+            log(f"projection done in {fmt_dur(time.time() - t_proj)}")
+    except Exception:
+        traceback.print_exc()
+        print(f"PROJECTION FAILED - fixture is complete without it "
+              f"(after {fmt_dur(time.time() - t_proj)})", flush=True)
+        build_info["projection"] = "failed"
+        write_json_stable(bi_path, build_info)
+        # build_info.json changed, so its manifest line must be reissued.
+        write_manifest(outdir, RECEIPT_ARTIFACTS)
+    return outdir
+
+
+def project_fixture(spec_path, out="fixtures"):
+    """`add_projection` for an already-built fixture directory on disk."""
+    spec = yaml.safe_load(open(spec_path))
+    outdir = os.path.join(out, spec["fixture"]["id"])
+    manifest = os.path.join(outdir, "MANIFEST.sha256")
+    if not os.path.exists(manifest):
+        raise FileNotFoundError(
+            f"{manifest} does not exist, so there is no built fixture to "
+            f"project. Run `oneground fixture build` first.")
+    return add_projection(spec, outdir)

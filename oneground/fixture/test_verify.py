@@ -284,6 +284,81 @@ def test_absent_large_artifacts_are_couldnt_check_not_contradicted_synthetic():
         assert fv.cmd_verify(Args) == 0
 
 
+
+
+# ---------------------------------------------------------------- task 016g
+def _runner_text():
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "..", "..", "corpora", "run_fixture_build.sh")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_the_runner_packages_before_the_projection_real_script():
+    """Receipts first. Session 20260911-220320 lost a finished build because
+    the only tarball was written at the very end; the first `pack` must come
+    before anything optional runs."""
+    t = _runner_text()
+    first_pack = t.index('\npack "the manifest')
+    projection = t.index("fixture project")
+    assert first_pack < projection, "the projection runs before the receipts are packaged"
+    build = t.index("python corpora/build_fixture.py")
+    assert build < first_pack, "packaging happens before the builder runs"
+
+
+def test_the_builder_is_always_told_to_skip_the_projection_real_script():
+    """Otherwise the receipts pack would still wait on UMAP."""
+    t = _runner_text()
+    line = [ln for ln in t.splitlines() if ln.startswith("BUILD_ARGS=(")][0]
+    assert "--skip-projection" in line, line
+
+
+def test_every_later_stage_repacks_real_script():
+    """Each stage that can add a file must leave the tarball current."""
+    t = _runner_text()
+    for stage in ("the projection", "verify", "the ground view"):
+        assert 'pack "%s"' % stage in t, stage
+
+
+def test_packing_is_atomic_real_script():
+    """A fetch that races a repack must get the previous whole tarball, not a
+    half-written one."""
+    t = _runner_text()
+    assert 'tar -czf "$TARBALL.tmp"' in t
+    assert 'mv -f "$TARBALL.tmp" "$TARBALL"' in t
+    assert 'tar -czf "$TARBALL_LARGE.tmp"' in t
+    assert 'mv -f "$TARBALL_LARGE.tmp" "$TARBALL_LARGE"' in t
+
+
+def test_the_receipts_are_all_mandatory_members_real_script():
+    t = _runner_text()
+    block = t[t.index("    local members=("):t.index("    # Optional members")]
+    for want in ("MANIFEST.sha256", "characterization.json",
+                 "build_info.json", "query_ids.json", "ground_truth.npy"):
+        assert want in block, want
+    # The projection is optional: it must not be a mandatory member, or an
+    # early pack would fail outright on a file that does not exist yet.
+    assert "projection.npy" not in block
+
+
+
+def test_skip_projection_still_skips_the_separate_step_real_script():
+    """SKIP_PROJECTION=1 must skip the projection, not merely announce it.
+
+    The builder is now always given --skip-projection, so honouring the
+    variable moved to the runner's own projection step. Without this the
+    variable would have become a no-op that printed a NOTE and then projected
+    anyway.
+    """
+    t = _runner_text()
+    i = t.index('echo "projecting ..."')
+    guard = t.rindex('if [ -n "$SKIP_PROJECTION" ]; then', 0, i)
+    # The guard must be the thing immediately wrapping the projection call,
+    # not the earlier NOTE-printing one near BUILD_ARGS.
+    between = t[guard:i]
+    assert "projection skipped (SKIP_PROJECTION set)" in between, between
+    assert "BUILD_ARGS" not in between, between
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
@@ -657,3 +732,141 @@ def test_the_verify_parser_offers_asset_on_both_entry_points():
     assert "--asset" in flags(
         fv.build_parser()._actions[-1].choices["fixture"]
         ._actions[-1].choices["verify"])
+
+
+# ---------------------------------------------------------------- task 016h
+# A first canonical build has nothing to verify against: the spec carries
+# TO_BE_FILLED throughout, and the build's own output is what fills it. The
+# recomputation is exact k-NN, a fresh k-means over the whole base and both
+# HNSW reference configurations -- 6-8 minutes of pod time on
+# stackexchange-150k, producing rows that were knowable from the spec before
+# a vector was read. Session 20260911-220320 was killed at its cap 21 minutes
+# from the finish with that recomputation in its tail.
+
+def _placeholder_spec(tmp, fid="tiny"):
+    """A tiny fixture whose published values are all TO_BE_FILLED."""
+    fdir, spec, fixtures = _tiny_fixture(tmp, fid=fid)
+    for f in fv.REPRODUCIBLE:
+        if f in spec["characterization"]:
+            spec["characterization"][f] = {"value": "TO_BE_FILLED",
+                                           "tolerance": 0.02}
+    spec["characterization"]["drift"] = {"value_before": "TO_BE_FILLED",
+                                         "value_after": "TO_BE_FILLED",
+                                         "tolerance": 0.02}
+    spec["reference_results"] = {
+        "single_node_hnsw": {"params": {"M": 32, "efSearch": 128},
+                             "recall_at_10": "TO_BE_FILLED",
+                             "tolerance": 0.01},
+        "semantic_sharded": {"params": {"centroids": 8, "epsilon": 0.2,
+                                        "probe": 2, "M": 32, "efSearch": 96},
+                             "recall_at_10": "TO_BE_FILLED",
+                             "storage_amplification": "TO_BE_FILLED",
+                             "tolerance": 0.01},
+        "kind": "receipt"}
+    spec["fixture"]["status"] = "planned"
+    return fdir, spec, fixtures
+
+
+def test_a_spec_with_nothing_published_skips_the_recomputation():
+    """Every row is still couldnt_check -- it just costs nothing to say so."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fdir, spec, _f = _placeholder_spec(tmp)
+        lines = []
+        rows = fv.verify_values("tiny", fdir, spec, assets_dir=tmp,
+                                requirements_path=os.path.join(tmp, "n.txt"),
+                                log_fn=lines.append)
+        assert rows, "no rows at all"
+        for name, outcome, detail in rows:
+            assert outcome == fv.COULDNT_CHECK, (name, outcome, detail)
+            assert "nothing to reproduce" in detail, (name, detail)
+        text = "\n".join(lines)
+        assert "every published value is a placeholder" in text, text
+        # The two expensive recomputations must not have been announced.
+        assert "recomputing single_node_hnsw" not in text, text
+        assert "recomputing semantic_sharded" not in text, text
+
+
+def test_the_skip_covers_the_reference_rows_too():
+    """The reference configs are the expensive half; they must be in the
+    skipped set, not merely absent from it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fdir, spec, _f = _placeholder_spec(tmp)
+        rows = fv.verify_values("tiny", fdir, spec, assets_dir=tmp,
+                                requirements_path=os.path.join(tmp, "n.txt"),
+                                log_fn=lambda *_a: None)
+        names = {n for n, _o, _d in rows}
+        for want in ("single_node_hnsw.recall_at_10",
+                     "semantic_sharded.recall_at_10",
+                     "semantic_sharded.storage_amplification", "drift"):
+            assert want in names, (want, sorted(names))
+
+
+def test_one_filled_value_is_enough_to_make_it_recompute():
+    """Deliberately generous: a single real number can still be contradicted,
+    so the recomputation is worth doing for it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fdir, spec, _f = _placeholder_spec(tmp)
+        # Fill exactly one field. Its value does not matter -- verified or
+        # contradicted are both proof that the recomputation ran.
+        spec["characterization"]["boundary_crispness"] = {
+            "value": 0.5, "tolerance": 0.02}
+        lines = []
+        rows = fv.verify_values("tiny", fdir, spec, assets_dir=tmp,
+                                requirements_path=os.path.join(tmp, "n.txt"),
+                                log_fn=lines.append)
+        text = "\n".join(lines)
+        assert "every published value is a placeholder" not in text, text
+        by = {n: o for n, o, _d in rows}
+        # It recomputed, so this one got a real verdict rather than the skip.
+        assert by["boundary_crispness"] in (fv.VERIFIED, fv.CONTRADICTED), by
+
+
+def test_anything_published_agrees_with_what_compare_treats_as_a_number():
+    """The guard and `_compare` must not disagree about what is published."""
+    wanted = ["boundary_crispness"]
+    ref_rows = [("single_node_hnsw.recall_at_10", "single_node_hnsw")]
+    empty = {"boundary_crispness": {"value": "TO_BE_FILLED"}}
+    assert not fv._anything_published(empty, {}, wanted, ref_rows)
+    assert not fv._anything_published({}, {}, [], [])
+    filled = {"boundary_crispness": {"value": 0.036}}
+    assert fv._anything_published(filled, {}, wanted, ref_rows)
+    # A value only in the reference block still counts.
+    assert fv._anything_published(
+        empty, {"single_node_hnsw": {"recall_at_10": 0.99}}, wanted, ref_rows)
+    # And a drift pair on its own counts.
+    assert fv._anything_published(
+        {"drift": {"value_before": 0.52}}, {}, [], [])
+
+
+def test_the_shipped_stackexchange_spec_is_in_the_skip_case():
+    """Not synthetic: this is why the change exists."""
+    import yaml as _yaml
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "..", "..", "fixtures",
+                        "stackexchange-150k.fixture.yaml")
+    with open(path, encoding="utf-8") as f:
+        spec = _yaml.safe_load(f)
+    published = spec.get("characterization") or {}
+    refs = spec.get("reference_results") or {}
+    wanted = [f for f in fv.REPRODUCIBLE if f in published]
+    ref_rows = [("single_node_hnsw.recall_at_10", "single_node_hnsw"),
+                ("semantic_sharded.recall_at_10", "semantic_sharded"),
+                ("semantic_sharded.storage_amplification", "semantic_sharded")]
+    assert not fv._anything_published(published, refs, wanted, ref_rows)
+
+
+def test_the_shipped_arxiv_spec_is_not_in_the_skip_case():
+    """arxiv-150k publishes real values and must still be recomputed."""
+    import yaml as _yaml
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "..", "..", "fixtures",
+                        "arxiv-150k.fixture.yaml")
+    with open(path, encoding="utf-8") as f:
+        spec = _yaml.safe_load(f)
+    published = spec.get("characterization") or {}
+    refs = spec.get("reference_results") or {}
+    wanted = [f for f in fv.REPRODUCIBLE if f in published]
+    ref_rows = [("single_node_hnsw.recall_at_10", "single_node_hnsw"),
+                ("semantic_sharded.recall_at_10", "semantic_sharded"),
+                ("semantic_sharded.storage_amplification", "semantic_sharded")]
+    assert fv._anything_published(published, refs, wanted, ref_rows)

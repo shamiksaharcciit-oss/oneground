@@ -1,8 +1,9 @@
 # Report: 016-stackexchange-fixture
 
-**Status: steps 1–4 complete. Step 5 (the build) RAN AND WAS LOST** — killed
-at its cap 21 minutes from the finish, with no network volume to survive on.
-Steps 5–8 have no artifacts and are not done; step 9 (`docs/POD.md`) is.
+**Status: steps 1–4 complete. Step 5 (the build) ran once and was lost** —
+killed at its cap 21 minutes from the finish, with no network volume to
+survive on. Steps 5–8 still have no artifacts; step 9 (`docs/POD.md`) is done.
+The three fixes that make the retry survivable are in (016g) and tested.
 
 Two commits. `e29b622` built steps 1–4 and reported a planned fixture matching
 at 1.00. This revision, after review, makes two changes the reviewer asked for:
@@ -597,6 +598,12 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 | **(016f)** Unfinished tail | 23:13:10 -> cap | **20m 21s** in `fixture verify` + ground-view + tar |
 | **(016f)** Outcome | `finished_because` | **cap**; neither tarball present; **nothing recovered**; $0.73 |
 | **(016f)** Pods left | `oneground pod ls` after terminate | **0** |
+| **(016g)** Receipts byte-identity after the split | smoke rebuild vs the committed manifest | all **6** receipts identical |
+| **(016g)** Projection byte-identity as its own step | `fixture project` on the same build | `adba4173…` — **identical** |
+| **(016g)** Cap-kill mid-projection | `tasks/scratch/016g-capkill-smoke.sh`, shipped runner | **PASS** — receipts tarball 45,253 B and release tarball 6,418,819 B already on disk; `projection.npy` absent |
+| **(016g)** New cap arithmetic | 2.0 h x $0.74/hr | **$1.48** against `max_usd` 2.50 |
+| **(016g)** Verify tests | `python -m pytest -q oneground/fixture/test_verify.py` | **47 passed** |
+| **(016g)** Full suite | `python -m pytest -q` | **608 passed, 1 skipped** in 191.2 s (+12) |
 | **(016d)** Baseline note | `git log` | task 015 merged into `main` at 21:58, **after** 016c's commit at 21:44, so the 555 and 580 figures are not the same baseline — hence the collect-only delta above |
 | **(016d)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **155 passed, 1 skipped**, 7.7 s (+15 from this change) |
 | **(016d)** Suite runtime before the seam | same command | **hung** past 400 s — two harnesses retrying a pod at 10.0.0.1 for the full window |
@@ -902,26 +909,158 @@ recomputation — and at the cap it tried to fetch before terminating, reported
 `couldn't-check: not present on the pod` for both outputs rather than claiming
 success, and left zero pods on the account.
 
+### (016g) Receipts first, a verify that has nothing to verify, and a cap that fits
+
+Three changes after the lost build, all asked for.
+
+**1. The runner packages the receipts the moment they exist.**
+
+The builder already wrote its MANIFEST before anything optional — that was
+deliberate, and the comment in `build.py` says so. What it did not have was
+anyone packaging at that point. So the projection moved out of the builder and
+became its own step:
+
+    build --skip-projection   ->  pack "the manifest (receipts complete)"
+    fixture project           ->  pack "the projection"
+    fixture verify            ->  pack "verify"
+    export_ground_view        ->  pack "the ground view"
+
+`--skip-projection` is now always passed by the runner; `SKIP_PROJECTION=1`
+still means "do not project at all". `pack` writes to `$TARBALL.tmp` and
+`mv -f`s it into place, so a `watch` that fetches mid-repack gets the previous
+whole tarball rather than a truncated one. Optional members are included from
+the stage that produces them onward, so an early pack cannot fail on a file
+that does not exist yet.
+
+**The split changes nothing about what is produced.** A smoke rebuild under the
+new path reproduces all six receipts *and* the projection byte for byte against
+the committed manifest:
+
+| artifact | digest | |
+|---|---|---|
+| `sample.jsonl.zst` | `b6383e22…` | identical |
+| `vectors.npy` | `d9f44ded…` | identical |
+| `queries.npy` | `2359ce71…` | identical |
+| `query_ids.json` | `0081604b…` | identical |
+| `ground_truth.npy` | `13919bb5…` | identical |
+| `characterization.json` | `07b576e2…` | identical |
+| `projection.npy` | `adba4173…` | identical — run as its own step |
+
+**The cap-kill test the brief asked for.** `tasks/scratch/016g-capkill-smoke.sh`
+runs the *shipped* runner on smoke, waits for `UMAP projection` to appear, and
+kills the process there — the same shape that killed session 20260911-220320:
+
+    projection started.
+      at projection start, receipts tarball EXISTS: 45253 bytes
+    killing the run now (the cap-kill).
+
+    --- tarball listing captured AT projection start ---
+      .../MANIFEST.sha256        .../query_ids.json
+      .../characterization.json  .../ground_truth.npy
+      .../build_info.json        logs/build-arxiv-smoke.log
+
+    release tarball EXISTS: /tmp/016g-capkill/smoke-large.tgz (6418819 bytes)
+    PASS: receipts were on disk before the projection ran.
+
+`projection.npy` is **absent** from that tarball, which is what makes the test
+conclusive: the kill landed during the projection, not after it. The test
+fails itself with `INCONCLUSIVE` if it ever lands late.
+
+**2. `fixture verify` skips the recomputation when nothing is published.**
+
+`_anything_published` decides via `_as_number` — the same function `_compare`
+uses — so the guard and the comparison cannot disagree about what counts as a
+published value. Deliberately generous: one filled value anywhere is enough to
+make the recomputation worth doing, because that one value can still be
+contradicted. Only the all-placeholder case is skipped, and every row is still
+reported `couldnt_check` with the reason; it just costs nothing to say so.
+
+Tests pin both shipped specs: `stackexchange-150k` is in the skip case,
+`arxiv-150k` is not.
+
+**3. `caps.max_hours: 1.5 -> 2.0`,** on the measured evidence rather than a
+guess. `max_usd` is unchanged at 2.50 and still binds: 2.0 h × $0.74/hr (the
+dearest card in the list that has actually been offered) is **$1.48**.
+
+#### Two things I did that were not asked for
+
+**`OUT` is now a runner variable.** The test had to drive the *shipped* script,
+and the script hardcoded `--out fixtures/` — so testing it would have rebuilt
+the committed smoke artifacts in place. `build_info.json` carries a timestamp,
+so the MANIFEST would have differed and dirtied the repo on every test run.
+`OUT` defaults to `fixtures/`, and `fixture verify` is passed
+`--fixtures-dir "${OUT%/}"` so the two cannot point at different directories.
+
+**A structural test of the packaging order**, alongside the end-to-end one:
+that the first `pack` precedes the projection, that the builder is always told
+to skip it, that every later stage repacks, that packing is atomic, and that
+`projection.npy` is not a mandatory member. The end-to-end test costs a
+9-minute rebuild; these run in milliseconds and fail for a readable reason.
+
+#### Two bad tests before a good one
+
+Worth recording, because both produced confident wrong output.
+
+The first used `tar -tzf "$TAR" | grep -q "/$want$"`. `grep -q` exits at its
+first match and closes the pipe, `tar` takes SIGPIPE, and under `pipefail` the
+pipeline reports failure — so it printed `FAIL: MANIFEST.sha256 missing` for
+five files listed one line above in its own output. The listing is now captured
+once into a variable and matched with `case`.
+
+The second polled for the projection every 5 seconds. Smoke's UMAP over 2,000
+points finishes in less than that, so the kill landed after the projection and
+after its repack, and `projection.npy` was in the tarball. That run proved
+nothing about ordering — and said so, because the test checks for exactly that
+and exits `INCONCLUSIVE`. The poll is now 0.1 s.
+
+One bug I introduced and caught on a read-through: because the builder is now
+*always* given `--skip-projection`, `SKIP_PROJECTION=1` had become a no-op that
+printed a NOTE and then projected anyway through the new separate step.
+Honouring it moved to the runner, with a test that pins the guard to the
+projection call rather than to the earlier NOTE.
+
+I also confirmed the one shell idiom the new `pack` depends on: under
+`set -euo pipefail`, `[ -f "$f" ] && members+=("$f")` does **not** abort when
+the file is absent. Checked rather than assumed, because it runs on a paid pod.
+
+#### And a third test caught me
+
+The full suite failed on
+`test_every_dispatchable_command_is_guarded_or_deliberately_not`:
+
+    assert not ['oneground fixture project']
+
+That test walks the shipped parsers rather than a hand-written list, exactly so
+a new subcommand cannot be added without someone accounting for its
+environment guard. `fixture project` *is* guarded — `guard_or_exit` runs before
+its branch in `_cmd_fixture`, and the guard string now carries the action name
+— but it was not registered in `GUARDS_ON_USE`, which is how `build` and
+`verify` declare that they guard inside their own handler. Registered, with the
+reason. Task 013b's note on that test says it was written after a hand-written
+list let an unguarded seventh command through; it has now done its job on an
+eighth.
+
 ## Blocked on developer
 
-**(016f) The item that matters now: the build needs ~100–105 minutes and its
-cap is 90.** That is measured, not estimated — the phase table above accounts
+**(016g) Ready to retry.** The three fixes are in and tested: the receipts are
+packaged the moment they exist, `fixture verify` no longer recomputes against
+placeholders, and the cap is 2.0 h. A rerun that trips the cap now loses only
+the stages after whatever it reached, not the build.
+
+~~**(016f) The item that matters now: the build needs ~100–105 minutes and its
+cap is 90.**~~ *Addressed in 016g — kept for the trail.* That is measured, not estimated — the phase table above accounts
 for all 90 minutes of the killed run. Four ways forward, in the order I would
 rank them, none of which I have taken because all four are yours:
 
-   a. **Package the receipts the moment the MANIFEST is written.** Independent
-      of the cap, and it would have saved *this* run: every receipt artifact
-      was complete 24m 38s before the terminate, and was lost for want of a
-      `tar` that had not happened yet.
+   a. **Package the receipts the moment the MANIFEST is written.** — **done
+      in 016g**, and tested with a cap-kill mid-projection.
    b. **Skip `fixture verify` when every published value is `TO_BE_FILLED`.**
-      ~6–8 minutes of recomputation that can only report `couldnt_check` on a
-      first build.
-   c. **Raise `caps.max_hours`** to ~2.0. I did not: rule 3, and the brief.
-   d. **Give the session a volume**, which would make a cap-kill survivable —
-      at the cost of re-pinning the region to that volume's stock, which is
-      what 016c removed and why.
-
-   (a) and (b) together bring the run home inside the existing 1.5 h.
+      — **done in 016g**.
+   c. **Raise `caps.max_hours`** to 2.0 — **done in 016g**, on the measured
+      evidence, with `max_usd` unchanged and still binding at $1.48 worst case.
+   d. **Give the session a volume.** Still **not** done, and still the one I
+      would not take: it re-pins the region to that volume's stock, which is
+      what 016c removed and why. (a) makes a cap-kill survivable without it.
 
 1. **Push `444c250`** (task 014d). One commit. I do not push.
 2. **Dispatch the calibration workflow** for run #6. Still open from 014c/014d,

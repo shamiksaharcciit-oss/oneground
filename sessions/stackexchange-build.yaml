@@ -114,6 +114,18 @@ caps:
   # network throughput, which `plan` cannot resolve. If the run hits the cap,
   # the report says so and says where the time went. The cap is not raised to
   # make it fit.
-  max_hours: 1.5
+  #
+  # Raised from 1.5 to 2.0 after session 20260911-220320 was killed at 1.5 h
+  # with the build 21 minutes from finishing. That is a measurement, not a
+  # guess: the streamed pass alone took 46m 56s (52% of the old cap), the
+  # measurement steps under 14 minutes, and the post-build tail 20m 21s. The
+  # two runner changes that came with this (packaging the receipts as soon as
+  # the MANIFEST exists, and skipping a verify that has nothing to verify)
+  # should bring it in well under 2.0 -- the extra half hour is headroom, not
+  # a plan, and `watch` still terminates at it.
+  #
+  # max_usd is unchanged and still binds: 2.0 h x $0.74/hr (the dearest card
+  # in the list that has actually been offered) is $1.48, inside $2.50.
+  max_hours: 2.0
   max_concurrent: 1
   max_usd: 2.50
