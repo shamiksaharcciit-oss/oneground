@@ -49,7 +49,7 @@ their data, and the tinkerer who has an idea and wants it tested.
 
 ## What we are doing now
 
-**Building the first checkable artifact: the arXiv-150k fixture.**
+**Two checkable artifacts: the arXiv-150k and stackexchange-150k fixtures.**
 
 A public corpus (150k arXiv abstracts, CC0), embedded with pinned weights,
 with exact ground truth, the five characterization values, two reference
@@ -58,6 +58,12 @@ oneground, rebuild the fixture, and confirm it reproduces the published
 numbers within tolerance. It is the proof that "true baseline" is a
 verifiable claim, not a slogan. It also yields the hero image (the ground
 view) and the drift headline (recall before vs. after a field trends).
+
+Task 016 added the second: **stackexchange-150k**, 150k Stack Overflow
+questions under CC BY-SA, built to the same rules so the two can be read line
+for line. Its brief forbade steering it toward a corpus that makes semantic
+sharding win, and it did not: the Q&A ground is *blurrier* than arXiv's
+(crispness 0.011 against 0.036). The two are compared in `docs/FIXTURES.md`.
 
 Status of the build:
 
@@ -82,7 +88,16 @@ Status of the build:
 | 012 | calibration harness, GloVe fixture, the three layers | done |
 | 013 | Tier 2 intake, `status: verified`, value reproduction | done |
 | 013b | the pinned-environment guard | done |
-| 014 | `0.1.0-preview`: public branch, wheel, release asset | in progress |
+| 014 | `0.1.0-preview`: public branch, wheel, release asset | done |
+| 014b | calibration in CI, the first two defects | done |
+| 014c | the calibration push, tested against a stubbed remote | done |
+| 014d | the push step deleted the script it was about to run | done |
+| T1 | teaser: the ground, measured in the browser | done |
+| T2 | the verdict, and `status: verified` | done |
+| T3 | site and teaser hosted on Pages, by artifact | done |
+| 015 | pgvector adapter, two-engine matched verify | done |
+| 015b | two tests that were green for reasons that were not correctness | done |
+| 016 | **stackexchange-150k: the second fixture** | done |
 
 Findings so far that changed the design: the pipeline is byte-deterministic
 (five of six artifacts identical across rebuilds, the sixth fixed in 001b);
@@ -95,6 +110,23 @@ replicates 84% of the corpus to the four-region cap, which is where the 3.7x
 comes from; and three builds in three environments agree on values, not bytes,
 with build 3's ground-view export reproducing four published values live to
 within 0.0005.
+
+From the second fixture (016), which was specified in full with every value
+`TO_BE_FILLED` before it was built, so that the answer could not be steered:
+the Stack Overflow ground is **blurrier** than arXiv's, not crisper (crispness
+0.011 vs 0.036, ambiguity 0.908 vs 0.891), and semantic sharding loses by more
+than it lost there (0.869 vs 0.932 recall@10, at 3.897x vs 3.715x storage).
+The routing ceiling sits at the measured recall on both, so the loss is
+routing, not the index, and no `efSearch` recovers it. 94.0% of vectors hit the
+four-copy cap — a wall, not a tail — which is where the amplification comes
+from. And the drift pair runs the *other way*: arXiv improves after its cutoff
+(0.522 -> 0.549), Stack Overflow degrades (0.485 -> 0.450), as a topic mix that
+turns over outruns centroids trained before it turned.
+
+**Two corpora that look unalike agree on the architecture question and
+disagree about time.** That is the v0.1 headline, and the one thing here a
+reader should carry to their own time-ordered corpus rather than take on
+trust — which is what `oneground characterize` is for.
 
 **How the work runs.** An orchestrator (this chat) writes bounded task
 briefs with acceptance criteria and a required report format; a Claude agent

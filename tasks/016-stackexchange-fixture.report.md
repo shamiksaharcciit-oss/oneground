@@ -627,6 +627,9 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 | **(016j)** Decision | `oneground report` | **2 meets, 6 fails**; all six failures are semantic sharding; recommended `single_node_hnsw` |
 | **(016j)** Routing vs index loss | sweep `route`/`index` columns | `index` is **0.000 on every** semantic-sharded row; the whole loss is routing |
 | **(016j)** Full suite | `python -m pytest -q` | **609 passed, 1 skipped** in 233.3 s |
+| **(016k)** `docs/FIXTURES.md` transcription | 20 published values checked against both specs | **0 mismatches** |
+| **(016k)** The one-line comparison in FIXTURES.md | compared against the spec's `findings` block | **verbatim match** |
+| **(016k)** Full suite after the docs | `python -m pytest -q` | **609 passed, 1 skipped** in 313.4 s |
 | **(016d)** Baseline note | `git log` | task 015 merged into `main` at 21:58, **after** 016c's commit at 21:44, so the 555 and 580 figures are not the same baseline — hence the collect-only delta above |
 | **(016d)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **155 passed, 1 skipped**, 7.7 s (+15 from this change) |
 | **(016d)** Suite runtime before the seam | same command | **hung** past 400 s — two harnesses retrying a pod at 10.0.0.1 for the full window |
@@ -1313,6 +1316,31 @@ and a declared price list -- `EUR 140 +/- 35/month; upper bound EUR 175 <= 1200`
 -- and the calibration block states plainly that no engine was verified in this
 run, so there is no engine calibration to cite. Nothing is claimed that was not
 measured.
+
+#### (016k) Close-out: the two docs
+
+`docs/FIXTURES.md` is new: the two fixtures side by side -- source, licence,
+what a record is, model, size, the five measures with their tolerances, the two
+reference configurations, and the drift pair given its own table because it is
+the one measure where the corpora disagree in sign. The one-line comparison is
+quoted **verbatim** from the fixture's own `findings` block rather than
+paraphrased, and a check confirms it matches character for character.
+
+Every number in it was transcribed by hand, so I checked the transcription
+rather than trusting it: a script reads both specs and asserts each of the 20
+published values appears in the document. Zero mismatches. It also states
+plainly what `verified` and `built` mean differently, and that two of
+stackexchange-150k's rows are couldn't-check with their reason.
+
+`docs/CHARTER.md` gains the status table through 016 -- 014, 014b/c/d, T1/T2/T3,
+015, 015b and 016, all done -- and a findings paragraph for the second fixture,
+ending on the sentence v0.1 leads with:
+
+> **Two corpora that look unalike agree on the architecture question and
+> disagree about time.**
+
+Its opening line changes from "the first checkable artifact" to two, since
+there are now two.
 
 #### Step 8 -- `fixture verify --asset`, and a third reader left behind
 
