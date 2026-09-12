@@ -310,3 +310,102 @@ def run_load(engine, namespace, queries, k=10, concurrency=DEFAULT_CONCURRENCY,
         f"errors {result.error_rate:.4%}"
         + (f", engine cpu {s['cpu_pct']}%" if s.get("cpu_pct") else ""))
     return result
+
+
+# --------------------------------------------------- the ceiling (task 017/5)
+
+CEILING_STEPS = (1, 2, 4, 8, 16, 32, 64, 128)
+CEILING_ERROR_RATE = 0.005        # 0.5%
+CEILING_P99_MULTIPLE = 5.0
+
+QPS_MAX_CAVEAT = (
+    "the ceiling under THIS load shape, on THIS host: one namespace, this "
+    "query set, this k, this client on this machine, open-loop with no think "
+    "time. It is not the engine's capacity, it is not a number to compare "
+    "against another engine measured elsewhere, and it is never what the `qps` "
+    "constraint is judged against -- that is a sustain check against an "
+    "offered rate, and the two answer different questions.")
+
+
+def ramp_to_ceiling(engine, namespace, queries, k=10, params=None,
+                    steps=CEILING_STEPS, step_seconds=20.0,
+                    warmup_seconds=5.0, error_rate_limit=CEILING_ERROR_RATE,
+                    p99_multiple=CEILING_P99_MULTIPLE, container=None,
+                    log_fn=None):
+    """Open-loop ramp until the engine stops keeping up. Task 017 item 5.
+
+    `qps_max` was deliberately unimplemented through tasks 009-016, because
+    the obvious way to produce one is to read the achieved rate off a
+    throttled run -- and a throttled run cannot exceed what it was offered, so
+    that number is the offer, not the ceiling. This measures the ceiling the
+    only way it can be measured: remove the throttle and raise concurrency
+    until the engine degrades.
+
+    Two stopping conditions, both degradation rather than a target:
+
+        error rate  > 0.5%              the engine is refusing work
+        p99         > 5x the first step  the queue is now most of the latency
+
+    The baseline is the FIRST step's p99, not the RTT baseline: this is asking
+    when the engine's own latency runs away, and the round trip is common to
+    every step.
+
+    Returns a dict, never a verdict. There is no `qps_max` constraint to judge
+    against and this is not evidence about one -- see QPS_MAX_CAVEAT.
+    """
+    def say(msg):
+        if log_fn:
+            log_fn(msg)
+
+    ladder, best, baseline_p99, stopped = [], None, None, None
+    for conc in steps:
+        res = run_load(engine, namespace, queries, k=k, concurrency=conc,
+                       target_qps=0,                       # unthrottled
+                       duration_minutes=step_seconds / 60.0,
+                       warmup_seconds=warmup_seconds, params=params,
+                       container=container, log_fn=None)
+        p = res.percentiles() or {}
+        p99 = float(p.get("p99_ms", 0.0))
+        rung = {"concurrency": conc, "achieved_qps": round(res.achieved_qps, 2),
+                "error_rate": res.error_rate, "p50_ms": p.get("p50_ms"),
+                "p95_ms": p.get("p95_ms"), "p99_ms": p99,
+                "completed": res.completed, "errors": res.errors}
+        ladder.append(rung)
+        say(f"  ceiling: c={conc:<4} {res.achieved_qps:8.1f} qps  "
+            f"p99 {p99:7.1f} ms  errors {res.error_rate:.4%}")
+
+        if baseline_p99 is None and p99 > 0:
+            baseline_p99 = p99
+
+        if res.error_rate > error_rate_limit:
+            stopped = (f"error rate {res.error_rate:.2%} exceeded "
+                       f"{error_rate_limit:.1%} at concurrency {conc}")
+            rung["degraded"] = True
+            break
+        if baseline_p99 and p99 > p99_multiple * baseline_p99:
+            stopped = (f"p99 {p99:.1f} ms exceeded {p99_multiple:g}x the "
+                       f"first step's {baseline_p99:.1f} ms at concurrency "
+                       f"{conc}")
+            rung["degraded"] = True
+            break
+        # Only a rung that stayed inside both limits can be the ceiling.
+        if best is None or res.achieved_qps > best["achieved_qps"]:
+            best = rung
+    else:
+        stopped = (f"the ladder ran out at concurrency {steps[-1]} without "
+                   "either limit being hit, so this is a floor on the "
+                   "ceiling, not the ceiling")
+
+    return {
+        "qps_max": (best or {}).get("achieved_qps"),
+        "at_concurrency": (best or {}).get("concurrency"),
+        "p99_ms_at_max": (best or {}).get("p99_ms"),
+        "stopped_because": stopped,
+        "baseline_p99_ms": baseline_p99,
+        "error_rate_limit": error_rate_limit,
+        "p99_multiple": p99_multiple,
+        "step_seconds": step_seconds,
+        "ladder": ladder,
+        "open_loop": True,
+        "caveat": QPS_MAX_CAVEAT,
+    }

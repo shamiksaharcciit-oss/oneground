@@ -959,3 +959,66 @@ number's precision before acting on it.
 
 Until then, read a latency verdict whose value sits within about 15% of its
 threshold as *couldn't-check wearing a verdict's clothes*.
+
+## `runs: N` — the spread, and the three-way rule
+
+*Task 017, 2026-09-12. This is the fix the section above asks for.*
+
+```yaml
+verify:
+  runs: 3                 # default 1
+  load:
+    concurrency: 32
+    at_qps: 200
+    duration_minutes: 5
+```
+
+Each run is a **separate load phase** against the same engine, the same
+namespace and the same sample, with the **engine restarted between runs**. The
+restart is the point: run 2 against a process that has been serving run 1 for
+five minutes measures a warm page cache and a settled allocator, which is a
+continuation of run 1 rather than a second sample of it.
+
+A restart that does not happen is recorded as such. `verify.json` carries
+`load_restarts`, one sentence per gap, and a run that could not be restarted
+says `not restarted: …` rather than leaving the reader to assume it was. A
+spread measured across runs that quietly shared a warm process is a different
+quantity from the one the report would otherwise call it.
+
+`verify.json` keeps **every** run in `load_runs`, and the under-load row gains:
+
+```json
+"p95_across_runs": {
+  "min": 38.22, "median": 40.10, "max": 42.82,
+  "spread": 4.60, "n_runs": 3,
+  "p95_ms_per_run": [42.82, 38.22, 40.10]
+}
+```
+
+`p95_ms` stays a float so every existing reader keeps working, and it becomes
+the **median** rather than run 1 — the honest single number when there are
+several. Nothing decides a verdict from it.
+
+**The verdict rule.** A latency constraint is:
+
+| | when |
+|---|---|
+| `meets` | the **worst** run meets it |
+| `fails` | the **best** run fails it |
+| `couldnt_check` | otherwise — `meets in k of N runs, spread X ms` |
+
+The third row is the one that matters. If the threshold falls anywhere inside
+the observed spread, the configuration is **not measurably on either side of
+it**, and saying so is the only honest answer available. The verdict carries
+no `value` in that case: a couldn't-check with a number attached invites
+exactly the reading it is trying to prevent.
+
+Applied to the two sessions above — 38.22 and 42.82 against a 40 ms cap — the
+rule returns `couldnt_check: meets in 1 of 2 runs, spread 4.60 ms`, which is
+what those two sessions actually established. Neither `meets` nor `fails` was
+ever supported by that evidence.
+
+**What this costs.** N times the load phase. At 5 minutes and `runs: 3` that is
+15 minutes of pod time per engine instead of 5, plus two restarts. The default
+stays 1 so nothing pays for it unintentionally; a session spec that cares about
+a near-threshold verdict sets 3.

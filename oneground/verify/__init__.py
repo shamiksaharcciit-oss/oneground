@@ -144,6 +144,84 @@ def compose_image(engine="qdrant"):
     return None
 
 
+def restart_engine(engine, cfg, engine_name, endpoint, log_fn=log,
+                   timeout=180.0):
+    """Restart the engine between load runs. Returns what actually happened.
+
+    Task 017 item 2. Repeating a load run is only worth doing if the runs are
+    comparable samples, and run 2 against a process that has been serving run
+    1 for five minutes is not the same measurement: the page cache is warm,
+    the allocator has settled, and any graph the engine builds lazily is
+    built. Restarting is what makes run 2 a second sample rather than a
+    continuation of the first.
+
+    The return value is a sentence, never a bool, and it says "not restarted"
+    when nothing was done. A spread measured across runs that silently shared
+    a warm process is a different quantity from the one the report will call
+    it, and the run record has to carry which of the two it is.
+    """
+    import subprocess
+
+    cmd = cfg.get("engine_restart_command")
+    container = cfg.get("engine_container") or CONTAINERS.get(engine_name)
+    if cmd:
+        how = f"`{cmd}`"
+        argv, shell = cmd, True
+    elif container:
+        how = f"docker restart {container}"
+        argv, shell = ["docker", "restart", container], False
+    else:
+        return ("not restarted: no engine_restart_command and no known "
+                "container for this engine, so this run continues against the "
+                "process the previous run warmed")
+    try:
+        r = subprocess.run(argv, shell=shell, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as e:
+        return f"not restarted: {how} could not be run ({e})"
+    if r.returncode != 0:
+        tail = (r.stderr or r.stdout or "").strip().splitlines()
+        return (f"not restarted: {how} exited {r.returncode}"
+                + (f" -- {tail[-1][:200]}" if tail else ""))
+
+    # Up is not the same as ready, and the whole point of the restart is lost
+    # if the next run starts measuring a process that is still opening its
+    # files. Reconnect until it answers.
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        try:
+            engine.connect(endpoint, cfg.get("credentials_env"))
+            waited = timeout - (deadline - time.time())
+            return f"restarted via {how}; reachable again after {waited:.1f} s"
+        except Exception as e:                        # adapter-specific
+            last = e
+            time.sleep(1.0)
+    return (f"restarted via {how}, but it did not answer within {timeout:.0f} s"
+            + (f" ({last})" if last else ""))
+
+
+def p95_spread(per_run):
+    """`{min, median, max, spread, n_runs, p95_ms_per_run}` for a p95 list.
+
+    The spread is what task 015 could not report: the same configuration
+    measured 38.22 ms on one pod and 42.82 ms on another, 12% apart, with a
+    40 ms constraint between them. One run cannot tell you which side of a
+    threshold a configuration sits on when the threshold is inside the
+    run-to-run variation, and a single number hides that it is a sample of
+    one.
+    """
+    vals = sorted(float(v) for v in per_run if v is not None)
+    if not vals:
+        return None
+    n = len(vals)
+    median = (vals[n // 2] if n % 2
+              else (vals[n // 2 - 1] + vals[n // 2]) / 2.0)
+    return {"min": vals[0], "median": median, "max": vals[-1],
+            "spread": vals[-1] - vals[0], "n_runs": n,
+            "p95_ms_per_run": [float(v) for v in per_run]}
+
+
 def compose_up(log_fn=log, timeout=120, engine="qdrant"):
     path = compose_file_for(engine)
     log_fn(f"docker compose up {engine} ({compose_image(engine)})")
@@ -462,7 +540,23 @@ def _prepare_runpod(req, cfg, workdir, requirements_path, log_fn):
             f"{requirements_path}: no pod endpoint for "
             f"{', '.join(missing_endpoints)}. Set verify.pod_endpoints so the "
             "pod-side run knows where to reach each engine.")
-    image = str(cfg.get("image") or POD_IMAGE)
+    # Task 017: prefer the pre-baked image, by digest, when the lock has one.
+    # An explicit `verify.image` still wins -- someone naming an image means
+    # it. When the lock has no digest the session runs the documented fallback
+    # and the log says which, because "which image did this run on" is a
+    # question the receipt has to answer without the reader guessing.
+    from ..pod import image as podimage
+    if cfg.get("image"):
+        image = str(cfg["image"])
+        log_fn(f"pod image: {image} (named in verify.image)")
+    elif podimage.is_baked():
+        image = podimage.reference()
+        log_fn(f"pod image: {image} (pre-baked, pinned by digest)")
+    else:
+        image = POD_IMAGE
+        log_fn(f"pod image: {image} -- the pre-baked image has no digest in "
+               "docker/pod/IMAGE.lock yet, so this session installs Postgres, "
+               "pgvector, Qdrant and the venv at run time")
     path = runpod_target.write_session(req, workdir, cfg, engines, image,
                                        path=cfg.get("session_path"),
                                        log_fn=log_fn)
@@ -613,12 +707,29 @@ def _verify_local(req, cfg, workdir, engine_name, endpoint, session_id, ks,
             tqps = float(lat_cfg.get("at_qps", cfg.get("target_qps", 0)))
             mins = float(cfg.get("duration_minutes", 1.0))
             warm = float(cfg.get("warmup_seconds", 10.0))
-            res = loadgen.run_load(
-                engine, ns, queries, k=10, concurrency=conc,
-                target_qps=tqps, duration_minutes=mins, warmup_seconds=warm,
-                params=engine_params,
-                container=cfg.get("engine_container"), log_fn=log_fn)
+            # Task 017 item 2: `runs: N` repeats the load phase so the report
+            # can say what the run-to-run spread is instead of implying there
+            # is none. Default 1, which is the shape every earlier run had.
+            n_runs = max(1, int(cfg.get("runs", 1) or 1))
+            results, restarts = [], []
+            for i in range(n_runs):
+                if i:
+                    note = restart_engine(engine, cfg, engine_name, endpoint,
+                                          log_fn=log_fn)
+                    restarts.append(note)
+                    log_fn(f"  run {i + 1}/{n_runs}: {note}")
+                results.append(loadgen.run_load(
+                    engine, ns, queries, k=10, concurrency=conc,
+                    target_qps=tqps, duration_minutes=mins,
+                    warmup_seconds=warm, params=engine_params,
+                    container=cfg.get("engine_container"), log_fn=log_fn))
+            res = results[0]
             out["load"] = res.as_dict()
+            if n_runs > 1:
+                # Every run is kept. The aggregate is derived from these and
+                # not the other way round, so a reader can recompute it.
+                out["load_runs"] = [r.as_dict() for r in results]
+                out["load_restarts"] = restarts
             # The p95 under load is a different quantity from the sequential
             # shape, and the verdict rule reads whichever the row carries.
             p = res.percentiles()
@@ -628,9 +739,36 @@ def _verify_local(req, cfg, workdir, engine_name, endpoint, session_id, ks,
                               "concurrency": conc,
                               "note": ("measured UNDER LOAD at concurrency "
                                        f"{conc}; not a single-client shape")})
+                spread = p95_spread([(r.percentiles() or {}).get("p95_ms")
+                                     for r in results]) if n_runs > 1 else None
+                if spread:
+                    # `p95_ms` stays a float so every existing reader keeps
+                    # working; it becomes the median rather than run 1, which
+                    # is the honest single number when there are several.
+                    shape["p95_ms"] = spread["median"]
+                    shape["p95_across_runs"] = spread
+                    shape["note"] += (
+                        f"; p95_ms is the MEDIAN of {spread['n_runs']} runs "
+                        f"(min {spread['min']:.2f}, max {spread['max']:.2f}, "
+                        f"spread {spread['spread']:.2f} ms) -- see "
+                        "p95_across_runs, and the verdict rule, which does "
+                        "not decide from one run")
                 row = {"recall_at_10": out["searches"]["k=10"]["recall_at_10"]}
                 _apply_noise_guard(row, shape, out["rtt_baseline_ms"], 10)
                 out["searches"]["k=10_under_load"] = row
+
+            # Task 017 item 5: the ceiling, opt-in and kept well away from the
+            # sustain verdict. Off by default because it deliberately drives
+            # the engine into degradation, which is not something to do to a
+            # run that was asked for a recall number.
+            if cfg.get("measure_ceiling") or lat_cfg.get("measure_ceiling"):
+                log_fn("measuring qps_max (open-loop ramp)")
+                out["qps_max"] = loadgen.ramp_to_ceiling(
+                    engine, ns, queries, k=10, params=engine_params,
+                    container=cfg.get("engine_container"), log_fn=log_fn)
+                log_fn(f"  qps_max {out['qps_max']['qps_max']} at "
+                       f"concurrency {out['qps_max']['at_concurrency']}; "
+                       f"{out['qps_max']['stopped_because']}")
 
         out["engine_facts"] = engine.describe(ns).as_dict()
 

@@ -84,27 +84,60 @@ def _fmt(v, nd=3):
     return f"{v:.{nd}f}"
 
 
+def _warn_truncation(truncation, log_fn=log):
+    """Say it at run time, not only in a file nobody opens. Task 017 item 3.
+
+    Truncation is the one intake fault that leaves no trace in any number
+    downstream: the vectors are well-formed, the recall is self-consistent,
+    and the corpus they describe is not the corpus on disk. So it is said
+    loudly, once, with the count in it.
+    """
+    from .embed import TRUNCATION_ADVICE
+    if truncation is None:
+        log_fn("truncation: couldnt_check -- the model exposed no tokenizer "
+               "to count with, so it is not known how many records were cut")
+        return
+    n = truncation["truncated_count"]
+    if not n:
+        log_fn(f"truncation: none -- the longest of "
+               f"{truncation['n_records']:,} records is "
+               f"{truncation['longest_tokens']} tokens, within "
+               f"{truncation['max_seq_length']}")
+        return
+    log_fn(f"WARNING: {n:,} of {truncation['n_records']:,} records "
+           f"({truncation['truncated_fraction']:.1%}) are longer than "
+           f"max_seq_length {truncation['max_seq_length']} tokens and will be "
+           f"TRUNCATED; the longest is {truncation['longest_tokens']} tokens. "
+           + TRUNCATION_ADVICE)
+
+
 def _embedder(req, log_fn=log):
-    """A callable that turns texts into vectors, or None if no model is set.
+    """`(embed, weights_sha256, count_truncated)`, each None without a model.
 
     Built lazily so that a vectors-only run never imports torch.
     """
     model_name = req.model
     if not model_name:
-        return None, None
+        return None, None, None
 
-    from .embed import embed as _embed, load_model
+    from .embed import (count_truncated, embed as _embed, load_model)
     device = req.text.get("device", "cpu")
     log_fn(f"loading model {model_name} on {device}")
     model, weights_sha = load_model(
         model_name, device=device,
         max_seq_length=int(req.text.get("max_seq_length", 512)), log=log_fn)
     batch = int(req.text.get("batch_size", 64))
+    # So the truncation record can name the model without the caller having
+    # to carry it separately.
+    model._oneground_name = model_name
 
     def run(texts):
         return _embed(model, texts, batch)
 
-    return run, weights_sha
+    def count(texts):
+        return count_truncated(model, texts)
+
+    return run, weights_sha, count
 
 
 def characterize_arrays(base, queries, seed, timestamps=None,
@@ -210,7 +243,8 @@ def run(requirements_path, with_projection=False, log_fn=log,
         return run_declared(req, requirements_path, workdir, t0,
                             log_fn, env_stamp=env_stamp)
 
-    embed_fn, weights_sha = _embedder(req, log_fn)
+    embed_fn, weights_sha, count_truncated_fn = _embedder(req, log_fn)
+    truncation = None
 
     # ---- corpus ----
     if req.vectors.get("path"):
@@ -225,6 +259,10 @@ def run(requirements_path, with_projection=False, log_fn=log,
         log_fn(f"loading text {text_path}")
         texts, ids = loaders.load_text(
             text_path, text_field=req.text.get("text_field", "text"))
+        # Counted BEFORE embedding, so a run that dies in the encoder has
+        # already told the user what it was about to throw away. Task 017.
+        truncation = count_truncated_fn(texts) if count_truncated_fn else None
+        _warn_truncation(truncation, log_fn)
         log_fn(f"embedding {len(texts):,} texts")
         full = embed_fn(texts)
         source_kind = "text"
@@ -350,6 +388,14 @@ def run(requirements_path, with_projection=False, log_fn=log,
         "source_kind": source_kind,
         "embedding_model": req.model,
         "weights_sha256": weights_sha,
+        # Task 017 item 3. Declared, like everything else in this file: the
+        # model reports what it cut, and nothing downstream can re-derive it
+        # from the vectors -- a truncated vector looks exactly like a short
+        # document's. `null` is couldn't-check (no tokenizer, or no text
+        # path), and is deliberately not the same as 0.
+        "max_seq_length": (truncation or {}).get("max_seq_length"),
+        "truncated_count": (truncation or {}).get("truncated_count"),
+        "truncation": truncation,
         "requirements_file": {"path": os.path.abspath(requirements_path),
                               "sha256": sha256_file(requirements_path)},
         # Which interpreter produced this, and whether it was running the
@@ -439,6 +485,14 @@ def run_declared(req, requirements_path, workdir, t0, log_fn=log,
         "source_kind": "declared",
         "embedding_model": d.get("embedding_model"),
         "weights_sha256": None,
+        # Written as nulls rather than omitted, for the reason the field list
+        # above is exhaustive: an absent field reads as "not measured" and a
+        # null reads as "could not be". Tier 2 embeds nothing -- the corpus
+        # was declared, not sampled -- so there is no text to truncate and no
+        # tokenizer that saw it.
+        "max_seq_length": None,
+        "truncated_count": None,
+        "truncation": None,
         "requirements_file": {"path": os.path.abspath(requirements_path),
                               "sha256": sha256_file(requirements_path)},
         # Which interpreter produced this, and whether it was running the

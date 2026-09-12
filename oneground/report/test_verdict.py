@@ -648,3 +648,149 @@ def test_the_indistinguishable_log_entry_states_overall_outcomes():
     assert "Overall:" in text, text
     assert "couldnt_check" in text, text
     assert "not indistinguishable overall" in text, text
+
+
+# ------------- the latency verdict across repeated runs (task 017 item 2)
+# 015 measured one configuration at 38.22 ms and 42.82 ms against a 40 ms cap,
+# 12% apart, and stated `meets` once and `fails` once. Nothing about the
+# architecture changed between them. A threshold inside the run-to-run spread
+# is not a verdict.
+
+_LAT_C = {"latency": {"p95_ms": 40.0, "at_qps": 200, "concurrency": 32},
+          "recall_at_k": {"k": 10}}
+
+
+def _verify_with_runs(per_run, concurrency=32):
+    """A verify.json carrying `runs` p95 values under load."""
+    from oneground import verify as vfy
+    spread = vfy.p95_spread(per_run)
+    shape = {"p50_ms": 10.0, "p95_ms": spread["median"], "p99_ms": 99.0,
+             "mean_ms": 12.0, "max_ms": 120.0,
+             "n_queries": 60000, "concurrency": concurrency,
+             "note": "measured UNDER LOAD", "p95_across_runs": spread}
+    return {"environment_id": "pod-1", "engine": "qdrant",
+            "searches": {"k=10_under_load": {
+                "recall_at_10": 0.99,
+                "latency_shape_single_client": shape,
+                "rtt_share_of_p95": 0.05}}}
+
+
+def _row():
+    return {"config": "single_node_hnsw[M=32,efConstruction=200,efSearch=128]",
+            "family": "single_node_hnsw",
+            "params": {"M": 32, "efConstruction": 200, "efSearch": 128}}
+
+
+def _info():
+    return {"engine_facts": {"index_params": {"m": 32, "ef_construct": 200}},
+            "engine_params": {"hnsw_ef": 128}}
+
+
+def test_meets_only_when_the_worst_run_meets():
+    v = vd.latency_p95(_row(), _verify_with_runs([35.0, 38.2, 39.9]),
+                       _LAT_C, "runpod", _info())
+    assert v.outcome == MEETS, v.reason
+    assert "all 3 runs" in v.reason and "39.90" in v.reason, v.reason
+    assert v.value == 39.9, v.value          # the worst, not the median
+
+
+def test_fails_only_when_the_best_run_fails():
+    v = vd.latency_p95(_row(), _verify_with_runs([41.0, 44.0, 52.0]),
+                       _LAT_C, "runpod", _info())
+    assert v.outcome == FAILS, v.reason
+    assert "all 3 runs" in v.reason and "41.00" in v.reason, v.reason
+    assert v.value == 41.0, v.value          # the best, not the median
+
+
+def test_a_threshold_inside_the_spread_is_couldnt_check_not_a_coin_toss():
+    """The 015 case: 38.22 and 42.82 straddling a 40 ms cap."""
+    v = vd.latency_p95(_row(), _verify_with_runs([38.22, 42.82]),
+                       _LAT_C, "runpod", _info())
+    assert v.outcome == CC, v.reason
+    assert "meets in 1 of 2 runs" in v.reason, v.reason
+    assert "4.60" in v.reason, v.reason       # the spread
+    assert v.value is None, "a couldn't-check must not carry a number"
+
+
+def test_the_straddling_verdict_never_reports_the_median_as_the_answer():
+    """Three runs, median under the cap, max over it. Reporting the median
+    would turn a straddle into a pass."""
+    data = _verify_with_runs([30.0, 39.0, 55.0])
+    shape = data["searches"]["k=10_under_load"]["latency_shape_single_client"]
+    assert shape["p95_ms"] == 39.0            # the median is under the cap
+    v = vd.latency_p95(_row(), data, _LAT_C, "runpod", _info())
+    assert v.outcome == CC, v.reason
+    assert "meets in 2 of 3 runs" in v.reason, v.reason
+
+
+def test_one_run_keeps_the_old_two_way_rule():
+    """`runs: 1` is every earlier run's shape and must be unchanged."""
+    from oneground import verify as vfy
+    assert vfy.p95_spread([41.0])["n_runs"] == 1
+    data = _verify_with_runs([41.0])
+    # a single-run file carries no p95_across_runs at all
+    shape = data["searches"]["k=10_under_load"]["latency_shape_single_client"]
+    shape.pop("p95_across_runs")
+    v = vd.latency_p95(_row(), data, _LAT_C, "runpod", _info())
+    assert v.outcome == FAILS and v.value == 41.0, v.reason
+
+
+def test_p95_spread_arithmetic():
+    from oneground import verify as vfy
+    s = vfy.p95_spread([42.82, 38.22, 40.0])
+    assert s["min"] == 38.22 and s["max"] == 42.82
+    assert s["median"] == 40.0
+    assert abs(s["spread"] - 4.6) < 1e-9
+    assert s["n_runs"] == 3
+    assert s["p95_ms_per_run"] == [42.82, 38.22, 40.0]   # unsorted, as measured
+    assert vfy.p95_spread([]) is None
+    assert vfy.p95_spread([10.0, 20.0])["median"] == 15.0
+
+
+# ------------------- qps_max is a separate row, never the verdict (017/5)
+
+def _verify_with_ceiling(achieved=200.0, target=200.0, ceiling=1750.0):
+    return {"environment_id": "pod-1", "engine": "qdrant",
+            "load": {"concurrency": 32, "target_qps": target,
+                     "achieved_qps": achieved, "completed": int(achieved * 300),
+                     "errors": 0, "duration_seconds": 300.0},
+            "qps_max": {"qps_max": ceiling, "at_concurrency": 64,
+                        "p99_ms_at_max": 180.0, "baseline_p99_ms": 12.0,
+                        "stopped_because": "error rate 1.20% exceeded 0.5% "
+                                           "at concurrency 128",
+                        "caveat": "the ceiling under THIS load shape",
+                        "ladder": []},
+            "searches": {"k=10": {"recall_at_10": 0.99}}}
+
+
+def test_the_qps_verdict_never_reads_the_ceiling():
+    """A sustain check is against the offered rate. If `qps_max` ever leaked
+    into it, an engine that sustained its offer would start reporting the
+    ceiling as the achieved rate, which is the bug qps_max exists to avoid."""
+    data = _verify_with_ceiling(achieved=112.63, target=200.0, ceiling=9999.0)
+    c = {"qps": {"target": 200.0, "concurrency": 32},
+         "latency": {"p95_ms": 40.0, "at_qps": 200, "concurrency": 32},
+         "recall_at_k": {"k": 10}}
+    v = vd.qps_target(_row(), data, c, "runpod", _info())
+    assert v is not None
+    assert v.outcome == FAILS, v.reason
+    assert "9999" not in v.reason, "the ceiling reached the sustain verdict"
+    assert v.value != 9999.0
+
+
+def test_the_ceiling_is_reported_as_its_own_row_with_its_caveat():
+    from oneground import report as rep
+    lines = rep.qps_max_lines(_verify_with_ceiling())
+    assert len(lines) == 1, lines
+    line = lines[0]
+    assert line["kind"] == "qps_max"
+    assert "1750.0 qps at concurrency 64" in line["text"], line["text"]
+    assert "error rate 1.20%" in line["text"], line["text"]
+    assert "THIS load shape" in line["text"], line["text"]
+    assert line["source"] == "verify.json:qps_max"
+
+
+def test_no_ceiling_measured_means_no_row():
+    from oneground import report as rep
+    assert rep.qps_max_lines({"engine": "qdrant", "searches": {}}) == []
+    assert rep.qps_max_lines({"engine": "q", "qps_max": {"qps_max": None}}) == []

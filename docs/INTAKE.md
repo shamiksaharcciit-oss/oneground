@@ -43,6 +43,34 @@ Everything the report says is traceable to a file and a field in your workdir.
 That is what "receipt" means here: re-derivable from the seeds and rules
 recorded beside it.
 
+### If you bring text: one record is one vector, so bring chunks
+
+oneground embeds each record you give it into exactly one vector, and the
+model takes a fixed number of tokens — `max_seq_length`, 512 by default. A
+record longer than that is **truncated, silently**: the transformer keeps the
+first `max_seq_length` tokens, discards the rest, and returns a perfectly
+well-formed vector of the part it kept. Nothing downstream can tell. Ground
+truth is computed from those same truncated vectors, so recall against it is
+high and self-consistent, and every number in the report describes a corpus
+that is not the one on your disk. If your records are whole documents, chunk
+them before intake and bring one row per chunk — that is a retrieval design
+decision, and oneground will not make it for you by quietly cutting at 512.
+
+So it is counted and said out loud. `characterize` tokenizes with the model's
+own tokenizer before embedding anything, prints
+
+```
+WARNING: 15 of 55 records (27.3%) are longer than max_seq_length 128 tokens
+and will be TRUNCATED; the longest is 402 tokens. if these are documents
+rather than chunks, chunk them first
+```
+
+and writes `truncated_count`, `max_seq_length` and the full `truncation` block
+to `build_info.json` as **declared** facts. `truncated_count: 0` means it was
+counted and none were cut; `null` means it could not be counted — the two are
+deliberately different values, because the reassuring one must never be what
+you get when nothing looked.
+
 ## Tier 2 — the declared path
 
 You have not exported anything yet. You know roughly what your corpus is and

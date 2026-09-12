@@ -899,6 +899,71 @@ def _kind_of(name, workdir):
 # the command
 # --------------------------------------------------------------------------
 
+def qps_max_lines(verify_data):
+    """Decision-log entries for the measured ceiling. Task 017 item 5.
+
+    A separate row on purpose. `qps` is a sustain check -- did the engine hold
+    the rate it was offered -- and `qps_max` is a ceiling found by removing the
+    throttle and ramping until the engine degrades. They are different
+    questions, and the reason `qps_max` went unimplemented until now is that
+    the cheap way to produce one is to read the achieved rate off a throttled
+    run, which reports the offer back as if it were the capacity.
+
+    So this is never a verdict: there is no `qps_max` constraint, nothing is
+    judged against it, and `latency_p95`/`qps` never read it.
+    """
+    lines = []
+    for engine, block in vd.engine_blocks(verify_data):
+        ceiling = (block or {}).get("qps_max")
+        if not isinstance(ceiling, dict) or ceiling.get("qps_max") is None:
+            continue
+        who = f"{engine}: " if engine else ""
+        lines.append({
+            "kind": "qps_max",
+            "text": (f"{who}{ceiling['qps_max']:.1f} qps at concurrency "
+                     f"{ceiling['at_concurrency']} (p99 "
+                     f"{ceiling.get('p99_ms_at_max') or 0:.1f} ms). Ramp "
+                     f"stopped because {ceiling['stopped_because']}. "
+                     f"{ceiling.get('caveat', '')}"),
+            "source": "verify.json:qps_max",
+        })
+    return lines
+
+
+def _prices_postdate_the_run(prices, verify_info):
+    """Why this price table may not price this run, or None. Task 017 item 6.
+
+    A declared price table carries an `as_of` date. When that date is later
+    than the run being reported, the cost estimate is quoting prices that did
+    not exist when the numbers were taken -- which happens the ordinary way,
+    by refreshing `prices.yaml` and re-running `report` over an older
+    `verify.json`. The arithmetic is unchanged and the output looks current,
+    so nothing about the report says the two came from different weeks.
+
+    Compared against the verify run's `run_at`, because that is when the
+    measurements this is pricing were made. With no verify run there is
+    nothing to postdate, and `unknown`/malformed dates are couldn't-check
+    rather than grounds for rejection.
+    """
+    as_of = str(getattr(prices, "as_of", "") or "")[:10]
+    run_at = str((verify_info or {}).get("run_at") or "")[:10]
+    if not as_of or not run_at:
+        return None
+    try:
+        time.strptime(as_of, "%Y-%m-%d")
+        time.strptime(run_at, "%Y-%m-%d")
+    except ValueError:
+        return None
+    if as_of <= run_at:                      # ISO dates compare as strings
+        return None
+    return (f"the price table is dated {as_of}, after the verify run it would "
+            f"price ({run_at}). Prices declared after a measurement cannot be "
+            "what that measurement cost, so the cost rows and the "
+            "monthly_budget verdict are dropped rather than quoted as if the "
+            "two were contemporaneous. Re-run verify, or price it with a "
+            "table `as_of` the run.")
+
+
 def run(requirements_path, log_fn=log, env_stamp=None):
     t0 = time.time()
     req = intake.load(requirements_path)
@@ -938,6 +1003,12 @@ def run(requirements_path, log_fn=log, env_stamp=None):
     if isinstance(prices, str):          # a load failure, reported not raised
         log_fn(f"cost: {prices}")
         costs, prices = {}, None
+    # Same idiom for a table that postdates the run: reported, not raised, and
+    # the costs go rather than being quoted out of their period.
+    price_note = _prices_postdate_the_run(prices, verify_info)
+    if price_note:
+        log_fn(f"cost: {price_note}")
+        costs, prices = {}, None
     log_fn(f"report '{req.name}': {len(sim.get('rows', []))} rows, "
            f"{len(_constraint_names(constraints))} constraints"
            + (f", verify on {env}" if env else ", no verify run"))
@@ -954,6 +1025,10 @@ def run(requirements_path, log_fn=log, env_stamp=None):
     recommended = vd.recommend(options, k=k)
     dlog = decision_log(options, not_run_rows, recommended, constraints,
                         verify_info, k=k, env_id=env_id)
+    # Appended rather than built inside `decision_log`, which is given the
+    # judged options and not the raw verify document. The ceiling is not a
+    # judgement of any option -- it is a property of the engine on this host.
+    dlog.extend(qps_max_lines(verify_data))
 
     inputs = _input_digests(workdir)
     counts = {o: sum(1 for x in options if x.outcome == o)
@@ -984,6 +1059,10 @@ def run(requirements_path, log_fn=log, env_stamp=None):
         "costs": costs,
         "price_table": (prices.as_dict() if prices is not None
                         and not isinstance(prices, str) else None),
+        # Present only when a table was rejected. A reader who finds no costs
+        # and no price_table would otherwise have to guess whether none were
+        # configured or one was refused.
+        "price_table_rejected": price_note,
         "calibration": _calibration_footer(verify_info, recommended),
         "summary": {"options": len(options), **counts,
                     "not_run": len(not_run_rows)},

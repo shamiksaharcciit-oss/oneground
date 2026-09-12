@@ -735,11 +735,21 @@ def _setup_script(s):
     return """set -euo pipefail
 {env}
 cd {repo}
-python3.12 -m venv --copies /root/.venv
-ln -sfn /root/.venv {repo}/.venv
-. /root/.venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+if [ -f /opt/oneground-image/BAKED ]; then
+    # Task 017: the pre-baked image already carries the pinned venv. Symlink
+    # it rather than building one -- this is the step that cost ~5 minutes of
+    # billed time per session, and the whole point of baking the image.
+    echo "baked image detected; using the pre-built venv"
+    cat /opt/oneground-image/BAKED
+    ln -sfn /opt/oneground-venv {repo}/.venv
+else
+    python3.12 -m venv --copies /root/.venv
+    ln -sfn /root/.venv {repo}/.venv
+    . /root/.venv/bin/activate
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+fi
+. {repo}/.venv/bin/activate
 python -c "import numpy, torch; print('numpy', numpy.__version__, 'torch', torch.__version__, torch.version.cuda, torch.cuda.is_available())"
 """.format(env=env_lines, repo=s.remote_repo)
 

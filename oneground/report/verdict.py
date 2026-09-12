@@ -413,12 +413,60 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             threshold=cap, kind="declared", engine=engine)
 
     got = float(shape["p95_ms"])
-    outcome = MEETS if got <= cap else FAILS
     env = f" on {verify_env}" if verify_env else ""
     if got_eid:
         env += f" (environment {got_eid})"
     how = (f"under load at concurrency {conc}" if conc > 1
            else "sequential, single client -- a latency shape, not throughput")
+
+    # Task 017 item 2. With several runs the verdict is decided by the whole
+    # set, never by one of them:
+    #
+    #     meets          only if the WORST run meets
+    #     fails          only if the BEST run fails
+    #     couldnt_check  otherwise -- the threshold is inside the spread
+    #
+    # 015 measured this configuration at 38.22 ms and 42.82 ms against a 40 ms
+    # cap, 12% apart, and reported `meets` once and `fails` once with nothing
+    # about the architecture changing. Both were single runs, and both were
+    # wrong to be stated as flatly as they were. A threshold that falls
+    # between two samples is not a verdict, it is a coin toss with a receipt.
+    spread = shape.get("p95_across_runs")
+    if isinstance(spread, dict) and int(spread.get("n_runs", 0)) > 1:
+        per_run = [float(v) for v in spread.get("p95_ms_per_run") or []]
+        n = len(per_run) or int(spread["n_runs"])
+        lo, hi = float(spread["min"]), float(spread["max"])
+        width = float(spread.get("spread", hi - lo))
+        meets_in = sum(1 for v in per_run if v <= cap)
+        runs_txt = ", ".join(f"{v:.2f}" for v in per_run)
+        src = (f"verify.json:searches[{row_key}]."
+               "latency_shape_single_client.p95_across_runs")
+        if hi <= cap:
+            return Verdict(
+                "latency_p95", MEETS,
+                f"p95 <= {cap} ms in all {n} runs (worst {hi:.2f} ms){env} "
+                f"-- runs {runs_txt}; spread {width:.2f} ms "
+                f"(from {row_key}: {how})",
+                source=src, value=hi, threshold=cap, engine=engine)
+        if lo > cap:
+            return Verdict(
+                "latency_p95", FAILS,
+                f"p95 > {cap} ms in all {n} runs (best {lo:.2f} ms){env} "
+                f"-- runs {runs_txt}; spread {width:.2f} ms "
+                f"(from {row_key}: {how})",
+                source=src, value=lo, threshold=cap, engine=engine)
+        return Verdict(
+            "latency_p95", COULDNT_CHECK,
+            f"meets in {meets_in} of {n} runs, spread {width:.2f} ms "
+            f"({lo:.2f}-{hi:.2f} ms against a {cap} ms cap){env} -- runs "
+            f"{runs_txt}. The threshold falls inside the run-to-run "
+            "variation, so this configuration is not measurably on either "
+            "side of it. Reported as couldn't-check rather than picked from "
+            f"one run (from {row_key}: {how})",
+            source=src, value=None, threshold=cap, kind="declared",
+            engine=engine)
+
+    outcome = MEETS if got <= cap else FAILS
     return Verdict(
         "latency_p95", outcome,
         f"p95 {got:.2f} ms {'<=' if outcome == MEETS else '>'} {cap} ms{env} "
