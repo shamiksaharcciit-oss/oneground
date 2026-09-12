@@ -25,7 +25,7 @@
 #   ONEGROUND_CONCURRENCY   closed-loop workers
 #   ONEGROUND_TARGET_QPS    token-bucket target, 0 = unthrottled
 #   ONEGROUND_DURATION_MIN  measured minutes, warm-up excluded
-#   ONEGROUND_ENGINES       comma-separated; only qdrant exists
+#   ONEGROUND_ENGINES       comma-separated: qdrant, pgvector (task 015)
 #   ONEGROUND_REQUIREMENTS  path to the requirements file in the repo
 
 set -euo pipefail

@@ -63,6 +63,21 @@ verify:
   engines: [qdrant, pgvector]
   duration_minutes: 1            # smoke proves the path; arXiv measures
   warmup_seconds: 10
+  # Task 017b. These live here and not in the session spec: the session's
+  # ONEGROUND_* load variables are GENERATED from this file and, on the pod,
+  # only echoed -- `verify` reads the real values from here. Setting them in
+  # the session would have looked right and changed nothing.
+  #
+  # `runs: 3` is what makes the spread a measurement rather than a sample of
+  # one; the engine is restarted between runs (ONEGROUND_ENGINE_RESTART_COMMAND
+  # in the session, corpora/restart_engine.sh on the pod). On smoke this proves
+  # the mechanism -- 1-minute runs on 2,000 vectors measure the path more than
+  # the engine -- and arXiv is where the number means something.
+  runs: 3
+  # The open-loop ramp. Off by default everywhere because it drives the engine
+  # into degradation on purpose; on smoke that is exactly what is wanted, and
+  # it is cheap.
+  measure_ceiling: true
   cost:
     prices: oneground/cost/prices.example.yaml
     error_band: 0.25

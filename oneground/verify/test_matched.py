@@ -1275,3 +1275,99 @@ def _main():
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# ---------- a committed session spec must agree with its requirements (017b)
+# A session YAML is GENERATED from a requirements file, then committed. The two
+# can then drift with nothing noticing, and a drift is only discovered on a pod
+# that is already billing.
+#
+# Session 20260912-171431 is the worked example. requirements.smoke.yaml has
+# said `engines: [qdrant, pgvector]` since task 015; the smoke session spec was
+# generated 2026-09-09 and still said `ONEGROUND_ENGINES: qdrant`. So
+# run_verify_pod.sh started only qdrant, `verify` read both engines out of the
+# requirements, and the run died on "pgvector: connection refused" -- after the
+# baked image, the setup and the venv had all worked perfectly.
+
+def _repo_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+
+
+def _session_specs():
+    import glob
+    import yaml
+    root = _repo_root()
+    for path in sorted(glob.glob(os.path.join(root, "sessions", "*.yaml"))):
+        with open(path, encoding="utf-8") as f:
+            spec = yaml.safe_load(f)
+        if not isinstance(spec, dict):
+            continue
+        env = spec.get("env") or {}
+        req = env.get("ONEGROUND_REQUIREMENTS")
+        if not req:
+            continue                    # not a verify session
+        rpath = os.path.join(root, req)
+        if not os.path.exists(rpath):
+            continue
+        with open(rpath, encoding="utf-8") as f:
+            reqs = yaml.safe_load(f)
+        yield os.path.basename(path), env, (reqs.get("verify") or {})
+
+
+def test_every_session_engine_list_matches_its_requirements():
+    """The one that cost a pod."""
+    for name, env, cfg in _session_specs():
+        want = ",".join(str(e) for e in
+                        (cfg.get("engines") or [cfg.get("engine", "qdrant")]))
+        got = str(env.get("ONEGROUND_ENGINES", ""))
+        assert got == want, (
+            "%s says ONEGROUND_ENGINES=%r but %s says %r. The session starts "
+            "the engines in its own list and `verify` measures the ones in the "
+            "requirements; when they differ the run dies on a connection "
+            "refused, on a pod, after everything else has worked."
+            % (name, got, env.get("ONEGROUND_REQUIREMENTS"), want))
+
+
+def test_every_session_load_shape_matches_its_requirements():
+    """The same class of drift, on the numbers rather than the engine list.
+
+    These variables are descriptive -- the pod echoes them and `verify` reads
+    the requirements -- which is exactly why they can rot unnoticed. A session
+    record that says `concurrency 8` for a run made at 32 is a receipt that
+    lies, quietly, forever.
+    """
+    import yaml
+    for name, env, cfg in _session_specs():
+        root = _repo_root()
+        with open(os.path.join(root, env["ONEGROUND_REQUIREMENTS"]),
+                  encoding="utf-8") as f:
+            whole = yaml.safe_load(f)
+        lat = (whole.get("constraints") or {}).get("latency") or {}
+        checks = (
+            ("ONEGROUND_CONCURRENCY", str(lat.get("concurrency", 8))),
+            ("ONEGROUND_TARGET_QPS", str(lat.get("at_qps", 0))),
+            ("ONEGROUND_DURATION_MIN", str(cfg.get("duration_minutes", 5))),
+            ("ONEGROUND_RUNS", str(cfg.get("runs", 1))),
+            ("ONEGROUND_MEASURE_CEILING",
+             "1" if cfg.get("measure_ceiling") else "0"),
+        )
+        for key, want in checks:
+            got = str(env.get(key, ""))
+            assert got == want, (name, key, got, want)
+
+
+def test_the_smoke_session_asks_for_the_spread_and_the_ceiling():
+    """Not a drift check: what this session exists to measure.
+
+    `runs: 1` would produce no spread and `measure_ceiling: false` no qps_max,
+    and both would look like a successful run that simply had nothing to say.
+    """
+    for name, env, cfg in _session_specs():
+        if "smoke" not in name:
+            continue
+        assert int(cfg.get("runs", 1)) >= 3, (name, cfg.get("runs"))
+        assert cfg.get("measure_ceiling") is True, name
+        assert env.get("ONEGROUND_ENGINE_RESTART_COMMAND"), (
+            "%s asks for repeated runs with no way to restart the engine "
+            "between them" % name)

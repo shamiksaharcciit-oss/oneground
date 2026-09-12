@@ -73,6 +73,13 @@ def session_spec(req, workdir, cfg, engines, image, log_fn=None):
             "ONEGROUND_TARGET_QPS": str(lat.get("at_qps", 0)),
             "ONEGROUND_DURATION_MIN": str(cfg.get("duration_minutes", 5)),
             "ONEGROUND_ENGINES": ",".join(engines),
+            # Task 017b. Descriptive, like the three above: `verify` reads the
+            # real values out of the requirements file and the pod only echoes
+            # these. Emitted so a session record says what shape of run it
+            # was, and so the drift guard has something to compare against.
+            "ONEGROUND_RUNS": str(cfg.get("runs", 1)),
+            "ONEGROUND_MEASURE_CEILING": (
+                "1" if cfg.get("measure_ceiling") else "0"),
             # Which requirements file the pod verifies. Without this the
             # remote script falls back to its default and a smoke session
             # would run the arXiv requirements -- whose vector path is a

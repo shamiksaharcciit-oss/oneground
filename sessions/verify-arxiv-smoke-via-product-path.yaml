@@ -25,8 +25,17 @@ env:
   ONEGROUND_CONCURRENCY: '8'
   ONEGROUND_TARGET_QPS: '50'
   ONEGROUND_DURATION_MIN: '1'
-  ONEGROUND_ENGINES: qdrant
+  # Task 017b: was `qdrant`, and requirements.smoke.yaml has said
+  # `engines: [qdrant, pgvector]` since task 015. This file is GENERATED from
+  # that one and was last generated 2026-09-09, before pgvector existed here,
+  # so the two drifted apart with nothing checking. Session 20260912-171431
+  # paid for the difference: run_verify_pod.sh started only qdrant, `verify`
+  # read both engines from the requirements, and the run died on
+  # "pgvector: connection refused" after the setup had gone perfectly.
+  ONEGROUND_ENGINES: qdrant,pgvector
   ONEGROUND_REQUIREMENTS: requirements.smoke.yaml
+  ONEGROUND_RUNS: '3'
+  ONEGROUND_MEASURE_CEILING: '1'
   # Task 017b. `verify.runs: N` restarts the engine between load runs so each
   # run is a second sample rather than a continuation of the first. On a pod
   # the engines are native processes, not containers, so there is nothing for

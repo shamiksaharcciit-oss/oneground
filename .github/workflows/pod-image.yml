@@ -80,9 +80,37 @@ jobs:
           # anything in the registry for a session to find.
           push: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.sha.outputs.short }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # NO GHA CACHE, deliberately. `cache-from: type=gha` failed this
+          # build three times running: the Actions cache handed back manifest
+          # entries whose blobs had been evicted, so buildx asked for them and
+          # got 404 BlobNotFound. Run 34706654417 died that way IN THE PUSH,
+          # after 5m55s, and never reached the lock check at all.
+          #
+          # This image rebuilds only when docker/pod/** or requirements.txt
+          # changes, which is rarely. An 18-minute build that always works is
+          # worth more than a 6-minute one that sometimes leaves a red tick
+          # against a green artifact -- especially here, where the red tick is
+          # the thing telling somebody whether the pod image is usable.
           provenance: false
+
+      # A run that did not push has verified that the Dockerfile builds and
+      # nothing else. Run 34705655888 was a workflow_dispatch: `push` was
+      # false, so the lock check (push-only) was skipped and the run went
+      # green having put nothing in the registry and compared nothing. A green
+      # tick that means less than it looks is worth saying out loud.
+      - name: say what this run did NOT do
+        if: github.event_name != 'push' || github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+        run: |
+          echo "::notice::built only. Nothing was pushed and IMAGE.lock was not"
+          echo "checked -- both happen on a push to the default branch. A green"
+          echo "run here means the Dockerfile builds, not that the locked digest"
+          echo "is current."
+          {
+            echo "### built, not pushed"
+            echo
+            echo "The image was built and discarded. No registry write, and"
+            echo "\`docker/pod/IMAGE.lock\` was **not** compared against it."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: the digest, and what to put in IMAGE.lock
         if: steps.build.outputs.digest != ''
