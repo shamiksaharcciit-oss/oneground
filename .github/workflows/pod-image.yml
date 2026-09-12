@@ -110,13 +110,33 @@ jobs:
       # The lock is the contract. If it does not match what was just built on
       # the default branch, sessions are pinned to an image that is no longer
       # what this Dockerfile produces, and that has to be loud.
+      #
+      # But an EMPTY lock and a WRONG lock are different things, and the first
+      # version of this step treated them the same. That made the first build
+      # unpassable by construction: the lock cannot name a digest until a build
+      # has produced one, and the build failed because the lock did not name
+      # it. Run #1 built and pushed the image correctly and then failed here --
+      # a red tick against a green artifact, which is the worst combination,
+      # because the next reader takes it to mean the image is broken.
+      #
+      #   empty        the bootstrap case. Warn, say what to commit, succeed.
+      #   set + wrong  drift: sessions are pinned to something this Dockerfile
+      #                no longer produces. Fail.
       - name: the committed lock must match what was built
         if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         run: |
           DIGEST='${{ steps.build.outputs.digest }}'
           LOCK=docker/pod/IMAGE.lock
           test -f "$LOCK" || { echo "::error::$LOCK is missing"; exit 1; }
-          LOCKED=$(grep '^digest=' "$LOCK" | cut -d= -f2-)
+          LOCKED=$(grep '^digest=' "$LOCK" | cut -d= -f2- || true)
+          if [ -z "$LOCKED" ]; then
+            echo "::warning::$LOCK has no digest yet; this build produced $DIGEST"
+            echo "Bootstrap: commit that digest to $LOCK."
+            echo "Until you do, no session can reference this image --"
+            echo "oneground/pod/image.py raises rather than falling back to the tag,"
+            echo "so an unfilled lock cannot silently become a floating-tag run."
+            exit 0
+          fi
           if [ "$LOCKED" != "$DIGEST" ]; then
             echo "::error::$LOCK pins $LOCKED but this build produced $DIGEST."
             echo "Update $LOCK and commit it; sessions reference the locked digest."

@@ -24,7 +24,7 @@ gpu:
 volume: vecbench            # by name; datacenter derived from it
 volume_mount_path: /workspace
 
-image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+image: ghcr.io/shamiksaharcciit-oss/oneground-pod@sha256:81567d58615f41e708c5aff8eb3e32af1cd4121daac4a9dddd3dbbadf9d388ce
 disk_gb: 20
 
 env:

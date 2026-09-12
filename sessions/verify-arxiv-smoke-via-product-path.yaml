@@ -18,7 +18,7 @@ gpu:
 - RTX PRO 6000 WK
 volume: vecbench
 volume_mount_path: /workspace
-image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+image: ghcr.io/shamiksaharcciit-oss/oneground-pod@sha256:81567d58615f41e708c5aff8eb3e32af1cd4121daac4a9dddd3dbbadf9d388ce
 disk_gb: 40
 env:
   ONEGROUND_VERIFY: '1'
@@ -27,6 +27,15 @@ env:
   ONEGROUND_DURATION_MIN: '1'
   ONEGROUND_ENGINES: qdrant
   ONEGROUND_REQUIREMENTS: requirements.smoke.yaml
+  # Task 017b. `verify.runs: N` restarts the engine between load runs so each
+  # run is a second sample rather than a continuation of the first. On a pod
+  # the engines are native processes, not containers, so there is nothing for
+  # `docker restart` to act on -- without this, verify records
+  # "not restarted: no engine_restart_command and no known container" and the
+  # spread is measured across runs that shared a warm process.
+  # `{engine}` is substituted per engine: qdrant and postgres are not
+  # restarted the same way.
+  ONEGROUND_ENGINE_RESTART_COMMAND: bash corpora/restart_engine.sh {engine}
 setup: corpora/POD_SETUP.md
 run: bash corpora/run_verify_pod.sh
 remote_repo: /workspace/oneground

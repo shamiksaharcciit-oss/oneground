@@ -319,11 +319,21 @@ def test_an_unknown_date_is_couldnt_check_not_a_rejection():
     assert rep._prices_postdate_the_run(_Prices("2030-01-01"), None) is None
 
 
-def test_the_real_arxiv_report_prices_do_not_postdate_its_run():
-    """Not synthetic: the run the rule was written against.
+def test_the_rule_agrees_with_itself_on_the_real_arxiv_report():
+    """Not synthetic: the rule applied to a real workdir, whichever way it
+    falls.
 
-    `runs/` is gitignored, so an absent workdir is an absent artifact rather
-    than a failure -- the name says it needs a local run.
+    The first version of this asserted the local artifact was *clean*, and it
+    passed in one checkout and failed in another -- because the two hold
+    different runs. A workdir under `runs/` is gitignored: it is whatever the
+    developer last produced, not a fixture, and asserting its contents is
+    testing the machine rather than the rule. That is the same error task 015b
+    had to correct in `test_matched.py`, made again here by the same hand.
+
+    So what is asserted is the implication, not the outcome: the rule fires if
+    and only if the price table's date is after the verify run's. Both answers
+    are correct behaviour; only a disagreement between the dates and the
+    verdict is a bug.
     """
     wd = "runs/arxiv-150k-via-characterize"
     if not os.path.exists(os.path.join(wd, "verify_info.json")):
@@ -335,4 +345,14 @@ def test_the_real_arxiv_report_prices_do_not_postdate_its_run():
     table = report.get("price_table")
     if not table:
         return                      # this report carries no price table
-    assert rep._prices_postdate_the_run(_Prices(table["as_of"]), info) is None
+
+    as_of = str(table["as_of"])[:10]
+    run_at = str(info.get("run_at") or "")[:10]
+    note = rep._prices_postdate_the_run(_Prices(table["as_of"]), info)
+    if as_of > run_at and run_at:
+        assert note, (
+            "prices dated %s postdate the run on %s and the rule said nothing"
+            % (as_of, run_at))
+        assert as_of in note and run_at in note, note
+    else:
+        assert note is None, (as_of, run_at, note)

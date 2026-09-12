@@ -162,7 +162,20 @@ def restart_engine(engine, cfg, engine_name, endpoint, log_fn=log,
     """
     import subprocess
 
-    cmd = cfg.get("engine_restart_command")
+    # Three sources, most specific first. The environment variable is how a
+    # SESSION sets this (task 017b): on a pod the engines are native processes
+    # rather than containers, so there is nothing for `docker restart` to act
+    # on, and the session spec is where the pod-side command belongs.
+    #
+    # `{engine}` is substituted, because one session measures both engines in
+    # turn and they are not restarted the same way -- pkill and setsid for
+    # qdrant, pg_ctl for postgres. A single command that ignored which engine
+    # it was restarting would restart the wrong one, or neither, and report
+    # success either way.
+    cmd = (cfg.get("engine_restart_command")
+           or os.environ.get("ONEGROUND_ENGINE_RESTART_COMMAND") or "")
+    if cmd:
+        cmd = cmd.replace("{engine}", str(engine_name))
     container = cfg.get("engine_container") or CONTAINERS.get(engine_name)
     if cmd:
         how = f"`{cmd}`"

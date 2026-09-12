@@ -341,3 +341,122 @@ def _main():
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# ------------- the engine restart between load runs (task 017b)
+# On a pod the engines are native processes, not containers, so there is
+# nothing for `docker restart` to act on. The session supplies the command.
+
+class _FakeEngine:
+    """Connects on demand; records how many times it was asked to."""
+
+    def __init__(self, fail_times=0):
+        self.connects = 0
+        self.fail_times = fail_times
+
+    def connect(self, endpoint, credentials_env=None):
+        self.connects += 1
+        if self.connects <= self.fail_times:
+            raise RuntimeError("not up yet")
+
+
+def _restart(engine, cfg, name, env=None, **kw):
+    old = os.environ.get("ONEGROUND_ENGINE_RESTART_COMMAND")
+    if env is None:
+        os.environ.pop("ONEGROUND_ENGINE_RESTART_COMMAND", None)
+    else:
+        os.environ["ONEGROUND_ENGINE_RESTART_COMMAND"] = env
+    try:
+        return verify.restart_engine(engine, cfg, name, "http://localhost:1",
+                                     log_fn=lambda m: None, **kw)
+    finally:
+        if old is None:
+            os.environ.pop("ONEGROUND_ENGINE_RESTART_COMMAND", None)
+        else:
+            os.environ["ONEGROUND_ENGINE_RESTART_COMMAND"] = old
+
+
+def test_the_session_env_var_supplies_the_restart_command():
+    """How a pod sets it: there is no container to fall back on."""
+    e = _FakeEngine()
+    note = _restart(e, {}, "qdrant", env=sys.executable + ' -c "pass"')
+    assert note.startswith("restarted via"), note
+    assert e.connects == 1, "it did not wait for the engine to answer"
+
+
+def test_the_engine_name_is_substituted():
+    """One session measures both engines and they restart differently. A
+    command that ignored which engine it was restarting would restart the
+    wrong one and report success anyway."""
+    script = sys.executable + ' -c "import sys; sys.exit(0)" # {engine}'
+    note = _restart(_FakeEngine(), {}, "pgvector", env=script)
+    assert "pgvector" in note, note
+    assert "{engine}" not in note, note
+
+
+def test_the_requirements_block_wins_over_the_environment():
+    cfg = {"engine_restart_command": sys.executable + ' -c "pass"'}
+    note = _restart(_FakeEngine(), cfg, "qdrant", env="exit 1")
+    assert note.startswith("restarted via"), note
+
+
+def test_no_mechanism_says_so_rather_than_claiming_a_restart():
+    """The honest case. A spread measured across runs that shared a warm
+    process is a different quantity, and the record has to say which."""
+    note = _restart(_FakeEngine(), {"engine_container": ""}, "nosuchengine")
+    assert note.startswith("not restarted"), note
+    assert "no engine_restart_command" in note, note
+
+
+def test_a_failing_restart_command_is_reported_not_swallowed():
+    note = _restart(_FakeEngine(), {}, "qdrant",
+                    env=sys.executable + ' -c "import sys; sys.exit(3)"')
+    assert note.startswith("not restarted"), note
+    assert "exited 3" in note, note
+
+
+def test_an_engine_that_never_comes_back_is_not_a_successful_restart():
+    """The command succeeding and the engine coming back are two facts, and
+    the note carries both: "restarted via X, but it did not answer within N s".
+    What must not happen is a clean success claim -- the next load run would
+    then be measured against an engine that is not up, and the spread would be
+    a measurement of that.
+    """
+    e = _FakeEngine(fail_times=99)
+    note = _restart(e, {}, "qdrant", env=sys.executable + ' -c "pass"',
+                    timeout=2.0)
+    assert "did not answer" in note, note
+    assert "reachable again" not in note, note
+
+
+def test_the_two_named_sessions_carry_the_restart_command():
+    """Not synthetic: the session files task 017b was asked to set."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    for name in ("verify-arxiv-smoke-via-product-path.yaml",
+                 "verify-arxiv-150k-two-engines.yaml"):
+        path = os.path.join(root, "sessions", name)
+        with io.open(path, encoding="utf-8") as f:
+            spec = yaml.safe_load(f)
+        cmd = (spec.get("env") or {}).get("ONEGROUND_ENGINE_RESTART_COMMAND")
+        assert cmd, f"{name} has no restart command"
+        assert "{engine}" in cmd, (name, cmd)
+        assert os.path.exists(os.path.join(root, "corpora",
+                                           "restart_engine.sh")), \
+            "the sessions name a script that does not exist"
+
+
+def test_every_session_that_names_the_baked_image_names_it_by_digest():
+    """A floating tag is what the lock exists to make impossible."""
+    from oneground.pod import image as podimage
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    import glob
+    for path in sorted(glob.glob(os.path.join(root, "sessions", "*.yaml"))):
+        with io.open(path, encoding="utf-8") as f:
+            spec = yaml.safe_load(f)
+        img = str(spec.get("image") or "")
+        if "oneground-pod" not in img:
+            continue                      # still on the documented base image
+        assert "@sha256:" in img, (os.path.basename(path), img)
+        assert img == podimage.reference(root), (os.path.basename(path), img)

@@ -61,7 +61,7 @@ volume_mount_path: /workspace   # an ordinary directory on the container disk
 # ubuntu2404 for python 3.12.3. The image's own torch is irrelevant -- setup
 # builds a fresh venv without --system-site-packages and installs
 # requirements.txt exactly.
-image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+image: ghcr.io/shamiksaharcciit-oss/oneground-pod@sha256:81567d58615f41e708c5aff8eb3e32af1cd4121daac4a9dddd3dbbadf9d388ce
 
 # Container disk. With no volume this holds everything the run writes, so it is
 # sized for the whole build rather than just the venv: the venv at /root/.venv,

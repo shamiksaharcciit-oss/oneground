@@ -16,18 +16,22 @@
 # It is filled by a human on purpose. A workflow that pushed this file to the
 # branch it builds from could move the pin it exists to hold still.
 #
-# STATE: NOT YET BUILT
-# --------------------
-# The image has never been built, because the workflow builds on push and this
-# branch has not been pushed. Until `digest` below is a real sha256, no
-# session can reference this image -- `oneground.pod.image` raises rather than
-# falling back to a tag, which would be the exact substitution this file
-# exists to prevent.
+# STATE: BUILT AND LOCKED
+# -----------------------
+# `pod image` run #1, on main at 6641737, built and pushed the image in
+# 18m18s. The digest below is what it produced; the build itself succeeded and
+# only the lock check failed, which was the bootstrap paradox -- the lock could
+# not name a digest that did not exist yet. Fixed in the workflow (task 017b):
+# an empty lock is now the bootstrap case and warns, a lock that disagrees with
+# the build is still a failure.
+#
+# The tag is recorded for tracing a digest back to the commit that built it.
+# Nothing references the tag, and nothing should: `reference` is the digest.
 
 image=ghcr.io/shamiksaharcciit-oss/oneground-pod
-digest=
-tag=
-reference=
+digest=sha256:81567d58615f41e708c5aff8eb3e32af1cd4121daac4a9dddd3dbbadf9d388ce
+tag=6641737
+reference=ghcr.io/shamiksaharcciit-oss/oneground-pod@sha256:81567d58615f41e708c5aff8eb3e32af1cd4121daac4a9dddd3dbbadf9d388ce
 
 # The fallback until the digest exists. This is the image every session
 # through task 016 actually ran, resolved live from Docker Hub and pinned in
