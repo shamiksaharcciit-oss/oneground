@@ -45,10 +45,11 @@ with the same functions the product path uses and compared against the spec's
 own tolerance — never one invented here, and never one widened to make
 something pass.
 
-**The scope is the release asset, not "vectors and queries".** `drift` needs
-`update_date` per record, which lives in `sample.jsonl.zst` -- part of the same
+**The scope is the release asset, not "vectors and queries".** `drift` needs a
+date per record, which lives in `sample.jsonl.zst` -- part of the same
 published asset -- so it is recomputed from there rather than reported
-unreachable. A value that is checkable from the published artifacts is a value
+unreachable. Which field carries that date comes from the spec's
+`source.field_map`: arXiv writes `update_date`, Stack Exchange `creation_date`. A value that is checkable from the published artifacts is a value
 this command checks.
 
 Values are couldnt_check, never contradicted, when the release asset is absent
@@ -108,6 +109,7 @@ import yaml
 from ..environment import (PINNED, read_requirements_pins,  # noqa: F401
                            running_pin_mismatches, running_versions)
 from ..receipts import MANIFEST_NAME, sha256_file
+from ..sample.fields import field_map
 
 # Where the release assets are extracted. Declared, and overridable: the large
 # artifacts ship separately from the repository, so a fresh clone has none of
@@ -260,17 +262,29 @@ def read_sample_records(path):
 
 
 def recompute_drift(sample_path, base, queries, gt10, seed,
-                    cutoff=DRIFT_CUTOFF, log_fn=None):
+                    cutoff=DRIFT_CUTOFF, log_fn=None, date_field=None):
     """The build's own drift call, with its inputs read back from the asset.
+
+    `date_field` is the record key the timeline is cut on, which the spec's
+    `source.field_map` names. It defaults to arXiv's `update_date`, so a spec
+    that declares no field map behaves as it always has.
+
+    Task 016 gave the builder a field map and left three readers behind. This
+    was the third: stackexchange-150k's records carry `creation_date`, so its
+    published drift pair reported `couldnt_check -- the sample records carry
+    no update_date field` against a fixture that had just measured it.
 
     Returns (result_dict, None) or (None, reason).
     """
     import numpy as np
 
     from ..measures import drift_pair
+    from ..sample.fields import DEFAULTS
+
+    date_field = date_field or DEFAULTS["date"]
 
     if log_fn:
-        log_fn(f"  reading update_date from {sample_path}")
+        log_fn(f"  reading {date_field} from {sample_path}")
     try:
         base_recs, q_recs = read_sample_records(sample_path)
     except ImportError:
@@ -291,15 +305,17 @@ def recompute_drift(sample_path, base, queries, gt10, seed,
                       f"queries.npy holds {len(queries):,}; these are not the "
                       "same query set")
     missing = [r for r in (base_recs[:1] + q_recs[:1])
-               if "update_date" not in r]
+               if date_field not in r]
     if missing:
-        return None, ("the sample records carry no update_date field, so "
-                      "there is no timeline to cut at")
+        have = sorted((base_recs[:1] + q_recs[:1])[0]) if base_recs else []
+        return None, (f"the sample records carry no {date_field} field, so "
+                      f"there is no timeline to cut at (they have: "
+                      f"{', '.join(have)})")
 
     if log_fn:
         log_fn(f"  recomputing the drift pair (cutoff {cutoff}, seed {seed})")
-    pre = np.array([r["update_date"] < cutoff for r in base_recs])
-    q_pre = np.array([r["update_date"] < cutoff for r in q_recs])
+    pre = np.array([r[date_field] < cutoff for r in base_recs])
+    q_pre = np.array([r[date_field] < cutoff for r in q_recs])
     if pre.all() or (~pre).all():
         return None, (f"the cutoff {cutoff} leaves one side of the corpus "
                       "empty")
@@ -486,11 +502,12 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
         if not os.path.exists(sample_path):
             rows.append(("drift", COULDNT_CHECK,
                          f"sample.jsonl.zst is not present ({sample_path}); "
-                         "it carries the update_date column drift is cut on"))
+                         "it carries the date column drift is cut on"))
         else:
             cutoff = _published_cutoff(published["drift"])
-            drift, why = recompute_drift(sample_path, base, queries, gt10,
-                                         seed, cutoff, log_fn=log_fn)
+            drift, why = recompute_drift(
+                sample_path, base, queries, gt10, seed, cutoff,
+                log_fn=log_fn, date_field=field_map(spec)["date"])
             if drift is None:
                 rows.append(("drift", COULDNT_CHECK, why))
             else:

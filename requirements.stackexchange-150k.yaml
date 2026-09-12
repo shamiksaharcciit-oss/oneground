@@ -75,9 +75,19 @@ corpus:
       # package anything.
       full_corpus_size: 20388803
 
-    # The whole corpus: no subsampling, so this is measured against the same
-    # 150,000 vectors the fixture measured rather than a draw from them.
-    target_sample_size: 150000
+    # The product's intended sample size. `oneground characterize` draws a
+    # stratified 20,000 from the 150,000 and everything downstream measures
+    # that draw -- which is what a user with a 20M-row corpus actually does,
+    # and what `simulate` is sized for. arxiv-150k's requirements file asks
+    # for the whole 150,000 because it was written to compare the product path
+    # against the fixture builder's own numbers, before this field meant what
+    # it now means.
+    #
+    # The consequence, stated so nobody reads across the two: the values from
+    # THIS file are measured on 20,000 vectors and are not the fixture's
+    # published values, which are measured on 150,000. The 150k reproduction
+    # was run separately and is reported in tasks/016-...report.md; it agreed.
+    target_sample_size: 20000
 
 # ------------------------------------------------------------------
 # simulate — the architecture sweep

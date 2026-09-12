@@ -838,21 +838,41 @@ def test_anything_published_agrees_with_what_compare_treats_as_a_number():
         {"drift": {"value_before": 0.52}}, {}, [], [])
 
 
-def test_the_shipped_stackexchange_spec_is_in_the_skip_case():
-    """Not synthetic: this is why the change exists."""
+def _shipped(name):
     import yaml as _yaml
     here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "..", "..", "fixtures",
-                        "stackexchange-150k.fixture.yaml")
+    path = os.path.join(here, "..", "..", "fixtures", name)
     with open(path, encoding="utf-8") as f:
-        spec = _yaml.safe_load(f)
+        return _yaml.safe_load(f)
+
+
+def _publish_args(spec):
     published = spec.get("characterization") or {}
     refs = spec.get("reference_results") or {}
     wanted = [f for f in fv.REPRODUCIBLE if f in published]
     ref_rows = [("single_node_hnsw.recall_at_10", "single_node_hnsw"),
                 ("semantic_sharded.recall_at_10", "semantic_sharded"),
                 ("semantic_sharded.storage_amplification", "semantic_sharded")]
-    assert not fv._anything_published(published, refs, wanted, ref_rows)
+    return published, refs, wanted, ref_rows
+
+
+def test_a_shipped_unbuilt_spec_is_in_the_skip_case():
+    """Not synthetic: arxiv-smoke is `status: planned` and TO_BE_FILLED
+    throughout, which is the state every fixture is in before its first
+    canonical build -- the state stackexchange-150k was in when this skip was
+    written, and the one that cost 6-8 minutes of pod time per run."""
+    spec = _shipped("arxiv-smoke.fixture.yaml")
+    assert spec["fixture"]["status"] == "planned", spec["fixture"]["status"]
+    assert not fv._anything_published(*_publish_args(spec))
+
+
+def test_a_built_fixture_leaves_the_skip_case():
+    """stackexchange-150k was the motivating skip case and is no longer in it:
+    its canonical build (session 20260912-100920) filled every value, so the
+    recomputation now has something to contradict and must run."""
+    spec = _shipped("stackexchange-150k.fixture.yaml")
+    assert spec["fixture"]["status"] == "built", spec["fixture"]["status"]
+    assert fv._anything_published(*_publish_args(spec))
 
 
 def test_the_shipped_arxiv_spec_is_not_in_the_skip_case():

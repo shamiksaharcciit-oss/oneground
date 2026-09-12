@@ -1,6 +1,6 @@
 """The fixture analogy, and the honesty rules that shape it.
 
-**Synthetic fixtures throughout**, except the two tests named `_real_specs`,
+**Synthetic fixtures throughout**, except the tests named `_real_specs`,
 which read the shipped `fixtures/*.fixture.yaml`. The property under test is
 that an analogy is never a verdict and a weak match is never presented as a
 strong one.
@@ -243,34 +243,45 @@ def test_the_model_family_is_derived_crudely_and_only_helps_synthetic():
 
 
 # ------------------------------------------------------- the shipped specs
-def test_the_planned_stackexchange_spec_is_not_matchable_real_specs():
-    """Task 016 wrote the stackexchange spec, with its `analogy:` block, days
-    before the corpus was built. On the day it landed a Q&A corpus matched it
-    at 1.00 against a fixture whose every value was TO_BE_FILLED. It must be
-    excluded until the build fills them in.
+def test_the_built_stackexchange_spec_is_matchable_real_specs():
+    """The other end of the story 016b started.
+
+    Task 016 wrote the stackexchange spec, with its `analogy:` block, days
+    before the corpus was built, and on the day it landed a Q&A corpus matched
+    it at 1.00 against a fixture whose every value was TO_BE_FILLED. The status
+    filter excluded it. Its canonical build (session 20260912-100920) filled
+    those values, so it is now a legitimate analogy and must be offered --
+    the filter was never meant to exclude it forever, only until it had
+    numbers behind it.
+
+    The `planned` exclusion itself is covered by the synthetic tests above,
+    which do not depend on any shipped spec staying unbuilt.
     """
     loaded = {fid: spec.get("fixture", {}).get("status")
               for fid, _an, _p, spec in A.load_fixture_analogies()}
 
-    assert "arxiv-150k" in loaded, loaded
-    assert loaded["arxiv-150k"] in A.MATCHABLE_STATUS, loaded
-    assert "stackexchange-150k" not in loaded, loaded
+    assert loaded.get("arxiv-150k") == "verified", loaded
+    assert loaded.get("stackexchange-150k") == "built", loaded
+    for fid, status in loaded.items():
+        assert status in A.MATCHABLE_STATUS, (fid, status)
 
-    # Excluded for its status, not because it was missed: the spec is on disk
-    # and does declare a qa analogy.
-    path = os.path.join(A.FIXTURES_DIR, "stackexchange-150k.fixture.yaml")
-    with open(path, encoding="utf-8") as f:
-        se = yaml.safe_load(f)
-    assert se["analogy"]["corpus_type"] == "qa", se["analogy"]
-    assert se["fixture"]["status"] not in A.MATCHABLE_STATUS, se["fixture"]
-
-    # And the user-facing consequence: a Q&A corpus is not sent to it.
+    # And the user-facing consequence, now that it has values: a Q&A corpus
+    # is sent to it rather than to the papers fixture.
     a, why = A.choose({"corpus_type": "qa", "text_length": "short",
                        "topics_trend": True, "time_ordered": True,
                        "dimension": 768,
                        "embedding_model": "BAAI/bge-base-en-v1.5"})
-    assert a is None or a.fixture != "stackexchange-150k", (a, why)
-    assert "stackexchange-150k" not in why, why
+    assert a is not None, why
+    assert a.fixture == "stackexchange-150k", (a.fixture, why)
+
+    # It is matched on its declared character, and the values it points at
+    # are real -- which is the whole property the status filter protects.
+    path = os.path.join(A.FIXTURES_DIR, "stackexchange-150k.fixture.yaml")
+    with open(path, encoding="utf-8") as f:
+        se = yaml.safe_load(f)
+    assert se["analogy"]["corpus_type"] == "qa", se["analogy"]
+    assert isinstance(se["characterization"]["boundary_crispness"]["value"],
+                      (int, float)), "the analogy points at a placeholder"
 
 
 def test_arxiv_150k_declares_an_analogy_real_specs():

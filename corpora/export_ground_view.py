@@ -63,6 +63,10 @@ import pyarrow.parquet as pq
 import yaml
 import zstandard as zstd
 
+sys.path.insert(0, os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")))
+from oneground.sample.fields import field_map  # noqa: E402
+
 # --------------------------------------------------------------------------
 # build_fixture.py, imported unmodified. Every estimator below comes from it.
 # --------------------------------------------------------------------------
@@ -240,7 +244,19 @@ def main():
         c_xy = sums / sizes[:, None]                     # NaN for empty regions
 
     # ---- tables ----
-    cats = [bf.primary_category(r["categories"]) for r in recs]
+    # Which record field holds the category and the date. Task 016 gave the
+    # builder a `source.field_map` and left this script behind: it read
+    # `r["update_date"]` directly, which is arXiv's name, and the first
+    # stackexchange build died here with KeyError: 'update_date' after 65
+    # minutes of pod time -- with every earlier artifact already packaged,
+    # which is the only reason that run survived at all.
+    #
+    # The *column* stays `update_year`. It is part of a published parquet
+    # schema whose digest is in arxiv-150k's MANIFEST, so renaming it would
+    # stop that fixture reproducing. What changes is where the value is read
+    # from, not what it is called.
+    fm = field_map(spec)
+    cats = [bf.primary_category(r[fm["categories"]]) for r in recs]
     base_tbl = pa.table({
         "x": pa.array(proj[:, 0], pa.float32()),
         "y": pa.array(proj[:, 1], pa.float32()),
@@ -251,7 +267,7 @@ def main():
         "copies": pa.array(copies, pa.int8()),
         "top_level_category": pa.array([top_level(c) for c in cats], pa.string()),
         "primary_category": pa.array(cats, pa.string()),
-        "update_year": pa.array([bf.year_of(r["update_date"]) for r in recs], pa.int16()),
+        "update_year": pa.array([bf.year_of(r[fm["date"]]) for r in recs], pa.int16()),
     })
     queries_tbl = pa.table({
         "x": pa.array(q_xy[:, 0], pa.float32()),

@@ -1,9 +1,12 @@
 # Report: 016-stackexchange-fixture
 
-**Status: steps 1–4 complete. Step 5 (the build) ran once and was lost** —
-killed at its cap 21 minutes from the finish, with no network volume to
-survive on. Steps 5–8 still have no artifacts; step 9 (`docs/POD.md`) is done.
-The three fixes that make the retry survivable are in (016g) and tested.
+**Status: steps 1–9 complete.**
+The canonical build landed on the second attempt (016h): the fixture is
+`status: built` with every value published from its artifacts, the findings
+are written, the ground view is exported, and the decision log is in
+`tasks/016-decision-log.txt`. Two `semantic_sharded` rows of
+`fixture verify` remain **couldn't-check** for laptop memory at 150,000
+vectors; recomputing them belongs on a CPU pod, not in a manufactured number.
 
 Two commits. `e29b622` built steps 1–4 and reported a planned fixture matching
 at 1.00. This revision, after review, makes two changes the reviewer asked for:
@@ -604,6 +607,26 @@ All on `.venv\Scripts\python.exe` (Python 3.12, pinned environment).
 | **(016g)** New cap arithmetic | 2.0 h x $0.74/hr | **$1.48** against `max_usd` 2.50 |
 | **(016g)** Verify tests | `python -m pytest -q oneground/fixture/test_verify.py` | **47 passed** |
 | **(016g)** Full suite | `python -m pytest -q` | **608 passed, 1 skipped** in 191.2 s (+12) |
+| **(016h)** Build session | 20260912-100920, pod `no7s6e94fldqmk` | RTX PRO 4500 / EU-RO-1, $0.72/hr, `volume: none`, **DONE at 1h 07m** of a 2.0 h cap, **$0.81** |
+| **(016h)** ssh-ready | session record | **0.7 s**, 1 attempt |
+| **(016h)** Streamed pass | build log 10:11:31 -> 11:01:42 | **50m 11s**, 59 shards, **~11.3 MB/s** |
+| **(016h)** Embed | build log 11:02:06 -> 11:06:31 | **4m 25s** / 152,000 texts |
+| **(016h)** Receipts tarball first existed | bracketed by the log | **11:11:03-11:11:24**, 625,297 B, before the projection |
+| **(016h)** Cross-pod determinism | A40 run vs RTX PRO 4500 run | identical per-shard counts at all 59 shards, same 20,388,803, same 199 hot categories |
+| **(016h)** Values published | `tasks/scratch/016-publish-values.py` | **23** placeholders, array digests recomputed locally and matching the pod |
+| **(016h)** Ground view, re-run locally | `corpora/export_ground_view.py` after the field-map fix | 3 tables; **4 published values reproduced** within tolerance off-pod |
+| **(016h)** `characterize` vs the builder | `oneground characterize` | all five measures agree (drift 0.483/0.452 vs 0.485/0.450) |
+| **(016h)** `simulate` | `oneground simulate` | **failed** at config 2/8, `ArrayMemoryError`; 526 MB available vs ~1.67 GiB of shard copies needed |
+| **(016i)** `fixture verify --asset` | `oneground fixture verify stackexchange-150k --asset ...` | **11 digests verified, 0 contradicted**; values **5 verified, 0 contradicted, 3 couldnt_check** |
+| **(016i)** Readers still assuming arXiv's field names | `grep` over the tree | **3 found, 3 fixed**; remaining hits are the arXiv reader and its synthetic source, which are correct |
+| **(016i)** Verify tests | `python -m pytest -q oneground/fixture/test_verify.py` | **48 passed** |
+| **(016i)** `drift` after the field-map fix | re-run of `fixture verify --asset` | **verified**: before 0.483067 vs 0.485, after 0.451868 vs 0.450, tol 0.02 |
+| **(016i)** Final verify | same | digests **11 verified, 0 contradicted**; values **6 verified, 0 contradicted, 2 couldnt_check** (both `MemoryError`) |
+| **(016j)** `characterize` at 20,000 | `oneground characterize` | 0.6 min; LID 37.46 unchanged, crispness 0.015, ambiguity 0.928, drift 0.373/0.353 |
+| **(016j)** Sweep at 20,000 | `oneground simulate` | **8 configurations in 3.6 min**, all measured |
+| **(016j)** Decision | `oneground report` | **2 meets, 6 fails**; all six failures are semantic sharding; recommended `single_node_hnsw` |
+| **(016j)** Routing vs index loss | sweep `route`/`index` columns | `index` is **0.000 on every** semantic-sharded row; the whole loss is routing |
+| **(016j)** Full suite | `python -m pytest -q` | **609 passed, 1 skipped** in 233.3 s |
 | **(016d)** Baseline note | `git log` | task 015 merged into `main` at 21:58, **after** 016c's commit at 21:44, so the 555 and 580 figures are not the same baseline — hence the collect-only delta above |
 | **(016d)** Pod tests | `python -m pytest -q oneground/pod/test_pod.py` | **155 passed, 1 skipped**, 7.7 s (+15 from this change) |
 | **(016d)** Suite runtime before the seam | same command | **hung** past 400 s — two harnesses retrying a pod at 10.0.0.1 for the full window |
@@ -1040,9 +1063,335 @@ reason. Task 013b's note on that test says it was written after a hand-written
 list let an unguarded seventh command through; it has now done its job on an
 eighth.
 
+### (016h) The build landed, and the ground is blurrier than arXiv's
+
+Session **20260912-100920**, pod `no7s6e94fldqmk`, **RTX PRO 4500 Blackwell in
+EU-RO-1** at $0.72/hr, `volume: none`, CUDA 13.0 / torch 2.14.0+cu130. `DONE`
+after **1h 07m** of a 2.0 h cap. Both tarballs fetched, pod terminated, zero
+left on the account. **Cost $0.81.**
+
+`planned_gpu` is null this time: stock had returned and it got the spec's first
+choice, so 016e's fallthrough was not exercised on this run.
+
+#### The four numbers
+
+| | |
+|---|---|
+| ssh-ready | **0.7 s**, 1 attempt |
+| streamed pass | **50m 11s**, 59 shards, ~34.06 GB, **~11.3 MB/s** |
+| embed, RTX PRO 4500 | **4m 25s** / 152,000 texts (~573/s) |
+| receipts tarball first existed | **11:11:03-11:11:24** |
+
+The last one is the point of 016g, and the log brackets it exactly:
+
+    [11:11:03] manifest written, 7 artifacts - fixture is verifiable from here
+               artifacts written to fixtures/stackexchange-150k   (59.6 min)
+               packaged after the manifest (receipts complete): 6 file(s), 625,297 bytes
+    [11:11:24] UMAP projection
+    [11:14:53] projection done in 3m 29s
+               packaged after the projection: 7 file(s), 1,687,860 bytes
+               packaged after verify: 7 file(s), 1,688,538 bytes
+
+**Within 21 seconds of the MANIFEST, and before the projection started.** Under
+the old runner the first tarball would not have existed until ~11:20.
+
+**016g's second change is visible too.** `fixture verify` returned all eight
+rows instantly:
+
+    couldnt_check boundary_crispness   the spec publishes no value for this field
+    yet, so there is nothing to reproduce. The recomputation was skipped rather
+    than run against placeholders.
+
+#### The change that earned its keep on the first run
+
+The ground-view export **failed**, and the run survived it:
+
+    File "/workspace/oneground/corpora/export_ground_view.py", line 254, in main
+        "update_year": pa.array([bf.year_of(r["update_date"]) for r in recs], ...)
+    KeyError: 'update_date'
+
+`export_ground_view.py` still hardcoded arXiv's field name -- the **same defect
+016 fixed in the builder**, in a script 016 did not touch. Under the old runner
+this would have killed the whole build at 65 minutes with nothing packaged.
+Instead it packaged what existed, warned, and reached `DONE`.
+
+Fixed the same way the builder was: `field_map(spec)` supplies the date and
+category fields. The **column** stays `update_year` -- it is part of a published
+parquet schema whose digest is in arxiv-150k's MANIFEST, so renaming it would
+stop that fixture reproducing. Only the source of the value changed.
+
+Re-run **locally** rather than on another paid pod, against the fetched
+artifacts, and it produced all three tables *and* independently reproduced four
+published values:
+
+    boundary_crispness       0.0114   spec 0.011   delta 0.0004  tol 0.02  OK
+    ambiguous_query_rate     0.9085   spec 0.908   delta 0.0005  tol 0.02  OK
+    skew_top10_share         0.0694   spec 0.069   delta 0.0004  tol 0.02  OK
+    one_region_recall@10     0.4619   drift band [0.430, 0.505]         OK
+
+A Linux/CUDA build, reproduced on a Windows laptop, within tolerance.
+
+#### Determinism across two pods
+
+The killed A40 run and this RTX PRO 4500 run produced **identical** per-shard
+eligible counts at every one of the 59 shards, the same 20,388,803 total, the
+same 150,000/2,000 split and the same 199 hot categories. Two cards, two
+regions, two dates, agreeing exactly.
+
+#### Step 5 -- published from the artifacts
+
+23 placeholders filled by `tasks/scratch/016-publish-values.py`, which reads
+`characterization.json`, `build_info.json` and `MANIFEST.sha256` and
+**recomputes** the array digests with the project's own `sha256_array`. They
+matched the pod's printed values exactly (`2b4afad4...`, `339df65a...`,
+`b23bf8d6...`).
+
+One convention had to be got right, and it is not obvious: arxiv-150k's spec
+and its MANIFEST disagree **on purpose** --
+
+    sample_sha256        == MANIFEST sample.jsonl.zst   the FILE digest
+    vectors_sha256       != MANIFEST vectors.npy        the ARRAY digest
+    queries_sha256       != MANIFEST queries.npy        the ARRAY digest
+    ground_truth_sha256  != MANIFEST ground_truth.npy   the ARRAY digest
+
+`sha256_array` hashes the array's bytes, `sha256_file` the .npy file whose
+header carries shape and dtype. Publishing the wrong one would have made
+`fixture verify` contradict its own fixture. `weights_sha256` has no artifact
+to recompute from, so it is read from the build log and **refused unless it
+matches arxiv-150k's** -- same declared model, same digest, or one spec is
+wrong about what it embedded with.
+
+#### The values, and the answer
+
+| measure | arxiv-150k | stackexchange-150k |
+|---|---|---|
+| intrinsic dimensionality | 32.55 | **37.46** |
+| boundary crispness | 0.036 | **0.011** |
+| ambiguous query rate | 0.891 | **0.908** |
+| skew top-10 share | 0.075 | 0.069 |
+| drift before to after | 0.522 to 0.549 | **0.485 to 0.450** |
+| single-node HNSW recall@10 | 0.997 | 0.994 |
+| semantic-sharded recall@10 | 0.932 | **0.869** |
+| routing ceiling | 0.932 | **0.870** |
+| storage amplification | 3.715x | **3.897x** |
+| copies p50/p95/p99 | 4/4/4 | 4/4/4 |
+
+The brief said this task must not be steered toward a corpus that makes
+semantic sharding win. It does not. **The Q&A ground is blurrier, not crisper**
+-- crispness about a third of arXiv's -- and semantic sharding loses here by
+more than it lost there: a 0.125 gap against 0.065.
+
+The copies histogram says why: `1:1,717  2:3,019  3:4,196  4:141,068`. **94.0%
+of vectors hit the 4-copy cap**, only 1.1% are stored once. That is not a
+distribution with a tail, it is a wall at the cap -- a blurry ground makes the
+epsilon=0.2 closure band admit nearly everything, so the cap decides the
+storage rather than the geometry.
+
+And the loss is **routing, not the index**: the routing ceiling is 0.870
+against a measured 0.869, so even an exact search inside the probed regions
+would not find the neighbours.
+
+**Drift is the one measure where the two corpora disagree in sign.** arXiv's
+regions get *better* after its cutoff (0.522 to 0.549); this corpus's get worse
+(0.485 to 0.450, a 7.2% relative fall). Stack Overflow's topic mix turns over --
+jQuery out, React and Kubernetes in -- and 2017 centroids do not describe the
+2020s.
+
+The realised drift split is reported rather than re-tuned: the spec predicted
+56.6% before 2017 from parquet row-group statistics, and the built sample is
+**78,969 of 150,000, 52.6%/47.4%**. Moving the cutoff after seeing that is the
+fitting this fixture exists to avoid.
+
+#### Step 6 -- `characterize` reproduced; `simulate` could not run here
+
+`oneground characterize` on the sample reproduces the fixture through the
+**product path**, which is task 007's property, now confirmed on a second
+corpus:
+
+| | fixture builder | `characterize` |
+|---|---|---|
+| intrinsic dimensionality | 37.46 | 37.46 |
+| boundary crispness | 0.011 | 0.011 |
+| ambiguous query rate | 0.908 | 0.908 |
+| skew top-10 share | 0.069 | 0.069 |
+| drift before / after | 0.485 / 0.450 | 0.483 / 0.452 |
+
+**`simulate` failed, and there is no decision log.** Config 1/8
+(`single_node_hnsw`) completed in 8m 12s; config 2/8 died:
+
+    [13:36:08] [2/8] semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]
+    numpy._core._exceptions._ArrayMemoryError: Unable to allocate 9.34 MiB
+        for an array with shape (3189, 768) and data type float32
+
+This machine had **526 MB available** with committed bytes at 28.8 GB of a
+31.3 GB limit. The semantic-sharded build must hold the 460 MB base *plus*
+3.897 x 150,000 = 584,581 vector-copies across 256 HNSW shards -- **about
+1.67 GiB of copies** before graph overhead at M=32. It does not fit, and it is
+not close.
+
+There is an irony worth recording: the property this fixture measured -- 3.897x
+amplification, worse than arXiv's 3.715x -- is exactly what makes its own sweep
+heavier than arXiv's. The corpus that most needs the sweep is the one this
+machine can least afford to run it on.
+
+Nothing was reduced to make it fit. Lowering `centroids`, narrowing the grid or
+dropping a family would each have produced a number, and none of them would
+have been the number the requirements file asks for. `simulate` writes its
+output only at the end, so config 1's measurement did not survive either.
+
+Worth noting separately: even with memory, the run would have hit its own
+guard. `simulate.budget.max_minutes` is 45 and config 1 alone took 8m 12s; six
+semantic-sharded configurations at comparable cost would have exceeded it, and
+the report would then have said which configurations were not measured.
+
+**At 150,000 vectors, step 6 does not fit on this machine.** That stands as a
+measurement of the machine, and it is why the sweep was re-run at the product's
+intended sample size -- see the next section, where it completes and produces a
+decision log.
+
+#### Step 6, completed at the product's sample size
+
+The 150k sweep did not fit in this machine (above). Re-run at
+`target_sample_size: 20000` -- the size `oneground characterize` is built to
+draw, and what a user with a 20M-row corpus actually measures. arxiv-150k's
+requirements file asks for all 150,000 because it was written to compare the
+product path against the fixture builder's own numbers, before this field meant
+what it now means; that difference is now stated in the file itself.
+
+**These are not the fixture's published values, and must not be read as them.**
+They are measured on a stratified 20,000-vector draw against the same 256
+centroids, so every region holds an eighth as many vectors and the
+routing-sensitive measures move:
+
+| measure | 150,000 (the fixture) | 20,000 (the product path) |
+|---|---|---|
+| intrinsic_dimensionality | 37.46 | 37.46 |
+| boundary_crispness | 0.011 | 0.015 |
+| ambiguous_query_rate | 0.908 | 0.928 |
+| skew_top10_share | 0.069 | 0.076 |
+| drift before / after | 0.485 / 0.450 | 0.373 / 0.353 |
+
+Intrinsic dimensionality is unmoved, which is what one wants from an estimator
+of it. The 150k reproduction that *does* compare against the fixture was run
+before this change and its receipts are preserved in
+`runs/stackexchange-150k-via-characterize-full150k`.
+
+**The sweep: 8 configurations in 3.6 minutes.**
+
+    configuration                                          r@10   ceil  route  index  ampl  fan
+    hash_sharded[M=32,efSearch=96,shards=3]               0.999  1.000  0.000  0.001  1.00    3
+    semantic_sharded[centroids=256,epsilon=0.2,probe=2]   0.802  0.802  0.198  0.000  3.87    2
+    semantic_sharded[centroids=256,epsilon=0.1,probe=2]   0.750  0.750  0.250  0.000  2.87    2
+    semantic_sharded[centroids=256,epsilon=0.2,probe=1]   0.662  0.662  0.338  0.000  3.87    1
+    semantic_sharded[centroids=256,epsilon=0.1,probe=1]   0.602  0.602  0.398  0.000  2.87    1
+    semantic_sharded[centroids=256,epsilon=0.0,probe=2]   0.528  0.528  0.472  0.000  1.00    2
+    semantic_sharded[centroids=256,epsilon=0.0,probe=1]   0.386  0.386  0.614  0.000  1.00    1
+    single_node_hnsw[M=32,efConstruction=200,efSearch=128] 0.998  1.000  0.000  0.002  1.00    1
+
+The `index` column is **0.000 for every semantic-sharded row**. The loss is
+entirely `route` -- what the routing cannot reach at all. No amount of
+`efSearch` recovers it, which is the same thing the fixture's routing ceiling
+said (0.870 against a measured 0.869) stated per-configuration.
+
+Raising epsilon buys recall by buying copies, and never enough of it: 0.0 ->
+0.1 -> 0.2 moves recall@10 from 0.386 to 0.602 to 0.662 at probe 1, and the
+storage amplification from 1.00x to 2.87x to 3.87x. Every rung fails the 0.95
+constraint, and the top two rungs also fail the 2.0x storage constraint.
+
+**The decision: 2 meets, 6 fails.** All six failures are semantic sharding.
+`hash_sharded` at 3 shards reaches 0.9994 with no amplification and no routing
+loss, because hashing does not try to be semantic -- it fans out to all three
+shards and the union is exact.
+
+`single_node_hnsw` is recommended over it, and the report says why rather than
+asserting it: the two are **indistinguishable on recall** (0.9994 vs 0.9982,
+inside the 0.01 calibration tolerance), so the tie is broken on fan-out, 1
+against 3.
+
+Also worth reading in the log: `monthly_budget` is decided with an error band
+and a declared price list -- `EUR 140 +/- 35/month; upper bound EUR 175 <= 1200`
+-- and the calibration block states plainly that no engine was verified in this
+run, so there is no engine calibration to cite. Nothing is claimed that was not
+measured.
+
+#### Step 8 -- `fixture verify --asset`, and a third reader left behind
+
+    digests  11 verified, 0 contradicted, 0 couldnt_check (6 receipt, 5 declared)
+    values    5 verified, 0 contradicted, 3 couldnt_check
+
+Every digest matched, and every value the command could reach reproduced on
+this Windows laptop against a build made on Linux/CUDA:
+
+| value | recomputed | published | delta | tolerance |
+|---|---|---|---|---|
+| intrinsic_dimensionality | 37.4635 | 37.46 | 0.0035 | 0.5 |
+| boundary_crispness | 0.0114467 | 0.011 | 0.00045 | 0.02 |
+| skew_top10_share | 0.0693533 | 0.069 | 0.00035 | 0.02 |
+| ambiguous_query_rate | 0.9085 | 0.908 | 0.0005 | 0.02 |
+| single_node_hnsw.recall_at_10 | 0.9938 | 0.994 | 0.0002 | 0.01 |
+
+The three `couldnt_check` rows have two different causes, and only one of them
+is the machine.
+
+**`drift` was a defect, not an environment.** It reported *"the sample records
+carry no `update_date` field, so there is no timeline to cut at"* -- against a
+fixture that had just measured its drift pair on the pod.
+`verify.recompute_drift` hardcoded arXiv's field name.
+
+That is the **third** reader task 016 gave the builder a field map and left
+behind:
+
+| reader | found | fixed |
+|---|---|---|
+| `oneground/fixture/build.py` | during 016 | 016, `source.field_map` |
+| `corpora/export_ground_view.py` | on the pod, mid-build (016h) | 016h |
+| `oneground/fixture/verify.py` `recompute_drift` | by `fixture verify` (016i) | 016i |
+
+Rather than fix the third and wait for a fourth, I grepped every `update_date`
+in the tree. The remaining hits are correct: `oneground/sample/arxiv.py` *is*
+the arXiv reader, `corpora/make_synthetic_source.py` generates arXiv-shaped
+synthetic records, and `oneground/sample/fields.py` is where the default is
+declared. No production reader still assumes the field name.
+
+`recompute_drift` now takes `date_field`, defaulting to `DEFAULTS["date"]` so a
+spec with no field map behaves exactly as before, and the caller passes
+`field_map(spec)["date"]`. Its failure message now also lists the fields the
+records *do* carry, so the next instance of this class names itself.
+
+**`semantic_sharded.recall_at_10` and `.storage_amplification`** are the same
+`MemoryError` that stopped `simulate` -- 4.58 MiB refused while building the
+256 shards. Environmental, and unchanged by any of this.
+
+**Two tests broke, both correctly, and both because the fixture stopped being
+unbuilt.** `test_the_planned_stackexchange_spec_is_not_matchable_real_specs`
+(016b) asserted the status filter excluded this spec -- true while it was
+`planned`, false the moment the build filled its values. That filter was never
+meant to exclude it forever, only until it had numbers behind it, so the test
+is now `test_the_built_stackexchange_spec_is_matchable_real_specs` and asserts
+the opposite: a Q&A corpus *is* sent to it, and the values it points at are
+real numbers rather than placeholders. The `planned` exclusion stays covered by
+the synthetic tests, which depend on no shipped spec staying unbuilt.
+
+**And in `test_verify.py`, a test written an hour earlier broke the same way.**
+`test_the_shipped_stackexchange_spec_is_in_the_skip_case` asserted that
+stackexchange-150k publishes nothing, which was true when it was `planned` and
+false the moment its build filled 23 values. It is repointed at
+`arxiv-smoke` -- a shipped spec that is genuinely `status: planned` and
+`TO_BE_FILLED` throughout -- and joined by
+`test_a_built_fixture_leaves_the_skip_case`, which asserts stackexchange-150k
+is now *out* of the skip case. A test that pins a transient state should fail
+when the state moves; this one did, and said so.
+
 ## Blocked on developer
 
-**(016g) Ready to retry.** The three fixes are in and tested: the receipts are
+**(016j) Everything the brief asked for is done.** One thing is deliberately
+left open, and it is a machine rather than a decision: `fixture verify`'s two
+`semantic_sharded` rows recompute the reference configuration over all 150,000
+vectors and hit `MemoryError` on this laptop. They stay **couldn't-check with
+the reason recorded**. Recomputing them needs a CPU pod -- no GPU, just a few
+GB -- and that is a later session, not a number invented here.
+
+~~**(016g) Ready to retry.**~~ The three fixes are in and tested: the receipts are
 packaged the moment they exist, `fixture verify` no longer recomputes against
 placeholders, and the cap is 2.0 h. A rerun that trips the cap now loses only
 the stages after whatever it reached, not the build.

@@ -9,17 +9,24 @@
 # paper abstracts? arxiv-150k has boundary crispness 0.036 and semantic
 # sharding loses on it. Whether that repeats here is the fixture's job to
 # report. Nothing in this spec was chosen to make it come out either way, and
-# the values below are TO_BE_FILLED precisely so that the choice of corpus,
-# rule and cutoff is fixed in writing *before* any number exists.
+# the values below were TO_BE_FILLED until the canonical build ran, precisely
+# so that the choice of corpus, rule and cutoff was fixed in writing *before*
+# any number existed.
 #
-# status: planned — no artifact has been built. Every receipt value is
-# TO_BE_FILLED and `oneground fixture verify stackexchange-150k` will report
-# couldnt_check for all of them until the canonical build runs.
+# The answer is now measured, and it is not the flattering one: this ground is
+# BLURRIER than arXiv's, not crisper. Boundary crispness is 0.011 against
+# arXiv's 0.036, 90.8% of queries are ambiguous, and semantic sharding reaches
+# recall@10 0.869 at 3.897x storage -- worse on both counts than it managed on
+# arxiv-150k. See `findings`.
+#
+# status: built - the canonical build is session 20260912-100920. Every
+# receipt value below is measured; `oneground fixture verify stackexchange-150k`
+# checks them against a local recomputation.
 
 fixture:
   id: stackexchange-150k
   version: 1
-  status: planned
+  status: built
   license_notice: >
     Stack Exchange user contributions are licensed under Creative Commons
     BY-SA. The version applies per post — CC BY-SA 2.5, 3.0 or 4.0 depending on
@@ -79,7 +86,7 @@ source:
   # sha256 over the sorted `<sha256>  <shard name>` manifest of the 59 parquet
   # shards at the pinned revision, as `oneground.receipts.manifest_digest`
   # computes it. Filled by the canonical build.
-  snapshot_sha256: TO_BE_FILLED
+  snapshot_sha256: a656730c7671294d31c50c5aacf1f0d5cde5ae4b68f86548bb90c3a856de1207
   # Per-shard sha256 values, recorded from the Hub's LFS metadata at the pinned
   # revision (an LFS pointer's oid *is* the file's sha256).
   shard_digests: sessions/stackexchange-shards.sha256
@@ -157,7 +164,7 @@ sampling:
   # actually realised on the built sample (questions only, after exclusions) is
   # published in `findings`.
   drift_cutoff: '2017-01-01'
-  sample_sha256: TO_BE_FILLED
+  sample_sha256: 2ab675cc3c20a0ff97602c26d070c24d307a97a4f69529ea37d7fd145c74ef0e
   kind: receipt
 
 queries:
@@ -169,24 +176,24 @@ queries:
     question — embedded with the same model, so queries are shorter than
     documents, as in real search.
   seed: 20260912
-  queries_sha256: TO_BE_FILLED
+  queries_sha256: 339df65a2417a2de41c051f6cf748bd968133f45a8341fb058416cd4fa79502a
   kind: receipt
 
 embedding:
   model: BAAI/bge-base-en-v1.5
-  weights_sha256: TO_BE_FILLED
+  weights_sha256: c7c1988aae201f80cf91a5dbbd5866409503b89dcaba877ca6dba7dd0a5167d7
   library: sentence-transformers
-  library_version: TO_BE_FILLED
+  library_version: 6.0.1
   max_seq_length: 512
   normalize: true
   dtype: float32
   dimension: 768
   batch_size: 128
   device: cuda
-  torch_version: TO_BE_FILLED
-  torch_cuda: TO_BE_FILLED
-  cuda_device: TO_BE_FILLED
-  vectors_sha256: TO_BE_FILLED
+  torch_version: 2.14.0+cu130
+  torch_cuda: 13.0
+  cuda_device: NVIDIA RTX PRO 4500 Blackwell
+  vectors_sha256: 2b4afad45b358eb79d7c24b8c2525534c3c8aee37abd824b1f05cda53585b531
   kind: receipt
 
 ground_truth:
@@ -194,7 +201,7 @@ ground_truth:
   k: 100
   metric: inner_product
   base_excludes_queries: true
-  ground_truth_sha256: TO_BE_FILLED
+  ground_truth_sha256: b23bf8d6c0d75e6d3540627275efa46c59e79a22d1cf2622a66aeadb91f71304
   kind: receipt
 
 # Tier 2 analogy: how a user's corpus is matched to this fixture.
@@ -212,30 +219,30 @@ analogy:
 characterization:
   intrinsic_dimensionality:
     estimator: TwoNN
-    value: TO_BE_FILLED
+    value: 37.46
     tolerance: 0.5
   boundary_crispness:
     definition: >
       Fraction of base vectors whose second-nearest centroid distance exceeds
       1.20 x their nearest centroid distance, under k-means with 256 centroids
       (seed 20260911, 20 iterations). Higher is crisper.
-    value: TO_BE_FILLED
+    value: 0.011
     tolerance: 0.02
   ambiguous_query_rate:
     definition: fraction of queries with d2 <= 1.10 * d1 against the same centroids
-    value: TO_BE_FILLED
+    value: 0.908
     tolerance: 0.02
   skew_top10_share:
     definition: share of base vectors in the 10 largest centroid regions
-    value: TO_BE_FILLED
+    value: 0.069
     tolerance: 0.02
   drift:
     definition: >
       Centroids trained on records with creation_date before 2017-01-01;
       recall@10 at one-region routing measured separately on queries whose
       source post is before / after that date. Reported as the pair.
-    value_before: TO_BE_FILLED
-    value_after: TO_BE_FILLED
+    value_before: 0.485
+    value_after: 0.45
     tolerance: 0.02
   kind: receipt
 
@@ -244,16 +251,16 @@ characterization:
 reference_results:
   single_node_hnsw:
     params: {M: 32, efConstruction: 200, efSearch: 128}
-    recall_at_10: TO_BE_FILLED
+    recall_at_10: 0.994
     tolerance: 0.01
   semantic_sharded:
     params: {centroids: 256, epsilon: 0.2, probe: 2, M: 32, efSearch: 96}
-    recall_at_10: TO_BE_FILLED
-    routing_ceiling: TO_BE_FILLED
-    storage_amplification: TO_BE_FILLED
-    p50_copies: TO_BE_FILLED
-    p95_copies: TO_BE_FILLED
-    p99_copies_per_vector: TO_BE_FILLED
+    recall_at_10: 0.869
+    routing_ceiling: 0.87
+    storage_amplification: 3.897
+    p50_copies: 4
+    p95_copies: 4
+    p99_copies_per_vector: 4
     tolerance: 0.01
   kind: receipt
 
@@ -291,8 +298,9 @@ verification:
   outcomes: [verified, contradicted, couldnt_check]
   note: >
     couldnt_check is reported when a dependency version differs from the pinned
-    one; it is never rounded up to verified. While `status: planned`, every
-    value is TO_BE_FILLED and every check is couldnt_check by construction.
+    one; it is never rounded up to verified. The large artifacts ship as a
+    release asset, so a clone without them reports couldnt_check for every
+    value that needs them -- pass `--asset` to point at an extracted copy.
 
 changelog:
   - build: 1-prep
@@ -333,5 +341,125 @@ changelog:
       progress log rather than off the artifact it belongs to is exactly what
       `kind: receipt` exists to prevent. Every value below stays TO_BE_FILLED
       and the status stays `planned`.
+  - build: 1
+    date: '2026-09-12'
+    status: built
+    note: >
+      Canonical build. Session 20260912-100920, pod no7s6e94fldqmk, RTX PRO
+      4500 Blackwell in EU-RO-1 at $0.72/hr, `volume: none`, CUDA 13.0 /
+      torch 2.14.0+cu130, Linux 6.8.0, Python 3.12.3. DONE after 1h 07m of a
+      2.0 h cap; cost $0.81.
 
-findings: []
+      One streamed pass over all 59 shards took 46m 56s-50m 11s across the two
+      attempts and found 20,388,803 eligible questions across 16 years (35.0%
+      of 58,329,355 posts). Embedding 152,000 texts took 4m 25s on the
+      RTX PRO 4500. The source was verified from the Hub's LFS metadata
+      before any content moved, and nothing was written to disk: the 34 GB of
+      shards were streamed through the per-year reservoirs.
+
+      Determinism across the two attempts is worth recording. The first
+      attempt (A40, CA-MTL-1, killed at its cap) and this one (RTX PRO 4500,
+      EU-RO-1) produced identical per-shard eligible counts at every one of
+      the 59 shards, the same 20,388,803 total, the same 150,000/2,000 split
+      and the same 199 hot categories -- two different cards in two different
+      regions, agreeing exactly.
+
+findings:
+  # Written from the numbers, after they existed. The spec's header committed
+  # in advance to reporting whichever way they fell; they fell against
+  # semantic sharding, harder than they did on arXiv.
+
+  - id: the-ground-is-blurrier-not-crisper
+    measure: boundary_crispness
+    value: 0.011
+    note: >
+      The question this fixture was built to answer. A Q&A corpus of short,
+      heavily overlapping posts does look different from paper abstracts --
+      but in the opposite direction to the one that would have helped.
+      Boundary crispness is 0.011 here against arxiv-150k's 0.036: roughly a
+      third as crisp, on the same model, the same size and the same
+      definition. Whatever separation 256 k-means regions find in Stack
+      Overflow questions, almost every vector sits about as close to its
+      second region as to its first.
+
+  - id: nearly-every-query-is-ambiguous
+    measure: ambiguous_query_rate
+    value: 0.908
+    note: >
+      90.8% of held-out queries have a second-nearest centroid within 1.10x
+      the nearest, against 89.1% on arxiv-150k. Both corpora are ambiguous by
+      this definition; this one slightly more so. A title like "How do I sort
+      a list in Python?" has no single region to belong to, and the
+      measurement agrees.
+
+  - id: copies-pile-up-at-the-cap
+    measure: semantic_sharded.copies
+    value: {p50: 4, p95: 4, p99: 4}
+    histogram: {1: 1717, 2: 3019, 3: 4196, 4: 141068}
+    note: >
+      With epsilon 0.20 and a 4-copy cap, 141,068 of 150,000 base vectors --
+      94.0% -- hit the cap, and only 1,717 (1.1%) are stored once. The
+      histogram is not a distribution with a tail; it is a wall at the cap.
+      That is what a blurry ground does to a closure band: the band admits
+      almost everything, so the cap, not the geometry, decides the storage.
+      Storage amplification is 3.897x, against 3.715x on arxiv-150k.
+
+  - id: the-two-reference-results
+    measure: reference_results
+    value:
+      single_node_hnsw.recall_at_10: 0.994
+      semantic_sharded.recall_at_10: 0.869
+      semantic_sharded.routing_ceiling: 0.87
+    note: >
+      A single HNSW index answers at recall@10 0.994. Semantic sharding at
+      256 centroids, epsilon 0.2, probe 2 reaches 0.869 -- and its routing
+      ceiling is 0.870, so the loss is not the index, it is the routing: even
+      with an exact search inside the regions it probes, the right neighbours
+      are not in them. On arxiv-150k the same two configurations gave 0.997
+      and 0.932. Semantic sharding loses on both fixtures, and it loses by
+      more here (a 0.125 gap against 0.065).
+
+  - id: drift-runs-the-other-way
+    measure: drift
+    value: {before: 0.485, after: 0.450}
+    note: >
+      Centroids trained on posts before 2017-01-01, then one-region routing
+      recall@10 measured separately on queries either side. Before 0.485
+      (n=1063), after 0.450 (n=937): the regions get *worse* for newer
+      questions, a 7.2% relative fall. arxiv-150k moves the other way, 0.522
+      before to 0.549 after. Stack Overflow's topic mix turns over -- jQuery
+      out, React and Kubernetes in -- and 2017 centroids do not describe the
+      2020s. This is the one measure where the two corpora disagree in sign,
+      and it is the one a reader should take to their own time-ordered corpus.
+
+  - id: the-drift-cutoff-as-realised
+    measure: sampling.drift_cutoff
+    value: '2017-01-01'
+    note: >
+      The spec chose 2017-01-01 in advance as the year boundary closest to a
+      60/40 split, estimated at 56.6% from the shards' parquet row-group
+      statistics. Realised on the built sample -- questions only, after the
+      exclusions -- it is 78,969 of 150,000 before the cutoff, 52.6%/47.4%.
+      Closer to even than intended, and reported rather than re-tuned: moving
+      the cutoff after seeing the split is exactly the fitting this fixture
+      exists to avoid.
+
+  - id: the-one-line-comparison
+    note: >
+      Against arxiv-150k: blurrier (crispness 0.011 vs 0.036), slightly more
+      ambiguous (0.908 vs 0.891), more expensive to shard (3.897x vs 3.715x),
+      worse under semantic sharding (0.869 vs 0.932 recall@10), and drifting
+      the opposite way (0.485->0.450 vs 0.522->0.549). Two corpora that look
+      unalike to a reader turn out to agree on the architecture question and
+      disagree about time.
+
+  - id: reproduced-off-the-pod
+    note: >
+      Four published values were recomputed on the developer's Windows laptop
+      from the fetched artifacts, against a build produced on Linux/CUDA:
+      boundary_crispness 0.0114 (published 0.011), ambiguous_query_rate 0.9085
+      (0.908), skew_top10_share 0.0694 (0.069), and one-region recall@10
+      0.4619 inside the drift band. All within tolerance. The same export on
+      the pod measured one-region recall at 0.4653; the 0.0034 difference is a
+      cross-environment k-means difference, which is why the ground-view
+      tables and the projection are `declared` rather than receipts.
