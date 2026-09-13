@@ -101,11 +101,22 @@ class Option:
             },
         }
 
-    def verdict_for(self, name):
-        for v in self.verdicts:
-            if v.constraint == name:
-                return v
-        return None
+    def verdicts_for(self, name):
+        """EVERY verdict for a constraint, because there may be several.
+
+        Task 018. This replaced `verdict_for`, which returned the *first*
+        match. With two engines a constraint has one verdict per engine, so
+        the first match is one engine's answer being handed back as the
+        configuration's -- the same shape as the `{best.outcome}` defect 017f
+        removed from `compare_engines`, and it was live in the HTML options
+        table: an option whose p95 met the budget on Qdrant and missed it on
+        pgvector rendered a single green `meets` cell, with the failing
+        engine's number nowhere on the page.
+
+        A caller that wants one outcome for the constraint wants
+        `collapse_by_constraint`, which states its rule and its precondition.
+        """
+        return [v for v in self.verdicts if v.constraint == name]
 
 
 # --------------------------------------------------------------------------

@@ -77,6 +77,30 @@ tolerances. It sat at `status: built` for four development tasks because one
 value — the drift pair — was not reachable by the verifier, and it was not
 marked verified until it was.
 
+## The second fixture, and why its claim is weaker
+
+`0.1.0` also ships `stackexchange-150k-v1.tgz`: 150,000 Stack Overflow
+questions, built to the same rules so the two read line for line. The same
+instruction works on it, with the id and the asset path changed:
+
+```
+oneground fixture verify stackexchange-150k --asset <path to the extracted folder>
+```
+
+It carries `status: built`, not `verified`, and the difference is the point.
+Its digests check and its values are measured, but two —
+`semantic_sharded.recall_at_10` and `.storage_amplification` — come back
+**couldn't-check** on the machine that published it, which runs out of memory
+recomputing the 256-shard reference over 150,000 vectors. That is recorded
+with its reason rather than dropped, and the fixture is not called `verified`
+until someone reproduces those two as well. If your machine has the memory,
+you will get a stronger result than the publisher did, and we would like to
+hear about it.
+
+The two fixtures are compared measure by measure in
+[FIXTURES.md](FIXTURES.md). They are reference points, not a leaderboard: every
+recommendation oneground makes is measured on your own corpus.
+
 ## If something goes wrong
 
 The output names the file and field behind every line, so a disagreement can

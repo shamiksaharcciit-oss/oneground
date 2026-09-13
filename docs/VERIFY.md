@@ -48,6 +48,29 @@ laptops.
 There is a test for the refusal, because it is the rule most likely to be
 quietly dropped for convenience.
 
+## The same-configuration rule
+
+> **A measurement settles a verdict only for the option whose `(family,
+> params)` match what the engine reported building.**
+
+The companion to the rule above, and the one task 011 had to add after finding
+one measurement credited to eight architectures, seven of which were never
+built in any engine. `verify` builds **one** index; a sweep simulates many. The
+row that may carry the measurement is the one the engine's own
+`index_params` — read back from the engine, not from what oneground asked for
+— says it built.
+
+Everything else is couldn't-check with the reason spelled out:
+
+> `couldnt_check: this configuration was not the one verified -- the verify`
+> `run built hnsw in a single namespace, which is not a hash_sharded`
+> `deployment. This row's architecture was simulated and never built, so a`
+> `measurement of the built index says nothing about it.`
+
+Read back from the engine, deliberately: an adapter that silently clamped a
+parameter, or a server that refused one, would otherwise have its measurement
+attributed to a configuration nobody ran.
+
 ### Why `local` usually cannot settle latency
 
 Task 009 measured this laptop against a container: the empty-collection round
@@ -226,8 +249,17 @@ favourite in the format itself.
   does in the background, so the two ingest rates are not the same quantity
   unless the index build is added — the receipt carries both halves.
 - **That either engine was tuned.** Neither is. `COPY`, unlogged tables,
-  `synchronous_commit=off`, Qdrant's gRPC path, quantization: all absent, for
-  both, deliberately. This measures two default deployments on one host.
+  `synchronous_commit=off`, quantization: all absent, for both, deliberately.
+  This measures two default deployments on one host, and `verify.json` carries
+  `runtime_settings` so a reader can see how each one *was* configured rather
+  than take "default" on trust.
+
+  One exception, and it is a transport rather than a tuning: the Qdrant
+  adapter **negotiates gRPC** and falls back to HTTP if it cannot. That is not
+  a tuned engine — the same server, the same index, the same query — but it is
+  a property of the measurement, so the transport each engine settled on is
+  recorded in `runtime_settings` and named wherever a latency row is refused
+  as unattributable. See the transport rule below.
 - **That the client is not the bottleneck.** The RTT-ratio guard is what
   answers that, per engine, per row. On this laptop it refused Qdrant's
   sequential latency and admitted pgvector's, which is not a statement about
@@ -909,11 +941,28 @@ of the engine's ceiling. See qps_max
 An **unthrottled** run (`target_qps: 0`) is a ceiling, and keeps the plain
 comparison.
 
-`qps_max` — the highest offered rate at which errors stay zero and p95 stays
-under the cap — is a different measurement needing a ramp rather than one load
-phase. It is documented in `oneground/report/verdict.py` and deliberately not
-implemented. The engine's ceiling and the rate it sustained are not the same
-number and must never share a row.
+`qps_max` — the ceiling — is a different measurement needing a ramp rather
+than one load phase, and task 017 implemented it. It is **opt-in**
+(`verify.measure_ceiling: true`), because the ramp drives the engine into
+degradation on purpose:
+
+```yaml
+verify:
+  measure_ceiling: true
+```
+
+Concurrency is ramped with the throttle removed and the ladder stops on an
+error rate over **0.5%**, or a p99 over **five times the first rung's**. The
+rung before the break is the ceiling; the rung that broke is not, even when it
+achieved more queries per second — on the 017e arXiv session Qdrant reached
+381.25 qps at concurrency 4 and 135.98-style higher throughput at 8 with a p99
+nine times the baseline, and 4 is the answer.
+
+**The ceiling is never read by the `qps` verdict.** The engine's ceiling and
+the rate it sustained are not the same number and do not share a row; the
+ceiling is its own decision-log entry carrying its own caveat — a ceiling
+under *this* load shape, on *this* host, with *this* query set — and a test
+asserts the sustain verdict cannot reach it.
 
 ## Rule: a single run does not settle a latency verdict near its threshold
 
@@ -959,6 +1008,11 @@ number's precision before acting on it.
 
 Until then, read a latency verdict whose value sits within about 15% of its
 threshold as *couldn't-check wearing a verdict's clothes*.
+
+> **This was fixed.** Everything above the line is the record as it stood on
+> 2026-09-11, kept because the finding is what motivated the rule. `runs: N`
+> and the three-way verdict, in the next section, are the fix, and they shipped
+> in task 017.
 
 ## `runs: N` — the spread, and the three-way rule
 
@@ -1022,3 +1076,54 @@ ever supported by that evidence.
 15 minutes of pod time per engine instead of 5, plus two restarts. The default
 stays 1 so nothing pays for it unintentionally; a session spec that cares about
 a near-threshold verdict sets 3.
+
+### What `runs: 3` measured on a pod
+
+*Task 017e, session `20260913-161921`, pod `1ombs4scr257a5`, RTX PRO 4000 in
+EU-RO-1. Three runs per engine, engine restarted between, arxiv-150k,
+concurrency 32, 200 qps offered, 5 minutes each.*
+
+| engine | p95 per run | spread | achieved qps |
+|---|---|---|---|
+| qdrant | 7.66 / 7.72 / 7.80 ms | **0.14 ms** | 200.0 ×3, 0 errors |
+| pgvector | 317.41 / 332.23 / 316.87 ms | **15.36 ms** | 119.1 / 116.4 / 122.6 |
+
+Both restarts answered a real probe, four gaps, both engines: qdrant
+`GET /readyz → 200`, pgvector `SELECT 1 → 1`, each reachable again in under
+0.05 s.
+
+The spread on a quiet pod is small — 1.8% for qdrant, 4.8% for pgvector —
+which is worth stating because it is the opposite of the 12% that motivated
+the rule. The 12% was **across two pods on two days**; this is within one
+session on one machine. A rule that costs 10 extra minutes a session and
+usually returns a tight spread is still doing its job: what it prevents is the
+day the spread is wide and nobody looked.
+
+## Rule: "noise" and "unanswerable" are different refusals
+
+*Task 017f.* The RTT guard refuses a latency row when the baseline round trip
+is more than 20% of the query p95. It used to call every such refusal
+**environment noise**, which reads as *a bad day — run it again somewhere
+quieter*.
+
+On `20260913-161921` it was nothing of the sort. The pod was fast enough that
+Qdrant's 4.62 ms round trip was **60%** of its 7.72 ms under-load p95. No rerun
+on that class of host would have changed it: there was not enough engine work
+per request for the engine to be the thing being measured.
+
+So the refusal splits in two, and the row says which:
+
+| the row says | when | what would answer it |
+|---|---|---|
+| **environment noise** | the run used a transport slower than the adapter's best | the faster client, named |
+| **unanswerable in this environment** | the run was already on the adapter's fastest transport | more engine work per request, an in-process measurement, or a host where the engine rather than the path is the bottleneck — **explicitly not re-running this one** |
+
+This is why the transport is recorded. `runtime_settings` carries the one each
+engine settled on, and the Qdrant adapter negotiates gRPC and **proves the
+client with a real `get_collections()` before keeping it** — `QdrantClient`
+constructs lazily and will hand back an object pointed at a closed port, which
+is the same mistake task 017c took out of the readiness probe.
+
+A refusal is still a refusal either way. Neither form is rounded up to a
+number, and the comparison the session existed to make is reported as not
+made, rather than made between a number and an absence.

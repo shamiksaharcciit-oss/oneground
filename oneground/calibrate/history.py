@@ -126,6 +126,37 @@ def decide(deviation, tolerance):
     return VERIFIED if abs(deviation) <= tolerance else CONTRADICTED
 
 
+def _portable_source(path):
+    """The source path as it would be written on any machine.
+
+    Task 018. `run_engine` passes `os.path.join(workdir, "verify.json")`, and
+    a workdir resolved from a requirements file is absolute -- so a line
+    appended by `calibrate engine` carried the developer's home directory into
+    `calibration/history.jsonl`, which is a TRACKED file. The identifier scan
+    task 017 added catches it; this stops writing it.
+
+    Relative to the repository root when the path is inside it, unchanged when
+    it is not, because a path outside the tree is a genuine fact about where
+    the artifact lived and shortening it would say something false. `~` is not
+    substituted: the point is that the line should not depend on whose machine
+    wrote it at all.
+
+    Separators are normalised to `/`. Two lines about the same file, written on
+    Windows and on Linux, must not differ in a field a reader compares by eye.
+    """
+    if not path:
+        return path
+    try:
+        root = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+        rel = os.path.relpath(os.path.abspath(path), root)
+    except (OSError, ValueError):
+        return str(path).replace("\\", "/")
+    if rel.startswith(".."):
+        return str(path).replace("\\", "/")
+    return rel.replace("\\", "/")
+
+
 def make_line(check, dataset, engine, engine_version, config, measured,
               reference, tolerance, definition, *, environment=None,
               outcome_scope=BLOCKING, source=None, note=None, extra=None):
@@ -155,7 +186,7 @@ def make_line(check, dataset, engine, engine_version, config, measured,
         "outcome_scope": outcome_scope,
     }
     if source:
-        line["source"] = source
+        line["source"] = _portable_source(source)
     if note:
         line["note"] = note
     if extra:

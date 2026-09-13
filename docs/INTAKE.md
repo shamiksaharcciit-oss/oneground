@@ -155,9 +155,21 @@ convention:
    the report says it was *not* chosen by matching. `none` disables the
    analogy entirely.
 
-At the time of writing only `arxiv-150k` declares an `analogy:` block, so a
-support-ticket corpus correctly gets **no** analogy. That is the honest
-outcome, not a gap to be papered over.
+**Only a fixture that has actually been built is matchable.** A spec's
+`status` has to be `built` or `verified`; a `planned` spec — one written in
+full before its build runs, which is how this project commits to a fixture's
+rules before it knows the answer — declares an `analogy:` block and is
+deliberately skipped until the numbers behind it exist. Matching a corpus to
+a fixture whose values are all `TO_BE_FILLED` would offer an analogy to
+nothing.
+
+Two fixtures qualify today: `arxiv-150k` (`corpus_type: papers`,
+`text_length: medium`) and `stackexchange-150k` (`corpus_type: qa`,
+`text_length: short`). Both are time-ordered with trending topics. A
+support-ticket corpus still matches neither on `corpus_type`, and so still
+correctly gets **no** analogy — that is the honest outcome, not a gap to be
+papered over, and adding fixtures until everything matches something would be
+the wrong fix.
 
 ---
 

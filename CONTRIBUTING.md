@@ -38,12 +38,19 @@ Every engine sits behind the `VectorEngine` protocol in
 adapter that special-cases itself anywhere outside its own directory will not
 be merged.
 
-**The gate: the conformance suite.** `oneground/adapters/test_conformance.py`
-runs the same battery against every registered adapter. A new adapter is
-merged when it passes unmodified — not when the suite is adjusted to
-accommodate it. If a real engine cannot satisfy a conformance test, that is a
-finding worth writing up, and the suite changes only after the finding is
-recorded and agreed.
+**The gate: the conformance suite.** `oneground/adapters/conformance.py`
+runs the same battery against every registered adapter —
+`run_conformance(name, factory, endpoint_desc)` — plus a protocol check that
+walks every adapter in the registry. A new adapter is merged when it passes
+unmodified, against a real running engine: not when the suite is adjusted to
+accommodate it, and not on a stub. If a real engine cannot satisfy a
+conformance test, that is a finding worth writing up, and the suite changes
+only after the finding is recorded and agreed.
+
+**Two engines pass it today: Qdrant and pgvector.** Milvus and Weaviate are
+the named next two, and nothing about either is written. The acceptance
+criterion for a third is a test run, not a maintainer's opinion, and that is
+deliberately what makes this the contribution unit.
 
 An adapter must also report `describe()` honestly: `engine_facts` is what the
 engine says about itself, marked `declared`, and it is never inferred from
@@ -81,6 +88,12 @@ that ranks engines or families on a fixture will be closed.
 A fixture spec declares its own tolerances. `oneground fixture verify`
 recomputes every published value from the release asset and compares each
 against *that spec's* tolerance — never one supplied at the command line.
+
+Two ship today: `arxiv-150k` (`verified`) and `stackexchange-150k` (`built`),
+compared line for line in [docs/FIXTURES.md](docs/FIXTURES.md). A spec is
+written in full, with every value `TO_BE_FILLED`, **before** its build runs,
+so the answer cannot be steered by the rules; a spec whose `status` is still
+`planned` is deliberately not matchable for Tier 2 analogies.
 
 **The gate: a fixture reaches `status: verified` only when every digest and
 every published value reproduces, in the pinned environment.** Not most of

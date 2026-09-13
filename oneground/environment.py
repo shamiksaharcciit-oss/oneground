@@ -383,7 +383,10 @@ IDENTIFIER_SCAN_ALLOWLIST = {
     "oneground/environment.py":
         "this scan; the patterns it looks for are written out here",
     "oneground/test_environment.py":
-        "the scan's own tests, which inject the patterns on purpose",
+        "the scan's own tests, which inject the patterns on purpose -- with "
+        "SYNTHETIC identifiers (task 018): a probe written with the "
+        "developer's own hostname would publish it under cover of the "
+        "allowlist, which is the allowlist doing the opposite of its job",
     "tasks/017-hardening.md":
         "the brief commissioning the scan quotes the patterns to specify it",
     "tasks/T3-hosting.report.md":

@@ -391,7 +391,7 @@ evidence problem in four lines:
     finished_because  failed-after-create
     last_error        timed out after 60s: ssh -p 40134
                         stderr: Warning: Permanently added
-                        '[213.192.2.69]:40134' (ED25519) to the list of
+                        '[<pod-ip>]:40134' (ED25519) to the list of
                         known hosts.
 
 Two things that summary does not say. **016c worked end to end** — a

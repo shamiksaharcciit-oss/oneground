@@ -27,6 +27,7 @@ import os
 import sys
 import tempfile
 
+import pytest
 import yaml
 
 sys.path.insert(0, os.path.normpath(
@@ -319,7 +320,7 @@ def test_an_unknown_date_is_couldnt_check_not_a_rejection():
     assert rep._prices_postdate_the_run(_Prices("2030-01-01"), None) is None
 
 
-def test_the_rule_agrees_with_itself_on_the_real_arxiv_report():
+def test_the_rule_agrees_with_itself_on_the_real_arxiv_report_needs_local_run():
     """Not synthetic: the rule applied to a real workdir, whichever way it
     falls.
 
@@ -334,17 +335,29 @@ def test_the_rule_agrees_with_itself_on_the_real_arxiv_report():
     and only if the price table's date is after the verify run's. Both answers
     are correct behaviour; only a disagreement between the dates and the
     verdict is a bug.
+
+    Task 018: the two bare `return`s became skips, and the name says the test
+    needs a local run. A test that quietly returns reports itself as a pass
+    having checked nothing, which is the same reassuring-answer-from-nothing
+    shape `truncated_count = null` exists to prevent one layer down. On a
+    fresh clone this is couldn't-check, and the run summary now says so.
     """
     wd = "runs/arxiv-150k-via-characterize"
-    if not os.path.exists(os.path.join(wd, "verify_info.json")):
-        return                      # no local workdir; nothing to check
+    missing = [n for n in ("verify_info.json", "report.json")
+               if not os.path.exists(os.path.join(wd, n))]
+    if missing:
+        pytest.skip(
+            "no local arxiv-150k workdir: %s has no %s. Run "
+            "`oneground report requirements.arxiv-150k.yaml` after a verify "
+            "session to produce one." % (wd, ", ".join(missing)))
     with open(os.path.join(wd, "verify_info.json"), encoding="utf-8") as f:
         info = json.load(f)
     with open(os.path.join(wd, "report.json"), encoding="utf-8") as f:
         report = json.load(f)
     table = report.get("price_table")
     if not table:
-        return                      # this report carries no price table
+        pytest.skip("%s/report.json carries no price_table, so there is no "
+                    "date for the rule to compare" % wd)
 
     as_of = str(table["as_of"])[:10]
     run_at = str(info.get("run_at") or "")[:10]

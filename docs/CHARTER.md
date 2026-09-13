@@ -1,6 +1,6 @@
 # oneground — project charter
 
-*As of 10 September 2026. Part of the oneproof suite: Prevent (onedoor),
+*As of 13 September 2026. Part of the oneproof suite: Prevent (onedoor),
 Detect (onewatch), Prove (onetrace), Choose (oneground).*
 
 ---
@@ -48,6 +48,13 @@ their data, and the tinkerer who has an idea and wants it tested.
 - Nothing labelled as capability that is only planned.
 
 ## What we are doing now
+
+**`0.1.0`, cut 13 September 2026, shipping 23 September.** Four commands that
+run end to end — characterize, simulate, verify, report — two engine adapters
+behind the `VectorEngine` protocol, two public fixtures with their receipts,
+and a calibration history every report cites. What is *not* in it is named
+here and in the README's "What is planned", with no date attached to anything
+unbuilt.
 
 **Two checkable artifacts: the arXiv-150k and stackexchange-150k fixtures.**
 
@@ -98,6 +105,14 @@ Status of the build:
 | 015 | pgvector adapter, two-engine matched verify | done |
 | 015b | two tests that were green for reasons that were not correctness | done |
 | 016 | **stackexchange-150k: the second fixture** | done |
+| 017 | hardening: baked pod image by digest, latency spread across runs, `qps_max`, truncation accounting, tracked-tree identifier scan | done |
+| 017b | the image lock's bootstrap case; one shell-quoting function; sessions vs. their requirements | done |
+| 017c | Postgres proved on the pulled image; readiness probes that actually probe | done |
+| 017d | the lock check verifies pullability and co-change, and never rebuilds | done |
+| 017e | the third matched session: spread, `qps_max`, and the comparison sentence that was lying | done |
+| 017f | transport recording, runtime settings, the setup split, and the no-lent-outcome property | done |
+| 017g | gRPC negotiated and proved against a live engine; the port stated everywhere | done |
+| 018 | **`oneground 0.1.0`**: version, docs pass, release notes, fresh-machine check, tag | cut; ships 23 Sept |
 
 Findings so far that changed the design: the pipeline is byte-deterministic
 (five of six artifacts identical across rebuilds, the sixth fixed in 001b);
@@ -162,7 +177,68 @@ pass. The git log is the project's own receipt trail.
   the tool can show a corpus where semantic sharding loses.
 - **v0.1 release**: characterize + simulate three families + verify two
   engines + report. The point at which oneground beats folklore for the
-  majority of RAG projects.
+  majority of RAG projects. **Cut** as `0.1.0` on 13 September 2026 and
+  **ships 23 September**: the wheel is built and checked, the tag exists
+  locally, and publishing — PyPI, the GitHub release, the two assets — is the
+  one step this project does not automate.
+
+### Phase 3b — More engines (v0.2 onward)
+
+The unit of contribution, and deliberately the first thing after v0.1: the
+project's credibility rests on having no favourite, and two adapters is the
+smallest number that can demonstrate that.
+
+- **Milvus** and **Weaviate** are the named next two, behind the same
+  `VectorEngine` protocol. Nothing about either is written.
+- **The conformance suite is the gate.** `oneground/adapters/conformance.py`
+  is what admits an adapter: an engine that passes it is an engine oneground
+  can verify against, and an engine that does not is not, whoever wrote it.
+  That is what makes this the natural community contribution — the acceptance
+  criterion is a test run, not a maintainer's opinion. See
+  [ADAPTERS.md](ADAPTERS.md) and [../CONTRIBUTING.md](../CONTRIBUTING.md).
+- No adapter ships with a tuned configuration supplied by its vendor. Every
+  engine is measured as deployed, and the report says how it was configured.
+
+### Phase 3c — Chunking measurement (v0.2 at the earliest)
+
+A `characterize` feature, not a separate command: chunking is the
+highest-leverage unmeasured decision in a RAG pipeline, and changing it
+changes the vector set, so nearest-neighbour ground truth does not carry
+across. The position is settled and written down in
+[CHUNKING.md](CHUNKING.md); no code implements it, and nothing appears on any
+page until it does.
+
+**The four paths, and what each may claim:**
+
+| path | ground truth | model in the loop | may carry a verdict |
+|---|---|---|---|
+| A. structural — properties of the cut itself | by construction | no | yes, on the structural property |
+| B. self-retrieval — does content stay retrievable after the cut | by construction | no | yes, on retrievability |
+| C. labelled questions | human labels over the user's corpus | no | yes, scoped to the label set |
+| D. generated questions | a model's questions | yes | **never** — an advisory row, its own colour, its own sentence |
+
+A and B ship together as v1. **Self-retrieval is an upper bound on
+retrievability, not an estimate of answer quality**, and the report says so
+every time it prints one: anchor spans are drawn from the corpus, so they
+overlap the text they retrieve. Each span has exactly one **home chunk** — of
+the chunks containing it entirely, the one in which it is most centred, ties
+to the earliest — and a hit is the home chunk in the top-k; a different
+containing chunk is counted separately, so overlap cannot raise the score by
+multiplying acceptable answers. The **over-fragmentation bias** is printed
+beside every B column rather than left for a reader to notice: self-retrieval
+is maximised by chunks too small to answer with, and the structural columns
+are what rule that out.
+
+**What the report must refuse to say**, carried here from CHUNKING.md §5:
+
+- that one chunking produces better *answers* than another — not from A, not
+  from B;
+- that a generated-question score is a measurement of the user's corpus;
+- that a structural improvement implies a retrieval improvement — A and B are
+  printed side by side precisely so a reader sees when they disagree;
+- anything at all about chunking on a corpus supplied as vectors. If the input
+  is `.npy` the cut has already happened and is out of the instrument's reach:
+  `chunking: couldn't-check — vectors were supplied, not text`.
 
 ### Phase 4 — The lab (Q1 2027)
 - The ground view and the query trace as interactive renderers over

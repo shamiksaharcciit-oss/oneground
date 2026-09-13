@@ -27,8 +27,21 @@ Python 3.12 or newer. Extras, each named for the capability it unlocks:
 | `[embed]` | handing oneground text instead of vectors |
 | `[view]` | the ground view and the fixture builder's projection |
 | `[qdrant]` | `oneground verify` against a real Qdrant |
+| `[pgvector]` | `oneground verify` against a real PostgreSQL + pgvector |
+| `[pod]` | `oneground pod`; names the capability and installs nothing |
 | `[calibrate]` | reading the ANN-Benchmarks HDF5 |
 | `[test]` | running the suite |
+
+An extra installs the **client**, never the engine. The Qdrant server and the
+PostgreSQL server are yours to run, as a container or a binary. `oneground
+verify --up` will compose the pinned container when you ask it to, and nothing
+starts if you do not.
+
+```bash
+pip install 'oneground[qdrant]'      # or 'oneground[qdrant,pgvector]'
+```
+
+The quotes are for zsh, which treats brackets as a glob.
 
 To work on oneground rather than with it:
 
@@ -100,21 +113,39 @@ a guess. Ask for drift without a timestamp column and you get
 
 ## Check your installation against a public fixture
 
-`fixtures/arxiv-150k` is 150,000 arXiv abstracts (CC0) embedded with pinned
-weights, with exact ground truth and published values. It exists so a stranger
-can confirm an installation reproduces the numbers this project publishes — it
-is not a leaderboard.
+Two public fixtures ship with the project: **arxiv-150k**, 150,000 arXiv
+abstracts (CC0), and **stackexchange-150k**, 150,000 Stack Overflow questions
+(CC BY-SA, per post). Both are embedded with pinned weights and published with
+exact ground truth and measured values. They exist so a stranger can confirm
+an installation reproduces the numbers this project publishes — they are
+**not** a leaderboard.
+
+The small fixture runs from a fresh clone with nothing downloaded:
 
 ```bash
 oneground fixture verify arxiv-smoke
 ```
 
-The picture at the top is that fixture. Almost all of it is one colour:
+The full ones need their vectors, which ship as release assets rather than in
+the repository. Extract one and point verify at the folder:
+
+```bash
+oneground fixture verify arxiv-150k --asset ./arxiv-150k
+```
+
+Each digest and each published value comes back **verified**, **contradicted**
+or **couldn't-check**, with the reason. A value that needs an artifact you
+have not downloaded is couldn't-check — never a pass, and never silence.
+The two fixtures side by side, with every measure and both reference results,
+are in [docs/FIXTURES.md](docs/FIXTURES.md).
+
+The picture at the top is arxiv-150k. Almost all of it is one colour:
 **84% of the vectors sit close enough to four different regions that they must
 be copied into all of them.** The categories separate visibly, which is why
 semantic sharding looks obviously right — and on this corpus it loses, 0.932
-recall at 3.7x storage against 0.997 at 1x for a single flat index. That
-result is why the tool exists.
+recall at 3.7x storage against 0.997 at 1x for a single flat index. On
+stackexchange-150k it loses by more: 0.869 at 3.9x. That result is why the
+tool exists.
 
 ---
 
@@ -140,52 +171,79 @@ never rounded up.
 
 ## What exists today
 
-Everything in this list is in `0.1.0-preview` and has been run end to end.
+Everything in this list is in `0.1.0` and has been run end to end.
+
+**The four commands.**
 
 - **`oneground characterize`** — the five measures on your own sample, with
   receipts. Vectors (`.npy`, `.parquet`) or text (`.jsonl`) plus a pinned
-  model. Tier 2 (`corpus.declared`) describes a corpus you have not embedded
-  yet; it produces a fixture analogy and capacity arithmetic and **never a
-  verdict**. See [docs/INTAKE.md](docs/INTAKE.md).
+  model; text longer than the model's `max_seq_length` is **counted and
+  warned about before it is embedded**, because truncation is the one intake
+  fault that leaves no trace in any number downstream. Tier 2
+  (`corpus.declared`) describes a corpus you have not embedded yet; it
+  produces a fixture analogy and capacity arithmetic and **never a verdict**.
+  See [docs/INTAKE.md](docs/INTAKE.md).
 - **`oneground simulate`** — `single_node_hnsw`, `hash_sharded` and
   `semantic_sharded` as runnable families over your sample, against exact
   k-NN, with loss decomposed into partitioning vs. index.
-- **`oneground verify`** — a real engine on the same sample. One adapter today
-  (Qdrant), locally or in a matched environment on a pod where latency under
-  load is attributable. See [docs/VERIFY.md](docs/VERIFY.md).
+- **`oneground verify`** — a real engine on the same sample. **Two adapters:
+  Qdrant and PostgreSQL + pgvector**, measured in turn on one host so the two
+  rows are comparable. Locally, or in a matched environment on a pod where
+  latency under load is attributable. `runs: N` repeats the load phase with
+  the engine restarted between runs and reports the **spread**, and the
+  latency verdict is `couldnt_check` when the runs straddle the threshold.
+  `measure_ceiling: true` adds `qps_max`, the highest rate an engine sustains
+  before latency or errors break — which is never read by the verdict about
+  the rate it was offered. See [docs/VERIFY.md](docs/VERIFY.md).
 - **`oneground report`** — the trade-off surface, three outcomes per option
   (meets / fails / couldn't-check), a decision log naming every source field,
-  and a deployable manifest.
+  and a deployable manifest. Where two engines were measured, each carries its
+  own number and its own verdict, everywhere.
+
+**And around them.**
+
 - **`oneground fixture verify`** — recompute a fixture's digests **and its
   published values** and report verified / contradicted / couldn't-check for
   each.
 - **`oneground fixture build`** — rebuild a fixture from its spec and seeds.
 - **`oneground pod`** — run a session on rented hardware, with the money
-  boundary documented in [docs/POD.md](docs/POD.md).
+  boundary documented in [docs/POD.md](docs/POD.md). Sessions run a pre-baked
+  image **pinned by digest**, never by a tag.
 - **`oneground calibrate`** — measure this installation against published
   ANN-Benchmarks values and against real engines, and keep the history. See
   [docs/VALIDATION.md](docs/VALIDATION.md).
-- **The arxiv-150k fixture**, `status: verified`: every digest and every
-  published value reproduced on a second machine and a second operating
-  system, under the same pinned versions.
+
+**Two public fixtures**, built the same way and published side by side in
+[docs/FIXTURES.md](docs/FIXTURES.md):
+
+- **arxiv-150k**, `status: verified` — 150,000 arXiv abstracts (CC0). Every
+  digest and every published value reproduced on a second machine and a second
+  operating system, under the same pinned versions.
+- **stackexchange-150k**, `status: built` — 150,000 Stack Overflow questions
+  (CC BY-SA, per post), specified in full before it was built. Two of its
+  rows are `couldnt_check` on a laptop, with the reason recorded.
+
+They disagree about time and agree about architecture, which is the finding
+this release leads with.
 
 ## What is planned
 
-Nothing below is implemented, and oneground will not pretend otherwise.
+Nothing below is implemented, and oneground will not pretend otherwise. None
+of it carries a date.
 
-- **A second engine adapter** — pgvector. The `VectorEngine` protocol and its
-  conformance suite exist and are the contribution gate; no second adapter
-  has been written. See [CONTRIBUTING.md](CONTRIBUTING.md).
-- **`qps_max`** — the highest offered rate an engine sustains before latency
-  or errors break. Today's `qps` verdict answers a different question, whether
-  the engine held the rate it *was* offered, and the two must never share a
-  row. Documented and unimplemented in `oneground/report/verdict.py`.
-- **A second corpus for the fixture analogy** — Tier 2 matches a declared
-  corpus against fixtures that publish an `analogy:` block, and only
-  arxiv-150k does. A support-ticket corpus therefore correctly gets *no*
-  analogy today.
+- **More engine adapters** — Milvus and Weaviate are the named next two. The
+  `VectorEngine` protocol and its conformance suite are the gate, and passing
+  the suite is the unit of contribution: an adapter that passes is an adapter,
+  and nothing else is. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+  [docs/ADAPTERS.md](docs/ADAPTERS.md).
+- **Chunking measurement** — how a chunking rule changes what is retrievable,
+  measured rather than asserted. The position, the four candidate ground
+  truths and the ones that are refused are written down in
+  [docs/CHUNKING.md](docs/CHUNKING.md); no code implements it.
 - **The lab** — the ground view and query traces as interactive renderers over
   the same simulator state the numbers come from.
+- **Proposals** — small, testable policy functions that turn a
+  characterization into a suggested starting configuration.
 
 The full plan, including what would make the project change course, is in
 [docs/CHARTER.md](docs/CHARTER.md).

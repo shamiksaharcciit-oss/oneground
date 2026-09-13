@@ -153,9 +153,11 @@ def decision_log(options, not_run_rows, recommended, constraints,
         if opt.outcome == vd.MEETS:
             add("meets",
                 f"{opt.config} meets every constraint that could be checked: "
-                + "; ".join(f"{v.constraint} {v.reason}"
-                            for v in opt.verdicts if v.outcome == vd.MEETS)
-                + ".",
+                + "; ".join(
+                    f"{v.constraint}{f' on {v.engine}' if v.engine else ''} "
+                    f"{v.reason}"
+                    for v in opt.verdicts if v.outcome == vd.MEETS)
+                + "." + _not_on_every_engine(opt),
                 source=f"simulate.json:rows[{opt.config}]")
 
     # indistinguishability, stated once per group rather than per pair
@@ -226,6 +228,46 @@ def decision_log(options, not_run_rows, recommended, constraints,
             "Every constraint was decidable from this workdir; nothing is "
             "outstanding.", source="(rule)")
     return lines
+
+
+def _not_on_every_engine(opt):
+    """The clause the `meets` line needs when an engine failed a constraint
+    the option is nonetheless recorded as meeting.
+
+    Task 018, and the same defect 017f took out of `compare_engines`.
+    `collapse_by_constraint` folds per-engine verdicts permissively -- a
+    constraint `meets` when *at least one* engine meets it -- and its docstring
+    states the precondition plainly: "it is only safe because the decision log
+    names the engine every time". The `meets` line did not. On the 017e shape
+    it read
+
+        ... meets every constraint that could be checked: latency_p95 7.72 ms
+        <= 40 ms; qps 200.00 >= 200.
+
+    with pgvector's 317.41 ms and 119.10 two entries above it under `fails`.
+    Both entries were true; the one a reader carries away is the flat one.
+    """
+    mixed = {}
+    for v in opt.verdicts:
+        if v.engine is None:
+            continue
+        mixed.setdefault(v.constraint, []).append(v)
+    bad = {}
+    for name, group in mixed.items():
+        if any(v.outcome == vd.MEETS for v in group):
+            others = [v for v in group if v.outcome != vd.MEETS]
+            if others:
+                bad[name] = others
+    if not bad:
+        return ""
+    bits = "; ".join(
+        f"{name} does not on "
+        + ", ".join(f"{v.engine} ({v.outcome})" for v in sorted(
+            group, key=lambda v: str(v.engine)))
+        for name, group in sorted(bad.items()))
+    return (f" This is not true of every engine measured: {bits}. `meets` for "
+            "a configuration means it meets on at least one engine measured, "
+            "not on all of them")
 
 
 def runner_up_lines(recommended, options):

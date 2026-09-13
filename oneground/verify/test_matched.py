@@ -12,8 +12,9 @@ whether a latency number may be believed:
 """
 
 import os
-import tempfile
+import re
 import sys
+import tempfile
 import time
 
 import numpy as np
@@ -1218,12 +1219,25 @@ def test_the_real_arxiv_workdir_gives_one_option_the_measurement_needs_local_run
             "measurement: %s" % (engine, sorted(set(settled) - {built})))
 
     # And it is the configuration each engine reported building.
+    #
+    # Task 018: derived from `built`, not written out again. `m == 32 and
+    # efc == 200` asserted the parameters this particular run happened to use
+    # -- the same shape as the `settled == [built]` assertion two paragraphs
+    # up, and it would have to be edited by hand the day a session verifies a
+    # different configuration, which is exactly when a test should be telling
+    # you something instead. The RULE is that the engine's reported index
+    # parameters are the ones named in the config string that carries the
+    # measurement.
+    want = dict(re.findall(r"(\w+)=(\d+)", built))
+    assert want, built
     for engine, einfo in vd.engine_info_blocks(info):
         ip = (einfo.get("engine_facts") or {}).get("index_params") or {}
         m = ip.get("m")
         efc = ip.get("ef_construct", ip.get("ef_construction"))
-        assert m == 32 and efc == 200, (engine, ip)
-        assert einfo["engine_params"]["hnsw_ef"] == 128, einfo["engine_params"]
+        assert m == int(want["M"]), (engine, "M", m, want)
+        assert efc == int(want["efConstruction"]), (engine, "efC", efc, want)
+        assert einfo["engine_params"]["hnsw_ef"] == int(want["efSearch"]), (
+            engine, einfo["engine_params"], want)
 
     # Task 015b: what this file records about its own shape must be true of
     # it. Which engines a local workdir happens to hold is not a rule -- it is

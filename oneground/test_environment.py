@@ -476,7 +476,7 @@ def test_the_scan_catches_an_injected_path_and_hostname():
             ("path: C:/Users/someuser/projects/x", "windows path, posix slashes"),
             ("cd /home/someuser/work", "linux home"),
             ("cd /Users/someuser/work", "macos home"),
-            ("environment: local:DESKTOP-HAGOPQC", "hostname"),
+            ("environment: local:DESKTOP-7QX2L4N", "hostname"),
             ("ran as someuser on the box", "bare identifier"),
     ):
         hits = env.scan_text(probe, identifiers=idents)

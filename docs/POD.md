@@ -10,9 +10,8 @@ developer pasting the twelve steps in `corpora/POD_SETUP.md` into a browser
 terminal. `oneground pod` makes a session one command driven by the build
 agent, without moving the decision about spending money.
 
-The same code becomes `verify.target: runpod` when the verification runner
-lands in Phase 3, which is why it is package code under `oneground/pod/` and
-not a script in `corpora/`.
+The same code is what `verify.target: runpod` drives — task 011 — which is why
+it is package code under `oneground/pod/` and not a script in `corpora/`.
 
 ---
 
@@ -319,16 +318,91 @@ happens to be allocated — is a plan that is over budget.
 
 `up`, after the `y`:
 
-1. `POST /pods` with the resolved plan, then poll to `RUNNING` with an SSH
-   mapping.
-2. `git bundle create --all`, `scp` it over, clone it on the pod.
-3. Build the venv at `/root/.venv` on local disk and symlink it into the repo
-   (see below), install `requirements.txt`, print the numpy/torch versions.
-4. Launch the run under `setsid nohup`, stdout to `/workspace/oneground-session.log`.
-5. Write `.oneground/sessions/<id>.json` (git-ignored) and stop.
+1. `POST /pods` with the resolved plan **and the image named by digest** (see
+   below), then poll to `RUNNING` with an SSH mapping.
+2. Wait for sshd to answer, then `git bundle create --all`, `scp` it over,
+   clone it on the pod.
+3. Upload the session's declared inputs.
+4. Run the setup script. On the pre-baked image that **symlinks**
+   `/opt/oneground-venv` rather than building a venv and running
+   `pip install`; on any other image it builds one at `/root/.venv` on local
+   disk (see below). Either way it prints which venv it got.
+5. Launch the run under `setsid nohup`, stdout to
+   `/workspace/oneground-session.log`.
+6. Write `.oneground/sessions/<id>.json` (git-ignored) and stop.
 
 Then `watch <id>` polls until the run prints `DONE` or the cap is hit, fetches
 the declared outputs, and terminates.
+
+### The image, and why it is a digest
+
+Sessions run a **pre-baked image**, built by
+[`docker/pod/Dockerfile`](../docker/pod/Dockerfile) on the same RunPod base:
+the pinned dependencies in a venv at `/opt/oneground-venv`, the Qdrant release
+binary, PostgreSQL + pgvector at the pins `run_verify_pod.sh` uses, and a
+marker at `/opt/oneground-image/BAKED` carrying the versions — so a session
+records *which* image it ran on rather than what apt happened to serve. It
+carries **no repo**: the bundle still syncs, because a session exists to run
+the commit under test. Full description in
+[POD_IMAGE.md](POD_IMAGE.md).
+
+It exists because task 015 lost six environment faults across five billed
+sessions, every one of them setup rather than work. Doing that setup once, in
+CI, costs a CI minute instead of a pod.
+
+**Referenced by digest, never by a tag.** `docker/pod/IMAGE.lock` holds the
+digest and `oneground/pod/image.py` reads it. A tag is a name that can be
+moved, and two sessions naming one can run different bytes with nothing in
+either receipt saying so. The rule worth stating on its own:
+
+> **A missing digest is never a reason to fall back to a tag.** `reference()`
+> raises, and `verify` refuses before anything is created. A session that
+> silently ran different bytes than it recorded is worse than a session that
+> did not start, and it is invisible in exactly the way the lock exists to
+> prevent.
+
+The documented escape hatch is explicit and one line — `verify.image` in the
+session's requirements — and it then appears in the receipt as something a
+person chose.
+
+### The build is not reproducible, and the lock is checked accordingly
+
+Task 017b rebuilt the same Dockerfile from the same `requirements.txt`,
+uncached, and got a different digest: `12bd6a3e` against the locked
+`81567d58`. The base resolved identically both times, so it was not the base
+moving — apt and pip do not promise byte-identical responses over time, and
+layer metadata carries timestamps regardless. **Both images are valid.**
+
+So CI does not rebuild and compare, which is a check that cannot pass in a
+steady state. It asks two different questions instead:
+
+| check | what it answers |
+|---|---|
+| **pullable** | does the registry still serve the digest the lock names? The only question whose answer changes what a session does. |
+| **co-change** | if a commit touched the image's build inputs, did the lock change in the same range? One-directional: re-locking without touching the recipe is fine, because a rebuild against an unchanged recipe produces a new and equally valid digest. |
+
+The build inputs are **derived from the Dockerfile** — the file itself plus
+every path it `COPY`s or `ADD`s from the context — rather than declared, so
+the trigger set cannot drift from what the build actually reads.
+`docker/pod/rebuild.sh` is what rebuilds, pushes, reads back the digest the
+*registry* assigned, and rewrites the lock in place.
+
+### The setup split
+
+A session record carries `phase_times`, and `pod status` prints the gaps
+between them:
+
+    RunPod provisioning: create to RUNNING
+    waiting for sshd
+    repo sync: bundle, scp, clone on the pod
+    uploading the session's declared inputs
+    setup script (venv built, or symlinked from the image)
+    starting the run
+
+It exists so "the baked image saved five minutes" is a measurement rather than
+an impression. A session recorded before task 017f has **no** split rather
+than a fabricated one: deriving a breakdown from `created_at` would be exactly
+the quoted boundary three reports declined to give.
 
 ### Why SSH, not `runpodctl`
 
@@ -356,13 +430,17 @@ carries history rather than a working-tree copy — which is also what keeps
 > not reach the pod. `up` prints a warning listing the dirty paths rather than
 > shipping something older than what the developer is looking at.
 
-### The venv is on local disk
+### The venv is on local disk — when one has to be built at all
 
-Setup builds the venv at `/root/.venv` — container disk — and symlinks it to
-`<repo>/.venv`. Populating a venv on the network volume took roughly **30
-minutes**, because `pip install` writes tens of thousands of small files and
-each one is a round trip; on local disk it is minutes. `--copies` matters, or
-the interpreter itself stays a symlink onto the mount.
+On the pre-baked image there is nothing to build: setup symlinks
+`/opt/oneground-venv`, and the `pip install` step that cost about five minutes
+of billed time per session does not run.
+
+On any other image, setup builds the venv at `/root/.venv` — container disk —
+and symlinks it to `<repo>/.venv`. Populating a venv on the network volume took
+roughly **30 minutes**, because `pip install` writes tens of thousands of small
+files and each one is a round trip; on local disk it is minutes. `--copies`
+matters, or the interpreter itself stays a symlink onto the mount.
 
 The container disk does not survive termination, so the venv is rebuilt every
 session. Nothing that must outlive the pod goes there — artifacts are written

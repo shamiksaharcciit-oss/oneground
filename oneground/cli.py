@@ -211,9 +211,13 @@ def build_parser():
         prog="oneground",
         description="Measure a retrieval architecture decision on your own "
                     "vectors, with the receipt attached.")
+    # Both strings, and only one when they coincide. `oneground 0.1.0 (0.1.0)`
+    # invites the reader to look for a difference that is not there.
     ap.add_argument("--version", action="version",
-                    version=f"oneground {__display_version__} "
-                            f"({__version__})")
+                    version=(f"oneground {__display_version__}"
+                             if __display_version__ == __version__
+                             else f"oneground {__display_version__} "
+                                  f"({__version__})"))
     sub = ap.add_subparsers(dest="command", required=True)
 
     c = sub.add_parser("characterize",

@@ -8,16 +8,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oneground"
-version = "0.1.0rc1"        # displayed as 0.1.0-preview
-description = "Measure a retrieval architecture decision on your own vectors, with the receipt attached."
+version = "0.1.0"           # __version__ and __display_version__ both
+description = "Measure a retrieval architecture decision on your own vectors against exact k-NN ground truth, verify it on Qdrant or pgvector, and keep the receipt."
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "Apache-2.0"}
 authors = [{name = "oneproof"}]
 keywords = ["vector-search", "retrieval", "benchmarking", "rag", "embeddings"]
 
-# Development Status :: 4 - Beta would overstate this. 3 - Alpha is what a
-# preview with three working commands and a charter of planned ones is.
+# Still 3 - Alpha at 0.1.0. Four commands work end to end, two engines have
+# adapters and two fixtures are published -- but the API is not stable, the
+# conformance suite has admitted exactly two engines, and most of the charter
+# is planned. 4 - Beta would claim a settled surface, and this one is not.
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -60,14 +62,21 @@ embed = ["sentence-transformers==6.0.1", "torch==2.14.0"]
 # umap-learn requires scikit-learn without pinning it; the core dependency
 # above is what fixes the version pip resolves here.
 view = ["umap-learn==0.5.12", "pyarrow==25.0.1", "matplotlib==3.11.1"]
-# `oneground verify` against a real Qdrant. The adapter talks HTTP, so this is
-# the client and nothing else; the engine itself is a container or a binary
-# the user runs.
-# `oneground verify` against a real Qdrant. The adapter imports
-# qdrant_client, and requirements.txt pins it at 1.19.0; pywin32 comes with it
-# on Windows via portalocker and carries the marker that keeps a Linux install
-# working.
+# `oneground verify` against a real Qdrant. The adapter imports qdrant_client
+# and nothing else -- the engine itself is a container or a release binary the
+# user runs, never something this package installs. requirements.txt pins the
+# client at 1.19.0; pywin32 comes with it on Windows via portalocker and
+# carries the marker that keeps a Linux install working.
 qdrant = ["qdrant-client==1.19.0", 'pywin32==312; sys_platform == "win32"']
+# `oneground verify` against a real pgvector. psycopg 3 with the binary build
+# so no libpq is needed at install time; the PostgreSQL server and the
+# `vector` extension are the user's, exactly as Qdrant is.
+#
+# This extra did not exist through the preview, while the pgvector adapter
+# shipped in task 015 and `verify`'s readiness probe has imported psycopg
+# since 017c. `pip install oneground[pgvector]` failed on a release that
+# claims two engines -- found by task 018's extras review, not by a user.
+pgvector = ["psycopg==3.3.5", "psycopg-binary==3.3.5"]
 # `oneground pod`: a RunPod session. stdlib urllib does the API calls -- see
 # oneground/pod/api.py -- so this extra exists to name the capability rather
 # than to add a dependency it does not have.

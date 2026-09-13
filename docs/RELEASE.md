@@ -1,8 +1,7 @@
 # Releasing oneground
 
-The procedure as it was actually run for `0.1.0-preview`, so v0.1 repeats it
-rather than reinventing it. Every command here was executed; nothing is
-aspirational.
+The procedure as it was actually run for `0.1.0-preview` and again for
+`0.1.0`. Every command here was executed; nothing is aspirational.
 
 **Run everything through the pinned interpreter.** On Windows that is
 `.venv\Scripts\python.exe`, explicitly — bare `python` is the system
@@ -26,14 +25,31 @@ interpreter is a release whose artifacts carry `pinned: false`.
 
 Two strings, deliberately:
 
-| where | value | for |
-| --- | --- | --- |
-| `oneground/__init__.py` `__version__` | `0.1.0rc1` | PEP 440; what pip compares and what the wheel is named |
-| `oneground/__init__.py` `__display_version__` | `0.1.0-preview` | what the release page, the teaser and `--version` say |
-| `pyproject.toml` `version` | `0.1.0rc1` | must match `__version__` |
+| where | `0.1.0-preview` | `0.1.0` | for |
+| --- | --- | --- | --- |
+| `oneground/__init__.py` `__version__` | `0.1.0rc1` | `0.1.0` | PEP 440; what pip compares and what the wheel is named |
+| `oneground/__init__.py` `__display_version__` | `0.1.0-preview` | `0.1.0` | what the release page, the teaser and `--version` say |
+| `pyproject.toml` `version` | `0.1.0rc1` | `0.1.0` | must match `__version__` |
 
 Neither is derived from the other, so neither can drift into a shape the other
-cannot read. `oneground --version` prints both.
+cannot read. For a **final** release the two coincide; the fields stay,
+because the next pre-release separates them again and a field that appears
+only when it differs is a field nobody remembers to set. `oneground --version`
+prints both when they differ and one when they do not.
+
+`oneground/test_packaging.py` checks the rest of it, and did not exist before
+0.1.0: that the pyproject version is the package's own, that every pin in
+every extra is the version `requirements.txt` names rather than one somebody
+wrote, that nothing is declared without an exact pin, and that a bare
+`pip install oneground` fixes every package `environment.PINNED` checks. The
+0.1.0-preview procedure caught the invented-pin defect by hand; this is the
+same check, run every time.
+
+**And every adapter must have an extra.** `pip install oneground[pgvector]`
+failed for three tasks after the pgvector adapter shipped, because nobody
+added the extra and nothing looked. The test walks `oneground/adapters/` and
+requires each directory to have an extra installing something that
+directory's `adapter.py` actually imports.
 
 ## 2. Build and check
 
@@ -93,6 +109,22 @@ copy %USERPROFILE%\oneground-assets\arxiv-150k-large.tgz ^
 
 Put the whole-file sha256 and all three member digests in `RELEASE_NOTES.md`.
 
+**One asset per full fixture**, so 0.1.0 has two. The second was cut from the
+loose artifacts rather than copied, with the same three members at the same
+paths inside the archive:
+
+```
+tar -czf %USERPROFILE%\oneground-assets\stackexchange-150k-v1.tgz ^
+    fixtures/stackexchange-150k/vectors.npy ^
+    fixtures/stackexchange-150k/queries.npy ^
+    fixtures/stackexchange-150k/sample.jsonl.zst
+```
+
+Then verify it the same way -- stream every member out of the finished tarball
+and compare to the fixture MANIFEST -- before the digest goes anywhere. A
+tarball digested without its members checked is a digest of whatever happened
+to be copied.
+
 ## 5. Docs pass
 
 Grep for every capability word and read each hit by hand:
@@ -111,6 +143,17 @@ does not exaggerate.
 Check `docs/CHARTER.md`'s status table against the git log.
 
 ## 6. The public branch
+
+**Only on the first release.** `main` *is* the public history from
+0.1.0-preview onward, so 0.1.0 skipped this step entirely: there is no private
+`master` left to cut from, and nothing to squash. What still applies every
+time is the leak scan, which has moved up to run against the tracked tree
+rather than against a branch about to be created -- `oneground/environment.py`
+provides it and `oneground/test_environment.py` runs it in the suite, and it
+found a live leak on `main` when task 017 added it.
+
+The rest of this section is the record of how the cut was made, kept because
+nothing else records it.
 
 ### What happens to the branches
 
@@ -236,3 +279,7 @@ misses is more persuasive than a list of steps.
 | 0.1.0-preview | 3 | `oneground characterize` raised TypeError on every invocation; broken for two commits under a green suite |
 | 0.1.0-preview | 2 | `[qdrant]` and `[calibrate]` extras pinned versions that were invented rather than read from `requirements.txt` |
 | 0.1.0-preview | 5 | the README listed four shipped commands as unimplemented |
+| 0.1.0 | 2 | **no `[pgvector]` extra existed at all.** The adapter shipped in 015 and `verify`'s readiness probe has imported psycopg since 017c; `pip install oneground[pgvector]` failed on a release claiming two engines |
+| 0.1.0 | 2 | no test in the repository read `pyproject.toml`. The preview's invented-pin defect was fixed by hand and nothing stopped it returning |
+| 0.1.0 | 5 | the README's "What is planned" listed pgvector, `qps_max` and a second corpus — all three shipped in 015, 016 and 017. Understating, exactly as the preview did, in the other direction |
+| 0.1.0 | 5 | `docs/VALIDATION.md` still quoted task 011 declining to implement `qps_max`; `docs/VERIFY.md` still listed Qdrant's gRPC path as absent; `docs/INTAKE.md` still said only arxiv-150k was matchable |

@@ -17,7 +17,7 @@ Implemented today:
 | engine | where | notes |
 |---|---|---|
 | `stub` | [`oneground/adapters/stub.py`](../oneground/adapters/stub.py) | in-process exact search; what CI runs against |
-| `qdrant` | [`oneground/adapters/qdrant/`](../oneground/adapters/qdrant/ADAPTER.md) | official client, pinned |
+| `qdrant` | [`oneground/adapters/qdrant/`](../oneground/adapters/qdrant/ADAPTER.md) | official client, pinned; negotiates gRPC and falls back to HTTP |
 | `pgvector` | [`oneground/adapters/pgvector/`](../oneground/adapters/pgvector/ADAPTER.md) | Postgres 16 + pgvector 0.8.6 via psycopg 3, pinned |
 
 ---
@@ -177,6 +177,18 @@ special case in the suite.
    building**, and **not supported**.
 5. Run the suite against a live instance and put the result in your PR. A
    stub-only pass is not a supported engine.
+6. Add a `[<engine>]` extra to `pyproject.toml` installing the client at the
+   version `requirements.txt` pins, and nothing else — never the engine
+   itself. A test asserts every adapter directory has one: task 018 found
+   `pip install oneground[pgvector]` failing on a release that claimed the
+   engine worked, three tasks after the adapter shipped.
+
+**If the adapter can reach the engine over more than one transport**, prove
+the faster one with a real call before keeping it — a client object that
+constructs lazily will happily point at a closed port — and report which one
+it settled on in `describe()`. The transport is a property of every latency
+number the run produces, and a run that silently changed transport between
+repetitions would make a spread a measurement of that instead.
 
 ### On "known quirks"
 
@@ -192,11 +204,12 @@ understood yet.
 
 - **Not for verdicts.** An adapter measures. Whether 12 ms p95 meets someone's
   budget is the report's job.
-- **Not for throughput.** `oneground verify` measures latency *shape*:
-  sequential, one client, client-side. The field is named
-  `latency_shape_single_client` so that nobody can quote it as a rate. Real
-  throughput needs concurrency and a machine that is not also running the
-  client — task 011, on a pod.
+- **Not for throughput.** An adapter's `search()` is one query at a time, and
+  the field it feeds is named `latency_shape_single_client` so that nobody can
+  quote it as a rate. Throughput needs concurrency and a machine that is not
+  also running the client; `oneground verify`'s load phase does that on a pod
+  (task 011), and the ceiling is a separate ramped measurement again
+  (`qps_max`, task 017). None of it belongs in the adapter.
 - **Not for the engine's own benchmark numbers.** Nothing an engine publishes
   about itself enters a oneground receipt except through `describe()`, where
   it is labelled declared.

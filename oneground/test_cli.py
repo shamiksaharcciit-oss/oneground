@@ -155,11 +155,22 @@ def test_the_report_stamps_the_environment_through_the_cli_synthetic():
 
 
 def test_version_prints_both_strings():
-    """PEP 440 for the resolver, the display name for the reader."""
+    """PEP 440 for the resolver, the display name for the reader.
+
+    Task 018: the two coincide at `0.1.0`, so `x in out` for both would pass
+    on a line that printed only one of them -- the assertion would be green
+    and testing nothing. The shape is checked instead: both when they differ,
+    one when they do not.
+    """
     from oneground import __display_version__, __version__
     code, out = _main(["--version"])
     assert __display_version__ in out, out
     assert __version__ in out, out
+    if __display_version__ == __version__:
+        assert out.strip() == "oneground %s" % __version__, out
+    else:
+        assert out.strip() == "oneground %s (%s)" % (__display_version__,
+                                                     __version__), out
 
 
 def test_an_unknown_command_does_not_crash():

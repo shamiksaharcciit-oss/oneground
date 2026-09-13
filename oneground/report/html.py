@@ -139,10 +139,17 @@ def _recommendation(report, recommended):
   <div class="pills">{counts}</div>
 </section>"""
 
+    # Task 018: the constraint name carries its engine. Two engines produce
+    # two `latency_p95` rows, and without the engine they read as one
+    # constraint answered twice and contradictorily -- a green dot and a red
+    # one against the same name, with nothing on the page saying which machine
+    # each belonged to.
     rows = "".join(
         f'<div class="rec-c"><span class="dot {OUTCOME_TOKEN[v.outcome]}">'
-        f'</span><span class="rec-cn">{esc(v.constraint)}</span>'
-        f'<span class="rec-cr">{esc(v.reason)}</span></div>'
+        f'</span><span class="rec-cn">{esc(v.constraint)}'
+        + (f'<span class="rec-ce">{esc(str(v.engine))}</span>' if v.engine
+           else "")
+        + f'</span><span class="rec-cr">{esc(v.reason)}</span></div>'
         for v in recommended.verdicts)
     indist = ""
     if recommended.indistinguishable_from:
@@ -163,23 +170,57 @@ def _recommendation(report, recommended):
 </section>"""
 
 
+def _label(outcome):
+    return ("couldn&#39;t-check" if outcome == vd.COULDNT_CHECK
+            else esc(outcome))
+
+
+def _verdict_cell(group):
+    """One table cell for every verdict a configuration carries on one
+    constraint -- which, with two engines, is one per engine.
+
+    Task 018. This used to render `o.verdict_for(name)`: the FIRST verdict,
+    with no engine named. On the 017e shape -- qdrant meets the p95 budget,
+    pgvector misses it by an order of magnitude -- the cell read a flat green
+    `meets` and the failing number appeared nowhere on the page. That is the
+    `{best.outcome}` defect in a table: one engine's verdict standing in for
+    the set.
+
+    The cell's own colour is the COLLAPSED outcome, the same rule that decides
+    `Option.outcome` (`meets` when at least one engine meets), so the row does
+    not contradict its own overall column. Underneath it, each engine carries
+    its own verdict, because the collapse rule is only safe when the engine is
+    named every time -- `collapse_by_constraint` says so in its docstring, and
+    this is the half that was missing.
+    """
+    collapsed = vd.collapse_by_constraint(group)[group[0].constraint]
+    title = "\n".join(
+        (f"{v.engine}: " if v.engine else "") + f"{v.reason}\nsource: {v.source}"
+        for v in group)
+    if len(group) == 1 and group[0].engine is None:
+        v = group[0]
+        return (f'<td class="v {OUTCOME_TOKEN[collapsed]}" '
+                f'title="{esc(title)}">{_label(collapsed)}'
+                f'<span class="src">{esc(v.source)}</span></td>')
+    per_engine = "".join(
+        f'<span class="by-engine {OUTCOME_TOKEN[v.outcome]}">'
+        f'{esc(str(v.engine or "unattributed"))} {_label(v.outcome)}</span>'
+        for v in group)
+    return (f'<td class="v {OUTCOME_TOKEN[collapsed]}" '
+            f'title="{esc(title)}">{_label(collapsed)}{per_engine}</td>')
+
+
 def _options_table(options, not_run_rows, constraint_names):
     head = "".join(f"<th>{esc(c)}</th>" for c in constraint_names)
     body = []
     for o in options:
         cells = []
         for name in constraint_names:
-            v = o.verdict_for(name)
-            if v is None:
+            group = o.verdicts_for(name)
+            if not group:
                 cells.append('<td class="v"><span class="muted">--</span></td>')
                 continue
-            label = ("couldn&#39;t-check" if v.outcome == vd.COULDNT_CHECK
-                     else esc(v.outcome))
-            title = f"{v.reason}\nsource: {v.source}"
-            cells.append(
-                f'<td class="v {OUTCOME_TOKEN[v.outcome]}" '
-                f'title="{esc(title)}">{label}'
-                f'<span class="src">{esc(v.source)}</span></td>')
+            cells.append(_verdict_cell(group))
         body.append(
             f'<tr><td class="cfg"><code>{esc(o.config)}</code></td>'
             f'<td class="v {OUTCOME_TOKEN[o.outcome]}">'
@@ -384,6 +425,8 @@ h2{{font-size:1.05rem;margin:3rem 0 .4rem;font-weight:600;
 .rec-c{{display:grid;grid-template-columns:12px 190px 1fr;gap:10px;
   align-items:baseline;font-size:.88rem}}
 .rec-cn{{color:var(--muted);font-family:var(--font-mono);font-size:.8rem}}
+.rec-ce{{color:var(--ochre);font-family:var(--font-mono);font-size:.72rem;
+  margin-left:.5em}}
 .dot{{width:8px;height:8px;border-radius:50%;display:inline-block;
   background:currentColor;transform:translateY(-1px)}}
 
@@ -402,6 +445,11 @@ tbody tr:hover{{background:#27334699}}
 td.v{{white-space:nowrap}}
 .src{{display:block;color:var(--muted);font-family:var(--font-mono);
   font-size:.66rem;margin-top:2px;opacity:.75}}
+/* one line per engine inside a verdict cell: the collapsed outcome above,
+   each engine's own beneath it, so a cell can never present one engine's
+   answer as the configuration's. */
+.by-engine{{display:block;font-family:var(--font-mono);font-size:.68rem;
+  margin-top:3px;opacity:.95}}
 .notrun td{{color:var(--muted)}}
 .kind{{color:var(--muted);font-size:.78rem}}
 .receipts .digest{{color:var(--muted);font-size:.72rem;word-break:break-all}}
