@@ -27,8 +27,8 @@ env:
   ONEGROUND_DURATION_MIN: '5'
   ONEGROUND_ENGINES: qdrant,pgvector
   ONEGROUND_REQUIREMENTS: requirements.arxiv-150k.pod.yaml
-  ONEGROUND_RUNS: '1'
-  ONEGROUND_MEASURE_CEILING: '0'
+  ONEGROUND_RUNS: '3'
+  ONEGROUND_MEASURE_CEILING: '1'
   ONEGROUND_CORPUS_TARBALL: /workspace/arxiv-150k-large.tgz
   ONEGROUND_CORPUS_MANIFEST: fixtures/arxiv-150k/MANIFEST.sha256
   # Task 017b. `verify.runs: N` restarts the engine between load runs so each
@@ -76,6 +76,26 @@ outputs:
   local: runs/arxiv-150k-via-characterize/
   extract: true
 caps:
-  max_hours: 1.0
+  # Task 017e raised this from 1.0. Three runs per engine instead of one adds
+  # 20 minutes of load, and the two ceiling ramps add about 7 more. Estimated
+  # from task 015's measured rates on this exact configuration:
+  #
+  #   qdrant    ingest 54.5 s (2,751/s) + index 2.5 s + searches ~30 s
+  #             + 3 x (300 s load + 15 s warmup)           =  ~17 min
+  #   pgvector  ingest 123 s (1,222/s, index synchronous) + searches ~60 s
+  #             + 3 x (300 s load + 15 s warmup)           =  ~19 min
+  #   ramps     2 x 8 rungs x (20 s + 5 s warmup)          =   ~7 min
+  #   restarts, corpus extract, setup, packaging           =   ~7 min
+  #                                                          ---------
+  #                                                            ~50 min
+  #
+  # 50 minutes against a 60-minute cap is 17% headroom, and task 016f is what
+  # that looks like when it is not enough: the cap terminated a fixture build
+  # 21 minutes from the finish and the session was lost entirely.
+  #
+  # max_usd is UNCHANGED at 2.0 and stays the money guard. At $0.72/hr the
+  # worst case here is $1.08, well inside it. This raises the runtime ceiling,
+  # not the spend ceiling.
+  max_hours: 1.5
   max_concurrent: 1
   max_usd: 2.0

@@ -70,6 +70,25 @@ verify:
     pgvector: postgresql://oneground:oneground@localhost:55432/oneground
   duration_minutes: 5
   warmup_seconds: 15
+  # Task 017e. THREE runs per engine, engine restarted between them, so the
+  # report can state a spread instead of a point.
+  #
+  # 5 minutes is kept deliberately: task 015 measured this exact configuration
+  # at 38.22 ms on one pod and 42.82 ms on another, both 5-minute runs at
+  # concurrency 32 and 200 qps offered, 12% apart with the 40 ms constraint
+  # between them. Shortening the run would make the spread cheaper to measure
+  # and incomparable with the two points it exists to put in context.
+  #
+  # These live here and not in the session spec: the session's ONEGROUND_*
+  # load variables are GENERATED from this file and only echoed on the pod --
+  # `verify` reads the real values from here. Setting them there would have
+  # looked right and changed nothing, which is how the smoke session in 017b
+  # came to ask for a spread and produce one run.
+  runs: 3
+  # The open-loop ramp. `qps` is a sustain check against an offered rate and
+  # cannot exceed it; this is the ceiling, found by removing the throttle and
+  # raising concurrency until the engine degrades.
+  measure_ceiling: true
   # One params block for both engines: `m` and the ef_construction value mean
   # the same thing in each, which is what makes the two rows comparable
   # rather than two different indexes measured side by side.
