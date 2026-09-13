@@ -197,19 +197,59 @@ def _decision_log_kinds():
     return kinds
 
 
-def _html_sections():
-    """Every module-level function `render_html` splices into the page."""
+def _html_render_paths(root="render_html"):
+    """Every function reachable from `render_html`, TRANSITIVELY.
+
+    Task 018b, and the reason is the defect 018 found. The first version of
+    this walk collected only what `render_html` calls **directly**, which is
+    the six section functions. `_verdict_cell` -- the function that carried
+    the defect -- is called by `_options_table`, not by `render_html`, so the
+    registry did not know it existed. A sibling added beside it would have
+    escaped the check the same way, which is precisely the shape this file is
+    supposed to close.
+
+    Nested definitions count too: `_ground` defines `row()` inside itself, and
+    a rendering path does not stop being one for being a closure.
+    """
     tree = _module_ast(H)
-    defined = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
-    called = set()
-    for fn in ast.walk(tree):
-        if isinstance(fn, ast.FunctionDef) and fn.name == "render_html":
-            for node in ast.walk(fn):
-                if (isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Name)
-                        and node.func.id in defined):
-                    called.add(node.func.id)
-    return called
+
+    # name -> the FunctionDef, including functions nested inside others.
+    defs = {}
+
+    def _collect(node, prefix=""):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef):
+                name = prefix + child.name
+                defs[name] = child
+                defs.setdefault(child.name, child)
+                _collect(child, prefix=name + ".")
+            else:
+                _collect(child, prefix=prefix)
+
+    _collect(tree)
+
+    def _calls(fn):
+        out = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in defs:
+                    out.add(node.func.id)
+        # A nested def is reached by being defined here, not only by being
+        # called: `_ground.row` is called through a local name.
+        for node in ast.iter_child_nodes(fn):
+            if isinstance(node, ast.FunctionDef):
+                out.add(node.name)
+        return out
+
+    seen, stack = set(), [root]
+    while stack:
+        name = stack.pop()
+        if name in seen or name not in defs:
+            continue
+        seen.add(name)
+        stack.extend(_calls(defs[name]))
+    seen.discard(root)
+    return seen
 
 
 # Surfaces this file drives. Each entry is checked against the derived sets
@@ -223,19 +263,36 @@ COVERED_LOG_KINDS = {
     # guard has something to match and a new tier-2 kind still shows up.
     "analogy", "capacity",
 }
-# Every function `render_html` splices into the page. The ones that render no
-# verdict are listed rather than filtered out, so adding a section is a
-# decision about this file rather than something that happens quietly.
-COVERED_HTML_SECTIONS = {
-    "_recommendation",      # per-constraint rows; each carries its engine
-    "_options_table",       # one cell per constraint; carries every engine
-    "_log",                 # the decision log, verbatim
-    "_ground",              # characterization numbers; no verdict
-    "_receipts",            # digests; no verdict
-    "_calibration",         # citation; no verdict
-    "_tokens_css",          # stylesheet
-    "esc",                  # escaping
+# Every rendering path reachable from `render_html`, split by whether it can
+# put a verdict on the page. The split is the point: naming a path is cheap,
+# and what stops the registry from drifting into decoration is that everything
+# in the first set must be *executed* by the property below -- proved by
+# counting calls, not by assertion.
+#
+# Task 018b widened this from the six functions `render_html` calls directly
+# to the whole transitive closure. `_verdict_cell` was not in the old set, and
+# `_verdict_cell` is where 018's defect lived.
+
+HTML_VERDICT_PATHS = {
+    "_recommendation":  "one row per verdict; each carries its engine",
+    "_options_table":   "one cell per constraint",
+    "_verdict_cell":    "the cell itself: collapsed outcome + every engine",
+    "_label":           "renders an outcome word, including couldn't-check",
+    "_log":             "the decision log, verbatim, sentences and all",
 }
+
+HTML_NO_VERDICT_PATHS = {
+    "_ground":           "characterization numbers and the projection",
+    "render_projection": "a PNG of this run's own projection, or None",
+    "_receipts":         "the input digests table",
+    "_calibration":      "the calibration citation in the footer",
+    "_tokens_css":       "the stylesheet, read from docs/design/tokens.css",
+    "esc":               "HTML escaping",
+    "_fmt":              "number formatting; takes a float, not a verdict",
+    "row":               "nested in `_ground`; one characterization row",
+}
+
+COVERED_HTML_SECTIONS = set(HTML_VERDICT_PATHS) | set(HTML_NO_VERDICT_PATHS)
 
 
 def test_the_registry_covers_every_decision_log_kind():
@@ -257,11 +314,113 @@ def test_the_registry_covers_every_decision_log_kind():
                        "%s" % sorted(stale))
 
 
-def test_the_registry_covers_every_html_section():
-    derived = _html_sections()
-    assert derived, "the AST walk found no HTML sections at all"
-    assert derived == COVERED_HTML_SECTIONS, (
-        sorted(derived ^ COVERED_HTML_SECTIONS))
+def test_the_registry_covers_every_html_rendering_path():
+    """Every function reachable from `render_html`, not only the sections.
+
+    Task 018b. The old version of this walked one level and found eight
+    functions. `_verdict_cell` was not among them -- it is called by
+    `_options_table` -- and `_verdict_cell` is where 018's defect was. A guard
+    that would not have known about the function it exists to protect is a
+    guard with a hole in the shape of the last bug.
+    """
+    derived = _html_render_paths()
+    assert derived, "the AST walk found no rendering paths at all"
+    assert len(derived) > 8, (
+        "the walk found only %d paths, which is the pre-018b one-level "
+        "result: %s" % (len(derived), sorted(derived)))
+    missing = derived - COVERED_HTML_SECTIONS
+    assert not missing, (
+        "rendering paths with no classification: %s. Put each in "
+        "HTML_VERDICT_PATHS (and make the property drive it) or in "
+        "HTML_NO_VERDICT_PATHS with a reason." % sorted(missing))
+    stale = COVERED_HTML_SECTIONS - derived
+    assert not stale, ("classified paths that no longer exist: %s"
+                       % sorted(stale))
+    overlap = set(HTML_VERDICT_PATHS) & set(HTML_NO_VERDICT_PATHS)
+    assert not overlap, ("a path cannot be both: %s" % sorted(overlap))
+    for name, why in list(HTML_VERDICT_PATHS.items()) + list(
+            HTML_NO_VERDICT_PATHS.items()):
+        assert why and len(why) > 10, (name, why)
+
+
+def test_the_property_actually_executes_every_verdict_carrying_path():
+    """Naming a path is not covering it. This counts the calls.
+
+    Task 018b, and the reason is 018's first negative control: a check written
+    against the whole rendered page *passed* with the broken cell restored,
+    because the page embeds the decision log and the log names every engine.
+    Listing `_verdict_cell` in a registry would have looked like coverage in
+    exactly the same way. So the registry's first half has to be executable,
+    and this runs `_units()` with each named function wrapped in a counter.
+    """
+    opt = _option(latency=[MEETS, FAILS], qps=[MEETS, FAILS])
+
+    # A nested function cannot be counted this way, so it cannot be claimed
+    # this way either. `_ground.row` is a closure; saying it carries verdicts
+    # would be a claim nothing in this file could check.
+    not_module_level = sorted(n for n in HTML_VERDICT_PATHS
+                              if not hasattr(H, n))
+    assert not not_module_level, (
+        "classified as verdict-carrying but not reachable as a module "
+        "attribute, so the call counter cannot prove anything about it: %s"
+        % not_module_level)
+
+    calls = {name: 0 for name in HTML_VERDICT_PATHS}
+    originals = {}
+
+    def _wrap(name):
+        real = getattr(H, name)
+        originals[name] = real
+
+        def counted(*a, **kw):
+            calls[name] += 1
+            return real(*a, **kw)
+        return counted
+
+    for name in HTML_VERDICT_PATHS:
+        setattr(H, name, _wrap(name))
+    try:
+        _units(opt)
+    finally:
+        for name, real in originals.items():
+            setattr(H, name, real)
+
+    never = sorted(n for n, c in calls.items() if c == 0)
+    assert not never, (
+        "classified as verdict-carrying but never executed by the property: "
+        "%s. Either the property does not reach it -- in which case the "
+        "coverage is a claim rather than a check -- or it belongs in "
+        "HTML_NO_VERDICT_PATHS." % never)
+
+
+def test_the_call_counter_would_notice_a_path_that_stopped_being_reached():
+    """The negative control for the test above.
+
+    A counter that is never zero for any reason proves nothing, so this checks
+    that a path removed from the property's reach is seen as unreached.
+    """
+    calls = {"_verdict_cell": 0}
+    real = H._verdict_cell
+    try:
+        # Stand in for a refactor that routes around the cell entirely.
+        H._verdict_cell = lambda group: '<td class="v"></td>'
+        _units(_option())
+        assert calls["_verdict_cell"] == 0, "the stand-in was not used"
+    finally:
+        H._verdict_cell = real
+    # And with the real one back, the property reaches it again.
+    hit = []
+    H_real = H._verdict_cell
+
+    def counted(group):
+        hit.append(1)
+        return H_real(group)
+    H._verdict_cell = counted
+    try:
+        _units(_option())
+    finally:
+        H._verdict_cell = H_real
+    assert hit, "the property no longer reaches _verdict_cell at all"
 
 
 # --------------------------------------------------------------------------

@@ -26,6 +26,18 @@ vectors and compares each against the tolerance the fixture itself publishes.
 Nothing is sent anywhere, no account is needed, and the command works offline
 once the two downloads are done.
 
+**That ten minutes assumes the machine is not paging.** The recomputation
+loads the fixture's 460 MB of vectors and builds indexes over them, so it wants
+a few spare gigabytes; on a laptop already short of RAM the same work can take
+well over an hour of wall clock for the same few minutes of CPU -- the run that
+cut `0.1.0` took 2 h 06 m for 588 seconds of CPU, about 95% of it waiting on
+page faults, with 225 MB of physical memory free. Nothing is wrong when that
+happens and the result is identical; close some things or let it run.
+
+(The peak memory the command actually needs has not been measured. On the run
+above the working set was being trimmed continuously, so what it reported was
+how little the machine would let it keep, not how much it wanted.)
+
 ---
 
 ## What a successful run prints

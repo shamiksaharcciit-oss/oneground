@@ -146,7 +146,17 @@ put them.
 **Digests come back in seconds. Values take about ten minutes** — each
 recomputes the characterization, the drift pair and both reference
 configurations over 150,000 vectors, and compares each against that fixture's
-own tolerance. On the machine that cut this release:
+own tolerance.
+
+**That ten minutes assumes the machine is not paging.** The recomputation
+loads the fixture's 460 MB of vectors and builds indexes over them, so it wants
+a few spare gigabytes; on a laptop already short of RAM the same work takes far
+longer in wall clock for the same few minutes of CPU — the run that cut this
+release took **2 h 06 m for 588 seconds of CPU**, about 95% of it waiting on
+page faults, with 225 MB of physical memory free. Nothing is wrong when that
+happens, and the answer is identical; only the clock is different.
+
+On the machine that cut this release:
 
 ```
 arxiv-150k          digests 11 verified, 0 contradicted, 0 couldnt_check

@@ -226,6 +226,219 @@ def test_every_extra_the_docs_offer_exists():
         "extra" % missing)
 
 
+# --------------------------------------------------------------------------
+# what an extra installs, and what it must not
+# --------------------------------------------------------------------------
+# Task 018b. Task 018 established that every *adapter* has an extra and that
+# every pin matches `requirements.txt`. It did not check the other direction:
+# that what an extra installs is what its capability needs. `[pgvector]` was
+# absent for three tasks; the same blind spot lets an extra keep a dependency
+# nothing imports, or acquire one that belongs to a different capability, and
+# a user pays the download either way.
+
+# Distributions an extra legitimately installs although no oneground module
+# imports them. Each needs a reason; a list without reasons is a list that
+# grows.
+NOT_IMPORTED_BY_US = {
+    "pywin32":
+        "a Windows-only transitive of qdrant-client via portalocker. Pinned "
+        "here so the version is fixed, with the marker that keeps a Linux "
+        "install resolving; nothing in this project imports it",
+    "psycopg-binary":
+        "the compiled backend psycopg loads. `import psycopg` is ours; "
+        "`psycopg_binary` is psycopg's, and installing it is what removes the "
+        "libpq build dependency",
+}
+
+
+def _distribution_modules():
+    """{normalised distribution: {top-level module}} for what is installed.
+
+    Read from the interpreter rather than from a table in this file.
+    `top_level.txt` is absent from most modern wheels -- torch, pyarrow,
+    matplotlib and qdrant-client all omit it here -- so this inverts
+    `packages_distributions()`, which is built from the installed files.
+    """
+    import importlib.metadata as md
+
+    out = {}
+    try:
+        mapping = md.packages_distributions()
+    except Exception:                                     # pragma: no cover
+        return out
+    for module, dists in mapping.items():
+        for dist in dists:
+            out.setdefault(environment._normalise(dist), set()).add(module)
+    return out
+
+
+def _imported_modules():
+    """Every top-level module name imported anywhere in the shipped tree."""
+    import ast
+    import warnings
+
+    roots = [os.path.join(ROOT, d) for d in
+             ("oneground", "adapters", "models", "policies", "corpora")]
+    names, scanned = set(), 0
+    for base in roots:
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            for fname in filenames:
+                if not fname.endswith(".py"):
+                    continue
+                try:
+                    with open(os.path.join(dirpath, fname),
+                              encoding="utf-8") as f:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            tree = ast.parse(f.read())
+                except (OSError, SyntaxError, UnicodeDecodeError):
+                    continue
+                scanned += 1
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            names.add(alias.name.split(".")[0])
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.level == 0 and node.module:
+                            names.add(node.module.split(".")[0])
+    return names, scanned
+
+
+def test_every_extra_installs_only_what_that_capability_needs():
+    """Each distribution in an extra is imported by this project, or says why.
+
+    The direction 018 did not check. An extra that installs something nothing
+    imports is a download a user pays for and never uses, and -- worse for a
+    project whose whole claim is that nothing is included by default -- it is
+    a dependency nobody can account for.
+    """
+    extras = _project().get("optional-dependencies") or {}
+    dist_modules = _distribution_modules()
+    imported, scanned = _imported_modules()
+    assert scanned > 50, "the import walk parsed only %d files" % scanned
+    assert dist_modules, "no installed distributions could be resolved"
+
+    unaccounted, unresolved = [], []
+    for extra, specs in sorted(extras.items()):
+        for dist in sorted(_pins(specs)):
+            if dist in NOT_IMPORTED_BY_US:
+                assert len(NOT_IMPORTED_BY_US[dist]) > 20, dist
+                continue
+            modules = dist_modules.get(dist)
+            if not modules:
+                # Not installed in THIS interpreter: unresolvable rather than
+                # wrong. Recorded, and the floor below keeps an empty result
+                # from passing as a clean one.
+                unresolved.append("%s[%s]" % (extra, dist))
+                continue
+            if not (modules & imported):
+                unaccounted.append(
+                    "%s: [%s] installs it and nothing in the tree imports "
+                    "%s" % (extra, dist, sorted(modules)[:4]))
+
+    assert not unaccounted, (
+        "extras installing what this project does not use: %s. Either drop "
+        "it, or add it to NOT_IMPORTED_BY_US with the reason."
+        % unaccounted)
+    # The floor: an all-clear only means something if most were checkable.
+    total = sum(len(_pins(s)) for s in extras.values())
+    assert len(unresolved) <= total // 2, (
+        "%d of %d extra dependencies could not be resolved in this "
+        "interpreter, so this check saw too little to mean anything: %s"
+        % (len(unresolved), total, unresolved))
+
+
+def test_no_extra_installs_another_extras_dependency():
+    """Capabilities do not overlap, so neither should their extras.
+
+    `pip install oneground[qdrant]` must not drag in matplotlib. A shared
+    dependency belongs in the core list where it is stated once, not
+    duplicated into two extras where the two copies can drift apart.
+    """
+    extras = _project().get("optional-dependencies") or {}
+    seen, clashes = {}, []
+    for extra, specs in sorted(extras.items()):
+        for dist in sorted(_pins(specs)):
+            if dist in seen:
+                clashes.append("%s is in both [%s] and [%s]"
+                               % (dist, seen[dist], extra))
+            seen[dist] = extra
+    assert not clashes, clashes
+
+
+def test_no_extra_repeats_a_core_dependency():
+    """An extra that re-pins a core dependency has two pins to keep in step."""
+    core = set(_pins(_project().get("dependencies") or []))
+    extras = _project().get("optional-dependencies") or {}
+    dupes = []
+    for extra, specs in sorted(extras.items()):
+        for dist in sorted(set(_pins(specs)) & core):
+            dupes.append("%s is pinned in the core list and again in [%s]"
+                         % (dist, extra))
+    assert not dupes, dupes
+
+
+def test_every_guarded_pin_is_exact_and_matches_requirements():
+    """`environment.PINNED`, spelled out rather than inferred.
+
+    Two other tests together imply this -- one says nothing is declared
+    without `==`, another says every guarded package is in the core list --
+    but the packages whose version can move a published number deserve an
+    assertion that says so in one place and fails with their names in it.
+    """
+    req = environment.read_requirements_pins(REQUIREMENTS)
+    core_specs = _project().get("dependencies") or []
+    by_name = {}
+    for spec in core_specs:
+        head = spec.split(";")[0].strip()
+        name = re.split(r"[=<>!~ \[]", head, 1)[0].strip()
+        by_name[environment._normalise(name)] = head
+
+    problems = []
+    for guarded in environment.PINNED:
+        key = environment._normalise(guarded)
+        head = by_name.get(key)
+        if head is None:
+            if key == "faiss" and "faiss-cpu" in by_name:
+                head = by_name["faiss-cpu"]
+                key = "faiss-cpu"
+            else:
+                problems.append("%s: not in the core dependency list" % guarded)
+                continue
+        if "==" not in head:
+            problems.append("%s: declared as %r, which is not an exact pin"
+                            % (guarded, head))
+            continue
+        version = head.split("==", 1)[1].strip()
+        if key in req and req[key] != version:
+            problems.append("%s: pyproject pins %s, requirements.txt pins %s"
+                            % (guarded, version, req[key]))
+    assert not problems, (
+        "the packages whose version can move a measured number are not "
+        "exactly pinned: %s" % problems)
+
+
+def test_the_extras_the_readme_lists_are_exactly_the_extras_that_exist():
+    """Both directions, because both fail quietly.
+
+    An extra in the README that pyproject lacks fails at `pip install`. An
+    extra pyproject has that the README omits is undiscoverable -- which is
+    how `[pgvector]` could be missing for three tasks without anyone noticing:
+    nobody was reading a list that named it.
+    """
+    extras = set(_project().get("optional-dependencies") or {})
+    with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
+        readme = f.read()
+    # The extras table: rows that begin `| \`[name]\` |`.
+    listed = set(re.findall(r"^\|\s*`\[([a-z0-9\-]+)\]`\s*\|", readme, re.M))
+    assert listed, "the README has no extras table any more"
+    assert listed == extras, (
+        "README extras table and pyproject disagree: only in the README %s; "
+        "only in pyproject %s"
+        % (sorted(listed - extras), sorted(extras - listed)))
+
+
 def _main():
     fns = [(n, f) for n, f in sorted(globals().items())
            if n.startswith("test_") and callable(f)]
