@@ -598,11 +598,124 @@ def test_the_qdrant_probe_fails_when_nothing_is_listening():
 
 
 def test_the_pgvector_probe_fails_when_nothing_is_listening():
-    """It must fail, and not by importing something that is absent."""
-    with pytest.raises(verify.VerifyError):
+    """The engine is not answering. Retryable: it may come up a moment later.
+
+    Split from the driver-absent case below (017c follow-up): the two look the
+    same from `pytest.raises(VerifyError)` and are different failures, and
+    running them as one test meant whichever came first hid the other.
+    """
+    with pytest.raises(verify.VerifyError) as exc:
         verify.probe_ready(
             "pgvector",
             "postgresql://nobody:nobody@127.0.0.1:1/nothing", timeout=1.0)
+    # It is NOT the unperformable kind: the driver is present, the server is
+    # not, and that distinction decides whether restart_engine keeps trying.
+    assert not isinstance(exc.value, verify.ProbeUnavailable), exc.value
+    assert "SELECT 1" in str(exc.value), str(exc.value)
+
+
+def test_a_missing_driver_is_a_verdict_not_an_ImportError():
+    """Running on an interpreter without psycopg.
+
+    The suite went red on the system interpreter with
+
+        ModuleNotFoundError: No module named 'psycopg'
+
+    which names neither the engine nor the interpreter, says nothing about
+    whether the engine is up, and is exactly the under-informative failure the
+    probe exists to remove. requirements.txt pins psycopg, so a driver missing
+    here means the command is running outside the pins -- and the interpreter
+    path is the thing that tells the reader which one they are on.
+    """
+    import builtins
+    real_import = builtins.__import__
+
+    def _no_psycopg(name, *a, **kw):
+        if name == "psycopg" or name.startswith("psycopg."):
+            raise ModuleNotFoundError("No module named 'psycopg'")
+        return real_import(name, *a, **kw)
+
+    builtins.__import__ = _no_psycopg
+    try:
+        with pytest.raises(verify.VerifyError) as exc:
+            verify.probe_ready("pgvector",
+                               "postgresql://x:y@127.0.0.1:1/z", timeout=1.0)
+    finally:
+        builtins.__import__ = real_import
+
+    msg = str(exc.value)
+    assert isinstance(exc.value, verify.ProbeUnavailable), type(exc.value)
+    assert not isinstance(exc.value, ModuleNotFoundError), msg
+    assert "pgvector" in msg, msg                      # the engine
+    assert "psycopg" in msg, msg                       # the driver
+    assert sys.executable in msg, msg                  # the interpreter
+    assert "requirements.txt" in msg, msg              # what to do about it
+    # And it must not read as a statement about the engine's health.
+    assert "reachable" not in msg, msg
+
+
+def test_a_missing_driver_stops_the_run_without_burning_the_timeout():
+    """Unperformable is not retryable.
+
+    A driver will not install itself, so retrying to the end of the restart
+    timeout arrives at the same place having spent it -- and ends on the
+    generic "did not answer a readiness probe" message rather than the exact
+    one naming the driver and the interpreter.
+    """
+    import builtins
+    import time as _time
+    real_import = builtins.__import__
+
+    def _no_psycopg(name, *a, **kw):
+        if name == "psycopg" or name.startswith("psycopg."):
+            raise ModuleNotFoundError("No module named 'psycopg'")
+        return real_import(name, *a, **kw)
+
+    builtins.__import__ = _no_psycopg
+    t0 = _time.time()
+    try:
+        with pytest.raises(verify.ProbeUnavailable) as exc:
+            _restart(_FakeEngine(), {}, "pgvector",
+                     env=sys.executable + ' -c "pass"', timeout=30.0,
+                     endpoint="postgresql://x:y@127.0.0.1:1/z")
+    finally:
+        builtins.__import__ = real_import
+    elapsed = _time.time() - t0
+    assert elapsed < 15.0, (
+        "a 30 s restart timeout was spent retrying an uninstallable driver: "
+        "%.1f s" % elapsed)
+    assert "not installed in this interpreter" in str(exc.value), exc.value
+
+
+def test_a_missing_driver_is_never_reachable_and_never_couldnt_check():
+    """The two ways this could be wrong, asserted directly.
+
+    Reachable would be a lie. couldnt_check would be worse than a lie on this
+    path: `probe_ready` returning a couldnt_check STRING is the no-probe-for-
+    this-engine case, and `restart_engine` treats that as a non-fatal note and
+    carries on -- into a measurement against an engine nothing checked.
+    """
+    import builtins
+    real_import = builtins.__import__
+
+    def _no_psycopg(name, *a, **kw):
+        if name == "psycopg" or name.startswith("psycopg."):
+            raise ModuleNotFoundError("No module named 'psycopg'")
+        return real_import(name, *a, **kw)
+
+    builtins.__import__ = _no_psycopg
+    try:
+        try:
+            got = verify.probe_ready("pgvector",
+                                     "postgresql://x:y@127.0.0.1:1/z",
+                                     timeout=1.0)
+        except verify.ProbeUnavailable:
+            got = None
+    finally:
+        builtins.__import__ = real_import
+    assert got is None, (
+        "a missing driver returned %r instead of raising; a returned string "
+        "lets the run continue" % (got,))
 
 
 def test_the_pgvector_probe_executes_select_1_not_pg_isready():

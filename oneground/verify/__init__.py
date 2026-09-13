@@ -39,6 +39,7 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import time
 
 import numpy as np
@@ -123,6 +124,21 @@ class VerifyError(RuntimeError):
     """The run cannot proceed. The message says what to do about it."""
 
 
+class ProbeUnavailable(VerifyError):
+    """The readiness probe could not be PERFORMED. Task 017c follow-up.
+
+    Distinct from "the engine did not answer", and the distinction carries its
+    weight: an engine that has not finished starting may answer a second
+    later, so that failure is worth retrying. A driver that is not installed
+    in this interpreter will not install itself, so retrying it spends the
+    whole restart timeout to arrive at the same place with a vaguer message.
+
+    A `VerifyError` subclass because the outcome is the same either way -- the
+    run stops, and an unprobeable engine is never reported as reachable. What
+    differs is how fast, and what it says while doing it.
+    """
+
+
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -190,7 +206,31 @@ def _probe_pgvector(endpoint, timeout):
     database will actually run a query -- and "accepting connections" was
     exactly the state the failed sessions needed to distinguish from "serving".
     """
-    import psycopg
+    # A missing driver is not a readiness verdict, and it must not escape as
+    # `ModuleNotFoundError: No module named 'psycopg'` -- which says nothing
+    # about the engine, names neither the engine nor the interpreter, and is
+    # the same shape of under-informative failure this whole probe exists to
+    # remove. The engine may be perfectly healthy; THIS PROCESS cannot ask it.
+    #
+    # `sys.executable` is in the message because that is the actual variable:
+    # requirements.txt pins psycopg and psycopg-binary, so a driver missing
+    # here means the command is running outside the pinned environment, and
+    # the interpreter path is what tells the reader which one they are on.
+    # This is the same failure task 013 traced to bare `python` on this
+    # machine being the system interpreter.
+    try:
+        import psycopg
+    except ImportError as e:
+        raise ProbeUnavailable(
+            "pgvector: cannot probe readiness -- the psycopg driver is not "
+            f"installed in this interpreter ({sys.executable}). "
+            "requirements.txt pins psycopg==3.3.5 and psycopg-binary, so this "
+            "process is running outside the pinned environment; use the venv "
+            "interpreter, or `pip install -r requirements.txt`. This is not a "
+            "statement about the engine: it may be serving, and this process "
+            "has no way to find out, so the run stops rather than measuring "
+            "an engine it never checked."
+        ) from e
 
     # Wrapped, so every probe fails the same way whoever calls it. Letting
     # psycopg.ConnectionTimeout out would make the probe contract "raises
@@ -322,6 +362,12 @@ def restart_engine(engine, cfg, engine_name, endpoint, log_fn=log,
                         f"{waited:.1f} s, but {answered}")
             return (f"restarted via {how}; reachable again after {waited:.1f} s "
                     f"({answered})")
+        except ProbeUnavailable:
+            # Not retryable and not survivable: the probe cannot be performed
+            # at all, so every remaining second of the timeout would produce
+            # the same answer, and the message it ends on would be the vague
+            # one about the engine rather than the exact one about the driver.
+            raise
         except Exception as e:                        # adapter- or probe-level
             last = e
             time.sleep(1.0)
