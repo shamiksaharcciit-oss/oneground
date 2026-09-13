@@ -794,3 +794,52 @@ def test_no_ceiling_measured_means_no_row():
     from oneground import report as rep
     assert rep.qps_max_lines({"engine": "qdrant", "searches": {}}) == []
     assert rep.qps_max_lines({"engine": "q", "qps_max": {"qps_max": None}}) == []
+
+
+# ------- the comparison sentence must not lend the winner's verdict (017e)
+
+def _cmp_opt(config, verdicts):
+    class _O:
+        pass
+    o = _O()
+    o.config = config
+    o.verdicts = verdicts
+    o.engines_meeting = []
+    return o
+
+
+def test_a_comparison_between_differing_verdicts_does_not_say_both_meet():
+    """The defect this shipped with.
+
+    `and both carry {best.outcome}` took the winner's verdict and asserted it
+    of every engine. Task 015's report said "both carry meets" about a pgvector
+    row that sustained 112.63 of an offered 200 -- a fail -- and 017e measured
+    119.10 and would have said it again.
+    """
+    from oneground import report as rep
+    opt = _cmp_opt("single_node_hnsw[M=32]", [
+        vd.Verdict("qps", MEETS, "r", engine="qdrant", value=200.0),
+        vd.Verdict("qps", FAILS, "r", engine="pgvector", value=119.1),
+    ])
+    lines = rep.compare_engines([opt], "pod-1")
+    text = " ".join(l["text"] for l in lines if l["kind"] == "engine_comparison")
+    assert text, lines
+    assert "both carry meets" not in text, text
+    # Each engine's number carries its own verdict.
+    assert "200.00 (meets)" in text, text
+    assert "119.10 (fails)" in text, text
+    assert "do not all carry the same verdict" in text, text
+
+
+def test_a_comparison_where_both_agree_still_says_so():
+    from oneground import report as rep
+    opt = _cmp_opt("single_node_hnsw[M=32]", [
+        vd.Verdict("latency_p95", FAILS, "r", engine="qdrant", value=42.8),
+        vd.Verdict("latency_p95", FAILS, "r", engine="pgvector", value=385.9),
+    ])
+    lines = rep.compare_engines([opt], "pod-1")
+    text = " ".join(l["text"] for l in lines if l["kind"] == "engine_comparison")
+    assert "All 2 carry fails" in text, text
+    assert "42.80 (fails)" in text and "385.90 (fails)" in text, text
+    # lower-is-better: qdrant is the better one
+    assert "qdrant is the better" in text, text

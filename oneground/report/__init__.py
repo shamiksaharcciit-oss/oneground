@@ -638,9 +638,26 @@ def compare_engines(options, env_id, verify_info=None):
             best = (min(usable, key=lambda v: float(v.value))
                     if lower_is_better
                     else max(usable, key=lambda v: float(v.value)))
+            # Each engine's OWN outcome, next to its own number.
+            #
+            # This used to end "and both carry {best.outcome} against the
+            # constraint", which takes the WINNER's verdict and asserts it of
+            # everyone. So a comparison where qdrant met the constraint and
+            # pgvector missed it read "both carry meets". It shipped in task
+            # 015's report saying that about a pgvector row which sustained
+            # 112.63 of an offered 200 -- a fail -- and would have said it
+            # again in 017e at 119.10. The ranking was right both times; the
+            # sentence describing it was wrong, and the sentence is what gets
+            # read.
             others = "; ".join(
-                f"{v.engine} {float(v.value):.2f}" for v in usable
-                if v is not best)
+                f"{v.engine} {float(v.value):.2f} ({v.outcome})"
+                for v in usable if v is not best)
+            outcomes = {v.outcome for v in usable}
+            verdicts = (
+                f"All {len(usable)} carry {best.outcome} against the "
+                "constraint." if len(outcomes) == 1 else
+                "They do not all carry the same verdict -- a better number "
+                "here is not the same as a passing one.")
             # Naming the tuning is not a courtesy. "qdrant beats pgvector"
             # read without it is a claim about the engines; what was measured
             # is a claim about two default deployments, and the gap between
@@ -652,10 +669,9 @@ def compare_engines(options, env_id, verify_info=None):
                     f"{opt.config}: on {constraint}, {best.engine} is the "
                     f"better of {len(usable)} engines measured in environment "
                     f"{env_id or 'unrecorded'} -- {best.engine} "
-                    f"{float(best.value):.2f} against {others}. Both were "
-                    f"measured on the same sample, on the same host, "
-                    f"sequentially, and both carry {best.outcome} against the "
-                    f"constraint. {tuning}"),
+                    f"{float(best.value):.2f} ({best.outcome}) against "
+                    f"{others}. Both were measured on the same sample, on the "
+                    f"same host, sequentially. {verdicts} {tuning}"),
                 "source": "verify.json:engines[*]"})
         if opt.engines_meeting:
             out.append({

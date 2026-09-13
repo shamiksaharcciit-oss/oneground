@@ -1193,13 +1193,29 @@ def test_the_real_arxiv_workdir_gives_one_option_the_measurement_needs_local_run
     # task 015's pod run made that visible: the same configuration measured
     # 38.22 ms on one pod and 42.82 ms on another, so an assertion on MEETS
     # against a 40 ms threshold was testing the machine, not the rule.
+    # Task 017e: a SUBSET of {built}, not exactly it.
+    #
+    # `== [built]` asserted that some option always carries a measurement, and
+    # that is a property of the workdir on disk rather than of the rule. On
+    # pod 1ombs4scr257a5 qdrant's latency was refused outright as environment
+    # noise -- the pod was fast enough that a 4.62 ms HTTP round trip was 60%
+    # of a 7.72 ms under-load p95 -- so NO option carried one and the test
+    # failed while the code was right.
+    #
+    # The rule is one-directional: an option that was not built must never
+    # carry a measurement. Zero options carrying one satisfies it. This is the
+    # third time a test here has asserted the state of a gitignored workdir
+    # instead of the rule (015b, then the price table in 017b); the shape to
+    # watch for is an assertion that some measurement EXISTS.
     built = "single_node_hnsw[M=32,efConstruction=200,efSearch=128]"
     for engine, block in vd.engine_blocks(data):
         einfo = dict(vd.engine_info_blocks(info)).get(engine)
         settled = [r["config"] for r in sim["rows"]
                    if vd.latency_p95(r, block, c, "runpod", einfo,
                                      engine=engine).outcome != CC]
-        assert settled == [built], (engine, settled)
+        assert set(settled) <= {built}, (
+            "%s: an architecture that was never built carried a latency "
+            "measurement: %s" % (engine, sorted(set(settled) - {built})))
 
     # And it is the configuration each engine reported building.
     for engine, einfo in vd.engine_info_blocks(info):
