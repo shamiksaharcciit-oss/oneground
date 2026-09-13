@@ -1371,3 +1371,101 @@ def test_the_smoke_session_asks_for_the_spread_and_the_ceiling():
         assert env.get("ONEGROUND_ENGINE_RESTART_COMMAND"), (
             "%s asks for repeated runs with no way to restart the engine "
             "between them" % name)
+
+
+ROOT_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+
+# ---------------------------------------------------- the pod image (017d)
+# `docker/pod/IMAGE.lock` is the single source of truth for what a session
+# pulls. When it names no digest, `_prepare_runpod` refuses rather than
+# quietly substituting the base tag: a session on the base image has no
+# Postgres, no pgvector, no Qdrant and no venv, so it presents as an
+# environment fault several minutes in -- the failure mode that cost two pods
+# in task 015. `oneground/pod/image.py` already stated this rule; this was its
+# one caller, and it was deciding implicitly.
+
+def _image_cfg(**over):
+    cfg = {"target": "runpod", "engines": ["qdrant"],
+           "pod_endpoints": {"qdrant": "http://127.0.0.1:6333"}}
+    cfg.update(over)
+    return cfg
+
+
+def _resolve_image(monkeypatch, cfg, baked, ref=None):
+    """Drive just the image-resolution branch of `_prepare_runpod`."""
+    from oneground import verify as V
+    from oneground.pod import image as podimage
+
+    monkeypatch.setattr(podimage, "is_baked", lambda *a, **k: baked)
+    if ref is not None:
+        monkeypatch.setattr(podimage, "reference", lambda *a, **k: ref)
+
+    seen = {}
+
+    def fake_write_session(req, workdir, cfg_, engines, image, **kw):
+        seen["image"] = image
+        raise _Stop()
+
+    monkeypatch.setattr(V.runpod_target, "write_session", fake_write_session)
+    lines = []
+    try:
+        V._prepare_runpod({}, cfg, ".", "requirements.yaml", lines.append)
+    except _Stop:
+        pass
+    return seen.get("image"), "\n".join(lines)
+
+
+class _Stop(Exception):
+    """Stop `_prepare_runpod` once the image has been chosen."""
+
+
+def test_a_locked_digest_is_what_the_session_runs_synthetic(monkeypatch):
+    from oneground import verify as V
+    ref = "ghcr.io/owner/oneground-pod@sha256:" + "c" * 64
+    image, log = _resolve_image(monkeypatch, _image_cfg(), baked=True, ref=ref)
+    assert image == ref, image
+    assert "pinned by digest" in log, log
+
+
+def test_no_digest_refuses_rather_than_falling_back_synthetic(monkeypatch):
+    """The whole point of 017d item 6."""
+    from oneground import verify as V
+    try:
+        _resolve_image(monkeypatch, _image_cfg(), baked=False)
+    except V.VerifyError as e:
+        msg = str(e)
+        assert "IMAGE.lock" in msg, msg
+        assert "rebuild.sh" in msg, msg
+        # It must name the explicit opt-in rather than just refusing.
+        assert "verify:" in msg and V.POD_IMAGE in msg, msg
+        return
+    raise AssertionError("an unlocked image silently fell back to the base tag")
+
+
+def test_the_base_tag_still_runs_when_someone_names_it_synthetic(monkeypatch):
+    """The fallback is not removed, only made explicit -- and it then appears
+    in the receipt as something a person chose."""
+    from oneground import verify as V
+    image, log = _resolve_image(
+        monkeypatch, _image_cfg(image=V.POD_IMAGE), baked=False)
+    assert image == V.POD_IMAGE, image
+    assert "named in verify.image" in log, log
+
+
+def test_an_explicit_image_wins_over_the_lock_synthetic(monkeypatch):
+    from oneground import verify as V
+    ref = "ghcr.io/owner/oneground-pod@sha256:" + "d" * 64
+    image, log = _resolve_image(
+        monkeypatch, _image_cfg(image="my/own:tag"), baked=True, ref=ref)
+    assert image == "my/own:tag", image
+
+
+def test_pod_image_is_still_the_documented_base_tag():
+    """It is the fallback a user names explicitly, so it has to stay a real
+    reference and stay the one the docs and the lock both cite."""
+    from oneground import verify as V
+    from oneground.pod import image as podimage
+    assert V.POD_IMAGE.startswith("runpod/pytorch:")
+    assert podimage.fallback(ROOT_DIR) == V.POD_IMAGE

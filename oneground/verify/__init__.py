@@ -725,10 +725,22 @@ def _prepare_runpod(req, cfg, workdir, requirements_path, log_fn):
             f"{', '.join(missing_endpoints)}. Set verify.pod_endpoints so the "
             "pod-side run knows where to reach each engine.")
     # Task 017: prefer the pre-baked image, by digest, when the lock has one.
-    # An explicit `verify.image` still wins -- someone naming an image means
-    # it. When the lock has no digest the session runs the documented fallback
-    # and the log says which, because "which image did this run on" is a
-    # question the receipt has to answer without the reader guessing.
+    # An explicit `verify.image` still wins -- someone naming an image means it.
+    #
+    # Task 017d: when the lock has NO digest this refuses rather than falling
+    # back to POD_IMAGE on its own. `oneground/pod/image.py` already says the
+    # rule -- "a missing digest is never a reason to fall back to a tag...
+    # reference() raises instead, and the caller decides whether to use the
+    # documented fallback base image explicitly" -- and this was its one
+    # caller, deciding implicitly. A session on the base tag has no Postgres,
+    # no pgvector, no Qdrant and no venv; it presents as an environment fault
+    # a few minutes in, which is the failure mode that cost two pods in task
+    # 015. A log line in a pod session's output is easy to miss; a refusal
+    # before anything is created is not.
+    #
+    # The fallback is not removed, only made explicit: naming it in
+    # `verify.image` is one line, and it then appears in the receipt as
+    # something a person chose.
     from ..pod import image as podimage
     if cfg.get("image"):
         image = str(cfg["image"])
@@ -737,10 +749,27 @@ def _prepare_runpod(req, cfg, workdir, requirements_path, log_fn):
         image = podimage.reference()
         log_fn(f"pod image: {image} (pre-baked, pinned by digest)")
     else:
-        image = POD_IMAGE
-        log_fn(f"pod image: {image} -- the pre-baked image has no digest in "
-               "docker/pod/IMAGE.lock yet, so this session installs Postgres, "
-               "pgvector, Qdrant and the venv at run time")
+        raise VerifyError(
+            "docker/pod/IMAGE.lock names no digest, so there is no pre-baked "
+            "pod image to run.\n"
+            "  The digest in that lock is the single source of truth for what "
+            "a pod session pulls.\n"
+            "\n"
+            "  Either build and lock one:\n"
+            "      bash docker/pod/rebuild.sh\n"
+            "\n"
+            "  or say explicitly that this run should use the base image and "
+            "install\n"
+            "  Postgres, pgvector, Qdrant and the venv at run time, as every "
+            "session\n"
+            "  through task 016 did:\n"
+            f"      verify:\n        image: {POD_IMAGE}\n"
+            "\n"
+            "  This does not choose the base image for you. A session that "
+            "quietly ran\n"
+            "  without the baked engines would look like an environment "
+            "fault, and that\n"
+            "  is the failure mode the pre-baked image exists to remove.")
     path = runpod_target.write_session(req, workdir, cfg, engines, image,
                                        path=cfg.get("session_path"),
                                        log_fn=log_fn)
