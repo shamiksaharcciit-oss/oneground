@@ -746,3 +746,162 @@ def test_every_registered_engine_has_a_probe():
             continue
         assert name in verify.PROBES, (
             "%s has no readiness probe; its restarts would go unchecked" % name)
+
+
+# ---- every run records each engine's settings, or says why not (017f)
+# Task 015 added runtime_settings and 017e's report then said "how qdrant,
+# pgvector was configured is not recorded in this run" about a run whose
+# verify_info.json carried the full settings for both engines. The data was
+# there; the reader looked for a key only a one-off backfill script wrote.
+# Nothing asserted the data was there, so nothing caught it.
+
+def test_a_verify_run_records_runtime_settings_for_every_engine_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        req = _prepared(tmp)
+        wd, _ = _capture(verify.run, req, log_fn=_quiet)
+        info = json.load(open(os.path.join(wd, "verify_info.json"),
+                              encoding="utf-8"))
+        assert info["engines"], info
+        for block in info["engines"]:
+            facts = block.get("engine_facts") or {}
+            assert "runtime_settings" in facts, (
+                "%s recorded no runtime_settings at all" % block.get("engine"))
+            rs = facts["runtime_settings"]
+            assert isinstance(rs, dict), rs
+            # Either real settings, or an explicit statement that there are
+            # none. An empty dict is neither, and is exactly the ambiguity
+            # that let a reader report "not recorded" about a run that had
+            # them.
+            assert rs, (
+                "%s left runtime_settings empty: an empty block cannot be "
+                "told apart from one nobody filled in" % block.get("engine"))
+            if "couldnt_check" in rs:
+                assert len(str(rs["couldnt_check"])) > 20, rs
+
+
+def test_the_report_reads_the_settings_a_run_actually_records_synthetic():
+    """The two halves joined up.
+
+    Asserting the writer alone is what allowed this: `verify` wrote the
+    settings, the report looked for a different key, and each side was fine on
+    its own.
+    """
+    from oneground import report as rep
+    with tempfile.TemporaryDirectory() as tmp:
+        req = _prepared(tmp)
+        wd, _ = _capture(verify.run, req, log_fn=_quiet)
+        info = json.load(open(os.path.join(wd, "verify_info.json"),
+                              encoding="utf-8"))
+        engines = [b["engine"] for b in info["engines"]]
+        note = rep._tuning_note(info, engines)
+        assert note, "the report produced no configuration sentence at all"
+        # The stub declares it has none, so the sentence must say that rather
+        # than claim the run failed to record anything.
+        assert "not recorded in this run" not in note, note
+
+
+def test_a_block_with_only_bookkeeping_is_still_not_recorded_synthetic():
+    """The guard must not be fooled by a block that carries only provenance.
+
+    `source`, `backfilled_by` and friends describe the RECORD, not the
+    engine. A block holding only those has said nothing about configuration.
+    """
+    from oneground import report as rep
+    info = {"engines": [{"engine": "qdrant", "engine_facts": {
+        "runtime_settings": {"source": "somewhere",
+                             "backfilled_by": "a script"}}}]}
+    note = rep._tuning_note(info, ["qdrant"])
+    assert "not recorded in this run" in note, note
+    assert rep._recorded_settings(
+        info["engines"][0]["engine_facts"]["runtime_settings"]) == {}
+
+
+def test_real_settings_are_reported_as_recorded_synthetic():
+    from oneground import report as rep
+    info = {"engines": [{"engine": "pgvector", "engine_facts": {
+        "runtime_settings": {"shared_buffers": "256MB", "work_mem": "4MB",
+                             "max_connections": "100",
+                             "index_build": "synchronous",
+                             "source": "read from the engine"}}}]}
+    note = rep._tuning_note(info, ["pgvector"])
+    assert "not recorded in this run" not in note, note
+    assert "4 settings read from the engine" in note, note
+    assert "index build synchronous" in note, note
+    # And it must not claim they are the vendor's defaults.
+    assert "engine defaults" not in note, note
+
+
+# ---- unanswerable is not the same as noisy (task 017f item 1)
+# Session 20260913-161921 refused Qdrant's latency as "environment noise" --
+# which reads as a bad day, rerun it somewhere quieter. It was not: the pod was
+# fast enough that the round trip was 60% of the p95, and no rerun on that
+# class of host would have changed it. That is a question the environment
+# cannot answer, and saying so has to name what would.
+
+def _noise_row(p95, rtt, engine, transport):
+    shape = {"p50_ms": p95 * 0.6, "p95_ms": p95, "p99_ms": p95 * 1.3,
+             "mean_ms": p95 * 0.7, "n_queries": 2000, "concurrency": 1}
+    row = {}
+    verify._apply_noise_guard(row, shape, {"p95_ms": rtt}, 10,
+                              engine=engine, transport=transport)
+    return row
+
+
+def test_the_fastest_transport_makes_it_unanswerable_not_noisy():
+    row = _noise_row(7.72, 4.62, "qdrant", "grpc")
+    msg = row["latency_shape_single_client"]
+    assert isinstance(msg, str), msg
+    assert "unanswerable in this environment" in msg, msg
+    assert "environment noise" not in msg, msg
+    assert row.get("latency_unanswerable_here") is True
+    # It must say what WOULD answer it, or it is just a nicer refusal.
+    for hint in ("larger corpus", "higher k", "in-process", "bottleneck"):
+        assert hint in msg, (hint, msg)
+    assert "not by re-running this one" in msg, msg
+
+
+def test_a_slower_transport_is_still_noise_and_names_the_faster_one():
+    """HTTP with gRPC available is a client choice, not a dead end."""
+    row = _noise_row(7.72, 4.62, "qdrant", "http")
+    msg = row["latency_shape_single_client"]
+    assert "environment noise" in msg, msg
+    assert "unanswerable" not in msg, msg
+    assert "grpc would lower the round trip" in msg.lower(), msg
+    assert row.get("latency_unanswerable_here") is None
+
+
+def test_pgvector_on_libpq_is_unanswerable_when_the_path_dominates():
+    """Not a Qdrant special case: the rule is about the fastest transport an
+    adapter has, whichever engine it is."""
+    row = _noise_row(1.0, 0.5, "pgvector", "libpq")
+    assert "unanswerable in this environment" in row[
+        "latency_shape_single_client"]
+
+
+def test_a_clean_row_is_untouched_and_records_the_transport():
+    row = _noise_row(100.0, 0.5, "qdrant", "grpc")
+    assert isinstance(row["latency_shape_single_client"], dict), row
+    assert row["transport"] == "grpc"
+    assert row.get("latency_unanswerable_here") is None
+    assert "latency_measured_but_not_attributable" not in row
+
+
+def test_an_unknown_transport_falls_back_to_the_noise_wording():
+    """Not knowing the transport must not upgrade a refusal to unanswerable:
+    that claim rests on having already used the fastest client available."""
+    row = _noise_row(7.72, 4.62, "qdrant", None)
+    assert "environment noise" in row["latency_shape_single_client"]
+    assert "unanswerable" not in row["latency_shape_single_client"]
+
+
+def test_the_qdrant_adapter_defaults_to_trying_grpc():
+    """`prefer_grpc=None` means try it and find out. It was False, so the
+    faster transport was never attempted on any run."""
+    import inspect
+    from oneground.adapters.qdrant import adapter as qa
+    sig = inspect.signature(qa.QdrantAdapter.__init__)
+    assert sig.parameters["prefer_grpc"].default is None
+    src = inspect.getsource(qa.QdrantAdapter.connect)
+    # And it must PROVE the channel rather than trust a lazily built client.
+    assert "get_collections()" in src, src[-400:]
+    assert "_transport" in src

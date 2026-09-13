@@ -3284,3 +3284,100 @@ def test_the_setup_script_checks_the_marker_after_the_exports_synthetic():
         "/opt/oneground-image/BAKED")
     # And the script, not the caller, is what reports which path it took.
     assert "baked image detected" in script
+
+
+# ---------------- the setup-time split (task 017f)
+# Three sessions reported it couldnt_check -- not because it is hard to
+# measure, but because nothing wrote down when each phase began and ended, so
+# the only honest answer was one total from `created_at` to the run's first
+# log line. The baked image was meant to be judged on exactly this number.
+
+def _session_rec(tmp, **extra):
+    import json
+    d = os.path.join(tmp, ".oneground", "sessions")
+    os.makedirs(d, exist_ok=True)
+    rec = {"id": "20260913-000000", "state": "running", "pod_id": "p1",
+           "started_at_epoch": 1000.0}
+    rec.update(extra)
+    with open(os.path.join(d, rec["id"] + ".json"), "w",
+              encoding="utf-8") as f:
+        json.dump(rec, f)
+    return rec["id"]
+
+
+def test_phase_marks_from_two_writers_do_not_erase_each_other():
+    """`up` stamps RUNNING and `_sync_and_start` stamps the rest.
+
+    A plain mark(phase_times={...}) replaces the whole dict, so each writer
+    would drop the other's marks and the record would keep whichever ran last
+    -- a field added to answer a question, answering none of it.
+    """
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        sid = _session_rec(tmp)
+        statemod.mark_phase(sid, "running_at", tmp, when=1010.0)
+        statemod.mark_phase(sid, "sync_start", tmp, when=1020.0)
+        statemod.mark_phase(sid, "sync_end", tmp, when=1050.0)
+        rec = statemod.load(sid, tmp)
+        assert set(rec["phase_times"]) == {"running_at", "sync_start",
+                                           "sync_end"}, rec["phase_times"]
+        assert rec["phase_times"]["running_at"] == 1010.0
+
+
+def test_the_setup_split_reports_each_phase_against_the_previous():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        sid = _session_rec(tmp)
+        for name, when in (("running_at", 1030.0), ("sync_start", 1035.0),
+                           ("sync_end", 1065.0), ("upload_end", 1075.0),
+                           ("setup_end", 1080.0), ("launch_start", 1081.0)):
+            statemod.mark_phase(sid, name, tmp, when=when)
+        split = statemod.setup_split(statemod.load(sid, tmp))
+        secs = dict((lbl, s) for lbl, s in split)
+        assert len(split) == 6, split
+        # create(1000) -> RUNNING(1030) is provisioning, not ours
+        assert secs["RunPod provisioning: create to RUNNING"] == 30.0
+        assert secs["waiting for sshd"] == 5.0
+        assert secs["repo sync: bundle, scp, clone on the pod"] == 30.0
+        assert secs["uploading the session's declared inputs"] == 10.0
+        assert sum(s for _, s in split) == 81.0
+
+
+def test_a_session_without_marks_has_no_split_rather_than_zeros():
+    """Sessions recorded before 017f. None, not a fabricated breakdown --
+    deriving one from created_at is the quoted boundary three reports
+    declined to give."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        sid = _session_rec(tmp)
+        assert statemod.setup_split(statemod.load(sid, tmp)) is None
+    assert statemod.setup_split({}) is None
+    assert statemod.setup_split(None) is None
+
+
+def test_a_partial_split_reports_only_the_phases_it_has():
+    """A run that died mid-setup still says how far it got."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        sid = _session_rec(tmp)
+        statemod.mark_phase(sid, "running_at", tmp, when=1030.0)
+        statemod.mark_phase(sid, "sync_start", tmp, when=1035.0)
+        split = statemod.setup_split(statemod.load(sid, tmp))
+        assert len(split) == 2, split
+        assert split[0][1] == 30.0 and split[1][1] == 5.0
+
+
+def test_run_session_stamps_running_and_sync_stamps_the_rest():
+    """The marks the code actually writes, not just the helper's arithmetic.
+
+    Asserted on the source: both call sites must go through mark_phase, or
+    the merge guarantee above is irrelevant.
+    """
+    import inspect
+    up_src = inspect.getsource(cli._run_session)
+    assert 'mark_phase(session_id, "running_at"' in up_src, up_src[:200]
+    sync_src = inspect.getsource(cli._sync_and_start)
+    for name in ("sync_start", "sync_end", "upload_end", "setup_end",
+                 "launch_start"):
+        assert 'phase("%s")' % name in sync_src, name
+    assert "state.mark_phase" in sync_src

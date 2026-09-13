@@ -35,7 +35,7 @@ class QdrantAdapter:
     name = NAME
 
     def __init__(self, timeout=120.0, batch_size=DEFAULT_BATCH,
-                 prefer_grpc=False):
+                 prefer_grpc=None):
         self._client = None
         self._version = "unknown"
         self._timeout = timeout
@@ -58,10 +58,46 @@ class QdrantAdapter:
                     "environment variable but is not set. oneground reads "
                     "keys from the environment only, never from the "
                     "requirements file.")
+        # Task 017f: gRPC when it is actually there, HTTP when it is not, and
+        # the receipt says which.
+        #
+        # Session 20260913-161921 produced no attributable latency number for
+        # Qdrant at all: the pod was fast enough that a 4.62 ms HTTP round
+        # trip was 60% of a 7.72 ms p95, over the 20% noise limit. Most of
+        # that round trip is transport, and gRPC is the cheaper one -- so the
+        # client choice is part of whether the question can be answered, and
+        # belongs next to the number either way.
+        #
+        # `prefer_grpc=None` means try it and find out. Trying is not
+        # believing: QdrantClient constructs lazily and will hand back an
+        # object pointed at a closed port, which is the same mistake 017c took
+        # out of the readiness probe. So a gRPC client is PROVED with a real
+        # call before it is kept.
+        self._transport = None
+        self._transport_note = ""
+        attempts = ([True, False] if self._prefer_grpc is None
+                    else [bool(self._prefer_grpc)])
+        last = None
+        for want_grpc in attempts:
+            try:
+                client = QdrantClient(url=endpoint, api_key=api_key,
+                                      timeout=self._timeout,
+                                      prefer_grpc=want_grpc)
+                if want_grpc:
+                    client.get_collections()      # over the channel under test
+                self._client = client
+                self._transport = "grpc" if want_grpc else "http"
+                break
+            except Exception as e:                    # noqa: BLE001
+                last = e
+                if want_grpc:
+                    self._transport_note = (
+                        "gRPC was tried first and did not answer (%s: %s); "
+                        "fell back to HTTP" % (type(e).__name__, str(e)[:120]))
+        if self._client is None:
+            raise AdapterError(f"qdrant: could not connect to {endpoint}: "
+                               f"{last}") from None
         try:
-            self._client = QdrantClient(url=endpoint, api_key=api_key,
-                                        timeout=self._timeout,
-                                        prefer_grpc=self._prefer_grpc)
             # Qdrant's root endpoint carries the version; it is the cheapest
             # call that proves the connection is real rather than lazy.
             self._version = self._read_version(endpoint)
@@ -346,7 +382,17 @@ class QdrantAdapter:
                    "Qdrant builds its HNSW graph asynchronously, so the "
                    "measured ingest rate excludes it; `wait_for_index` polls "
                    "indexed_vectors_count until it catches up and the wait is "
-                   "reported separately.")}
+                   "reported separately."),
+               # Task 017f. The transport is a property of the MEASUREMENT,
+               # not of the engine, and it is most of the round trip that
+               # decides whether a latency number is attributable at all. A
+               # p95 recorded without it cannot be compared with one taken
+               # over a different client.
+               "transport": self._transport or "unknown",
+               "transport_note": (
+                   self._transport_note
+                   or ("gRPC, chosen automatically" if self._transport == "grpc"
+                       else "HTTP"))}
         try:
             raw = _model_dump(c.get_collection(collection_name=ns))
             cfg = raw.get("config") or {}

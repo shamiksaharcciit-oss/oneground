@@ -903,7 +903,9 @@ def _verify_local(req, cfg, workdir, engine_name, endpoint, session_id, ks,
             cand = engine.search(ns, queries, k, engine_params)
             shape = latency_shape(cand.latencies_ms)
             row = {f"recall_at_{k}": recall_at(cand.ids, gt, k)}
-            _apply_noise_guard(row, shape, out["rtt_baseline_ms"], k)
+            _apply_noise_guard(row, shape, out["rtt_baseline_ms"], k,
+                               engine=engine_name,
+                               transport=_transport_of(engine))
             out["searches"][f"k={k}"] = row
             log_fn(f"  recall@{k} {row[f'recall_at_{k}']:.4f}   "
                    f"p50 {shape['p50_ms']:.2f} ms  p95 {shape['p95_ms']:.2f} ms")
@@ -967,7 +969,9 @@ def _verify_local(req, cfg, workdir, engine_name, endpoint, session_id, ks,
                         "p95_across_runs, and the verdict rule, which does "
                         "not decide from one run")
                 row = {"recall_at_10": out["searches"]["k=10"]["recall_at_10"]}
-                _apply_noise_guard(row, shape, out["rtt_baseline_ms"], 10)
+                _apply_noise_guard(row, shape, out["rtt_baseline_ms"], 10,
+                                   engine=engine_name,
+                                   transport=_transport_of(engine))
                 out["searches"]["k=10_under_load"] = row
 
             # Task 017 item 5: the ceiling, opt-in and kept well away from the
@@ -999,12 +1003,36 @@ def _verify_local(req, cfg, workdir, engine_name, endpoint, session_id, ks,
     return out
 
 
-def _apply_noise_guard(row, shape, baseline, k):
+# The transport each adapter uses when it has nothing faster to offer. When a
+# run is already on this one and the round trip still dominates, no client
+# choice closes the gap -- the question is unanswerable here, which is a
+# different statement from "this run was noisy".
+FASTEST_TRANSPORT = {"qdrant": "grpc", "pgvector": "libpq"}
+
+
+def _transport_of(engine):
+    """What the adapter says it connected over, or None.
+
+    Read off the adapter rather than assumed from the engine name: the whole
+    point is that qdrant can be either, and which one it got decides whether
+    a refused latency row is "noisy" or "unanswerable".
+    """
+    return getattr(engine, "_transport", None)
+
+
+def _apply_noise_guard(row, shape, baseline, k, engine=None, transport=None):
     """Set `latency_shape_single_client`: the shape, or why it is unusable.
 
     Sets the key either way rather than replacing one the caller pre-set. A
     guard that only writes on failure is a guard that silently does nothing
     when called on the wrong dict, which is how it was first written here.
+
+    Task 017f splits the refusal in two. "Environment noise" reads as a bad
+    day -- run it again, run it somewhere quieter. On session 20260913-161921
+    it was nothing of the sort: the pod was fast enough that Qdrant's round
+    trip was 60% of its p95, and no rerun on that class of host would have
+    changed it. That is not a noisy measurement, it is a question this
+    environment cannot answer, and saying so has to name what would.
     """
     row["latency_shape_single_client"] = shape
     base_p95 = baseline["p95_ms"]
@@ -1012,14 +1040,35 @@ def _apply_noise_guard(row, shape, baseline, k):
         return
     share = base_p95 / shape["p95_ms"]
     row["rtt_share_of_p95"] = share
-    if share > NOISE_FRACTION:
+    if transport:
+        row["transport"] = transport
+    if share <= NOISE_FRACTION:
+        return
+
+    head = (f"the baseline RTT p95 ({base_p95:.2f} ms) is "
+            f"{share * 100:.0f}% of the query p95 ({shape['p95_ms']:.2f} ms), "
+            f"over the {NOISE_FRACTION * 100:.0f}% limit")
+    best = FASTEST_TRANSPORT.get(str(engine))
+    if transport and best and str(transport) == best:
         row["latency_shape_single_client"] = (
-            f"{COULDNT_CHECK}: environment noise -- the baseline RTT "
-            f"p95 ({base_p95:.2f} ms) is {share * 100:.0f}% of the query p95 "
-            f"({shape['p95_ms']:.2f} ms), over the {NOISE_FRACTION * 100:.0f}% "
-            "limit, so this measures the path to the engine more than the "
-            "engine. Recall is unaffected and is reported.")
-        row["latency_measured_but_not_attributable"] = shape
+            f"{COULDNT_CHECK}: unanswerable in this environment -- {head}, "
+            f"and this run already used the fastest transport this adapter "
+            f"has ({transport}). No client choice closes that gap: the engine "
+            "answers faster than the path to it can be measured. It becomes "
+            "answerable with more engine work per request (a larger corpus, a "
+            "higher k), an in-process measurement, or a host where the engine "
+            "rather than the path is the bottleneck -- not by re-running this "
+            "one. Recall is unaffected and is reported.")
+        row["latency_unanswerable_here"] = True
+    else:
+        faster = (f" This run used {transport}; {best} would lower the round "
+                  f"trip and may bring it under the limit." if transport
+                  and best and transport != best else "")
+        row["latency_shape_single_client"] = (
+            f"{COULDNT_CHECK}: environment noise -- {head}, so this measures "
+            f"the path to the engine more than the engine.{faster} Recall is "
+            "unaffected and is reported.")
+    row["latency_measured_but_not_attributable"] = shape
 
 
 def _verify_existing(req, cfg, workdir, engine_name, endpoint, session_id, ks,
@@ -1089,7 +1138,9 @@ def _verify_existing(req, cfg, workdir, engine_name, endpoint, session_id, ks,
         cand = engine.search(ns, queries, k, engine_params)
         shape = latency_shape(cand.latencies_ms)
         row = {f"recall_at_{k}": recall_at(cand.ids, gt_ids, k)}
-        _apply_noise_guard(row, shape, out["rtt_baseline_ms"], k)
+        _apply_noise_guard(row, shape, out["rtt_baseline_ms"], k,
+                           engine=engine_name,
+                           transport=_transport_of(engine))
         out["searches"][f"k={k}"] = row
         log_fn(f"  recall@{k} {row[f'recall_at_{k}']:.4f} (over the sample)")
 

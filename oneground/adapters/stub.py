@@ -156,6 +156,18 @@ class StubEngine:
             metric=st["metric"], index_type="exact",
             index_params=dict(st["index_params"]),
             shards=1, replicas=1, nodes=1,
+            # Task 017f: an empty runtime_settings cannot be told apart from
+            # "nobody recorded any", and that ambiguity is half of why the
+            # report said "not recorded in this run" about runs whose settings
+            # were sitting in verify_info.json. The stub has no runtime
+            # configuration, so it says so rather than leaving {} behind for a
+            # reader to interpret.
+            runtime_settings={
+                "couldnt_check": "the stub engine has no runtime "
+                                 "configuration: it is in-process, searches "
+                                 "exactly and builds no index, so there are "
+                                 "no settings that could move a number",
+            },
             raw={"note": "in-process stub; exact search, no index"})
 
     # -- scroll ------------------------------------------------------------
