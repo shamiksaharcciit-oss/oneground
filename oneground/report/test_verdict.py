@@ -828,7 +828,7 @@ def test_a_comparison_between_differing_verdicts_does_not_say_both_meet():
     # Each engine's number carries its own verdict.
     assert "200.00 (meets)" in text, text
     assert "119.10 (fails)" in text, text
-    assert "do not all carry the same verdict" in text, text
+    assert "the verdicts differ" in text.lower(), text
 
 
 def test_a_comparison_where_both_agree_still_says_so():
@@ -843,3 +843,78 @@ def test_a_comparison_where_both_agree_still_says_so():
     assert "42.80 (fails)" in text and "385.90 (fails)" in text, text
     # lower-is-better: qdrant is the better one
     assert "qdrant is the better" in text, text
+
+
+# ------- no generated sentence may assert one option's outcome of another
+# Task 017f. The `{best.outcome}` defect was not a typo: it was a sentence
+# built from ONE verdict and phrased as if it covered several. That shape can
+# reappear anywhere a line summarises a group, so this checks the property
+# across the outcome combinations rather than the one line that was wrong.
+#
+# The sibling lesson, from the workdir assertions: a test that pins what a
+# particular artifact happens to contain does not catch this. What catches it
+# is asserting the relationship between what the data says and what the
+# sentence says.
+
+# Phrases that ASSERT a shared outcome. Deliberately not "carry the same":
+# the mixed-verdict sentence says "the verdicts differ", and an earlier
+# version of this list matched the denial as if it were a claim -- a guard
+# that cannot tell an assertion from its negation is worse than none.
+_UNIFORM_CLAIMS = ("both carry", "all carry", "each carry",
+                   "both meet", "both fail",
+                   "all 2 carry", "all 3 carry")
+
+
+def _sentences_for(outcomes, constraint="qps", values=None):
+    """Decision-log text for one option whose engines have `outcomes`."""
+    from oneground import report as rep
+    values = values or [200.0 - 10 * i for i in range(len(outcomes))]
+    verdicts = [
+        vd.Verdict(constraint, o, "r", engine="e%d" % i, value=v)
+        for i, (o, v) in enumerate(zip(outcomes, values))]
+
+    class _O:
+        pass
+    o = _O()
+    o.config, o.verdicts, o.engines_meeting = "cfg[M=32]", verdicts, []
+    return " ".join(l["text"] for l in rep.compare_engines([o], "pod-1"))
+
+
+def test_no_uniform_claim_unless_the_outcomes_are_uniform():
+    """The property. A sentence may only say "all carry X" when all do."""
+    import itertools
+    for combo in itertools.product([MEETS, FAILS], repeat=2):
+        text = _sentences_for(list(combo))
+        if not text:
+            continue
+        uniform = len(set(combo)) == 1
+        claimed = any(c in text.lower() for c in _UNIFORM_CLAIMS)
+        if claimed and not uniform:
+            raise AssertionError(
+                "a uniformity claim was made about mixed outcomes %s:\n%s"
+                % (list(combo), text))
+        if uniform:
+            # And when they ARE uniform it should say so, rather than leaving
+            # a reader to infer it.
+            assert "carry %s" % combo[0] in text.lower(), (combo, text)
+
+
+def test_every_engines_number_is_printed_with_its_own_outcome():
+    """Each value and its verdict travel together.
+
+    `qdrant 200.00 against pgvector 119.10` with a single trailing verdict is
+    how the original defect read: two numbers, one outcome, and no way to tell
+    which it belonged to.
+    """
+    text = _sentences_for([MEETS, FAILS], values=[200.0, 119.1])
+    assert "200.00 (meets)" in text, text
+    assert "119.10 (fails)" in text, text
+
+
+def test_three_engines_with_one_odd_one_out():
+    """Two agreeing and one differing is the case a two-way check misses."""
+    text = _sentences_for([MEETS, MEETS, FAILS], values=[200.0, 190.0, 50.0])
+    assert not any(c in text.lower() for c in _UNIFORM_CLAIMS), text
+    assert "the verdicts differ" in text.lower(), text
+    for frag in ("200.00 (meets)", "190.00 (meets)", "50.00 (fails)"):
+        assert frag in text, (frag, text)

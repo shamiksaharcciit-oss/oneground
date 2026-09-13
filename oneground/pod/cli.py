@@ -352,6 +352,11 @@ def _run_session(client, args, s, p, root, session_id, pod_id, pod,
           "`oneground pod down %s` stops it." % (true_rate, session_id))
 
     pod = _wait_running(client, pod_id, args.boot_timeout)
+    # Task 017f. RUNNING is where the setup-time question starts: everything
+    # before it is RunPod provisioning a machine, everything after it is ours.
+    # Three sessions could not answer "did the baked image help" because this
+    # instant was never written down.
+    state.mark_phase(session_id, "running_at", root)
     ssh = sshx.PodSsh.from_pod(pod, key_path=args.ssh_key)
 
     # RUNNING is the container's state, not sshd's. Session 20260911-200558
@@ -646,7 +651,19 @@ def _upload_inputs(ssh, s, root):
 
 
 def _sync_and_start(ssh, s, root, session_id, pod_id=None):
-    """Bundle the repo, clone it on the pod, run setup, launch the command."""
+    """Bundle the repo, clone it on the pod, run setup, launch the command.
+
+    Task 017f instruments the phases. Three sessions reported the setup-time
+    split as couldn't-check -- not because it is hard to measure, but because
+    nothing wrote down when each phase began and ended, so the only honest
+    answer was the total from `created_at` to the run's first log line. The
+    baked image was supposed to be judged on exactly this number.
+    """
+    def phase(name):
+        if session_id:
+            state.mark_phase(session_id, name, root)
+
+    phase("sync_start")
     print("syncing repo (git bundle over scp) ...")
     bundle, dirty = sshx.bundle_repo(root)
     if dirty:
@@ -697,8 +714,10 @@ def _sync_and_start(ssh, s, root, session_id, pod_id=None):
         state.mark(session_id, "cloned", repo_root=root,
                    repo_commit=commit, repo_branch=branch)
     print("  cloned to %s" % s.remote_repo)
+    phase("sync_end")
 
     _upload_inputs(ssh, s, root)
+    phase("upload_end")
 
     setup_script = _setup_script(s)
     if setup_script:
@@ -711,7 +730,9 @@ def _sync_and_start(ssh, s, root, session_id, pod_id=None):
         print("running setup (the script reports which venv it used) ...")
         ssh.run(setup_script, timeout=3600)
         print("  setup complete")
+    phase("setup_end")
 
+    phase("launch_start")
     print("starting run under nohup ...")
     # The spec's env, plus the two things only `up` knows: which session this
     # is and which pod it landed on. `environment_id` is derived from the pod
@@ -804,6 +825,15 @@ def cmd_status(args):
         billed = _billed(client, rec["pod_id"])
         if billed is not None:
             print("  billed     : $%.4f  (GET /billing/pods; lags)" % billed)
+        # Task 017f: the setup split, so "did the baked image help" has an
+        # answer that is not a single total with a guess inside it.
+        split = state.setup_split(rec)
+        if split:
+            print("  setup split:")
+            for label, secs in split:
+                print("    %6.1f s  %s" % (secs, label))
+            print("    %6.1f s  total, create to run start"
+                  % sum(s2 for _, s2 in split))
 
         if args.no_logs:
             continue

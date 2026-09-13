@@ -153,6 +153,58 @@ def mark(session_id, state, repo_root=".", **extra):
     return rec
 
 
+def mark_phase(session_id, name, repo_root=".", when=None):
+    """Stamp one setup phase, MERGING with the phases already recorded.
+
+    Task 017f. A plain `mark(..., phase_times={...})` replaces the whole dict,
+    so two writers -- `up` stamping RUNNING and `_sync_and_start` stamping the
+    sync -- would each erase the other's marks and the record would keep
+    whichever wrote last. That is how a field added to answer a question ends
+    up answering none of it.
+    """
+    try:
+        rec = load(session_id, repo_root)
+    except FileNotFoundError:
+        return None
+    times = dict(rec.get("phase_times") or {})
+    times[name] = float(time.time() if when is None else when)
+    return mark(session_id, rec.get("state", "running"), repo_root,
+                phase_times=times)
+
+
+# The phases, in order, and what the gap ENDING at each one measures.
+SETUP_PHASES = (
+    ("running_at", "RunPod provisioning: create to RUNNING"),
+    ("sync_start", "waiting for sshd"),
+    ("sync_end", "repo sync: bundle, scp, clone on the pod"),
+    ("upload_end", "uploading the session's declared inputs"),
+    ("setup_end", "setup script (venv built, or symlinked from the image)"),
+    ("launch_start", "starting the run"),
+)
+
+
+def setup_split(record):
+    """`[(label, seconds)]` from a record's `phase_times`, or None.
+
+    None rather than zeros when the marks are absent. A session recorded
+    before task 017f has no split, and deriving one from `created_at` would be
+    precisely the quoted boundary three reports declined to give.
+    """
+    times = (record or {}).get("phase_times") or {}
+    if not times:
+        return None
+    started = record.get("started_at_epoch")
+    out, prev = [], (float(started) if started else None)
+    for key, label in SETUP_PHASES:
+        t = times.get(key)
+        if t is None:
+            continue
+        if prev is not None:
+            out.append((label, round(float(t) - prev, 1)))
+        prev = float(t)
+    return out or None
+
+
 def elapsed_hours(record, now=None):
     started = record.get("started_at_epoch")
     if not started:

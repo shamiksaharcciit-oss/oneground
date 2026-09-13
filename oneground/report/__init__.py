@@ -563,6 +563,21 @@ def _judged_constraint_names(options, constraints):
     return seen or _constraint_names(constraints)
 
 
+# Keys in `runtime_settings` that are bookkeeping about the record rather than
+# a setting the engine is running under. A block carrying only these has told
+# us nothing about the configuration.
+_SETTINGS_BOOKKEEPING = frozenset({
+    "source", "backfilled_by", "why_not_read_back", "note", "tuning",
+    "index_build_note", "couldnt_check",
+})
+
+
+def _recorded_settings(rs):
+    """The actual settings in a runtime_settings block."""
+    return {k: v for k, v in (rs or {}).items()
+            if k not in _SETTINGS_BOOKKEEPING}
+
+
 def _tuning_note(verify_info, engines):
     """One sentence on how the engines were configured.
 
@@ -572,22 +587,49 @@ def _tuning_note(verify_info, engines):
     """
     blocks = {b.get("engine"): b for b in ((verify_info or {}).get("engines")
                                            or [])}
-    notes, unknown = [], []
+    notes, declared_none, unknown = [], [], []
     for name in engines:
         rs = ((blocks.get(name) or {}).get("engine_facts") or {}).get(
             "runtime_settings") or {}
         t = rs.get("tuning")
-        if t:
+        if not _recorded_settings(rs) and not t and rs.get("couldnt_check"):
+            # The engine SAID it has none, or said why it could not be read.
+            # That is a different answer from silence, and reporting it as
+            # "not recorded in this run" would lose the reason the engine
+            # gave -- which is the whole content of a couldn't-check.
+            declared_none.append(f"{name}: {rs['couldnt_check']}")
+        elif t:
+            # A prose summary, which is what task 015's backfill wrote.
             notes.append(f"{name}: {t.split('.')[0].strip().lower()}")
+        elif _recorded_settings(rs):
+            # Task 017f: the settings THEMSELVES. This branch did not exist,
+            # so the note read `runtime_settings["tuning"]` -- a key only the
+            # 015 backfill script ever wrote -- and every live run therefore
+            # reported "not recorded" while verify_info.json carried the full
+            # settings for both engines. The feature worked exactly once, on
+            # backfilled data, and never on a measurement.
+            kept = _recorded_settings(rs)
+            shown = ", ".join(sorted(kept)[:3])
+            build = rs.get("index_build")
+            notes.append(
+                f"{name}: {len(kept)} settings read from the engine"
+                + (f", index build {build}" if build else "")
+                + f" ({shown}{', ...' if len(kept) > 3 else ''})")
         else:
             unknown.append(name)
     parts = []
     if notes:
-        parts.append("Both ran on engine defaults except where the receipt "
-                     "says otherwise -- " + "; ".join(notes)
-                     + " -- so this compares two default deployments, not "
-                       "two tuned ones, and a tuned row for either engine "
-                       "would be a different measurement")
+        # NOT "both ran on engine defaults": reading settings back tells you
+        # what they WERE, not that they were the vendor's defaults, and this
+        # sentence used to assert the second from the first. What is true is
+        # that the configuration is on the record and a reader can check it.
+        parts.append("How each was configured is on the record -- "
+                     + "; ".join(notes)
+                     + " -- so this compares these two deployments as they "
+                       "were configured; a differently tuned row for either "
+                       "engine would be a different measurement")
+    if declared_none:
+        parts.append("; ".join(declared_none))
     if unknown:
         parts.append(f"how {', '.join(unknown)} was configured is not "
                      f"recorded in this run, so it is couldnt_check rather "
@@ -656,8 +698,11 @@ def compare_engines(options, env_id, verify_info=None):
             verdicts = (
                 f"All {len(usable)} carry {best.outcome} against the "
                 "constraint." if len(outcomes) == 1 else
-                "They do not all carry the same verdict -- a better number "
-                "here is not the same as a passing one.")
+                "The verdicts differ -- a better number here is not the same "
+                "as a passing one.")
+            # "Both" is wrong for three. Task 017f: the whole point of this
+            # line is that it describes a set accurately.
+            howmany = "Both" if len(usable) == 2 else f"All {len(usable)}"
             # Naming the tuning is not a courtesy. "qdrant beats pgvector"
             # read without it is a claim about the engines; what was measured
             # is a claim about two default deployments, and the gap between
@@ -670,8 +715,8 @@ def compare_engines(options, env_id, verify_info=None):
                     f"better of {len(usable)} engines measured in environment "
                     f"{env_id or 'unrecorded'} -- {best.engine} "
                     f"{float(best.value):.2f} ({best.outcome}) against "
-                    f"{others}. Both were measured on the same sample, on the "
-                    f"same host, sequentially. {verdicts} {tuning}"),
+                    f"{others}. {howmany} were measured on the same sample, "
+                    f"on the same host, sequentially. {verdicts} {tuning}"),
                 "source": "verify.json:engines[*]"})
         if opt.engines_meeting:
             out.append({
