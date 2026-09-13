@@ -7,29 +7,28 @@
 #
 # HOW THIS GETS FILLED
 # --------------------
-# `.github/workflows/pod-image.yml` builds the image on any change to
-# docker/pod/** or requirements.txt. On the default branch it pushes to GHCR
-# and prints the digest in the job summary. Copy it here and commit. The same
-# workflow then fails on the next push if this file and the built image
-# disagree, so the pin cannot quietly rot.
+# By `docker/pod/rebuild.sh`, run locally, and committed by a human in the same
+# commit as the change that caused the rebuild. CI does not write this file and
+# does not build the image -- an automation that pushed to the branch it builds
+# from could move the pin it exists to hold still.
 #
-# It is filled by a human on purpose. A workflow that pushed this file to the
-# branch it builds from could move the pin it exists to hold still.
+#     bash docker/pod/rebuild.sh
+#     git add docker/pod/Dockerfile requirements.txt docker/pod/IMAGE.lock
+#     git commit
+#
+# See docs/POD_IMAGE.md.
 #
 # STATE: BUILT AND LOCKED
 # -----------------------
 # `pod image` run #1, on main at 6641737, built and pushed the image in
-# 18m18s. The digest below is what it produced; the build itself succeeded and
-# only the lock check failed, which was the bootstrap paradox -- the lock could
-# not name a digest that did not exist yet. Fixed in the workflow (task 017b):
-# an empty lock is now the bootstrap case and warns, a lock that disagrees with
-# the build is still a failure.
+# 18m18s. The digest below is what it produced. Two pod sessions have since
+# pulled and run it; 017c proved Postgres starts on it.
 #
 # The tag is recorded for tracing a digest back to the commit that built it.
 # Nothing references the tag, and nothing should: `reference` is the digest.
 #
-# THE BUILD IS NOT REPRODUCIBLE, AND THIS DIGEST IS NOT UPDATED (task 017b)
-# ------------------------------------------------------------------------
+# THE BUILD IS NOT REPRODUCIBLE, AND THIS DIGEST IS NOT UPDATED
+# ------------------------------------------------------------
 # Run #4 (34709757290) rebuilt the same Dockerfile from the same
 # requirements.txt, uncached, and produced a DIFFERENT digest:
 #
@@ -43,20 +42,27 @@
 # do not promise byte-identical responses over time, and layer metadata
 # carries build timestamps regardless.
 #
-# The digest above is LEFT ALONE on purpose. It names an image that exists,
-# that was pushed, and that two pod sessions have now pulled and run. Nothing
-# about it is stale; the rebuild simply produced a second, equally valid
-# image. Overwriting the pin every time CI runs would defeat the pin.
+# The digest below is LEFT ALONE on purpose. It names an image that exists,
+# that was pushed, and that two pod sessions have pulled and run. Nothing about
+# it is stale; the rebuild simply produced a second, equally valid image.
+# Overwriting the pin every time CI ran would defeat the pin.
 #
-# The consequence is that the lock check as written cannot pass in a steady
-# state: any push touching docker/pod/** or requirements.txt rebuilds, gets a
-# new digest, and disagrees with whatever is committed here. The check is
-# doing what it was designed to do; the design assumed reproducible builds.
-# See the report -- the shape that would work is (a) verify the locked digest
-# still exists and is pullable, and (b) require the lock to change in the same
-# commit as the Dockerfile, rather than requiring a rebuild to reproduce it.
-# Not changed here: that is a redesign, not a fix, and the developer should
-# choose it.
+# WHAT CI CHECKS NOW (task 017d)
+# ------------------------------
+# The old check rebuilt and compared, which could not pass in a steady state
+# and left a red run beside a good image on every push. It is gone. CI never
+# builds. It checks two things instead:
+#
+#   pullable    `docker manifest inspect` on the digest below must succeed.
+#               This is the only question whose answer changes what a session
+#               does -- a session pins this digest.
+#   co-change   if a commit touched the image's build inputs (the Dockerfile
+#               and what it COPYs -- today just requirements.txt), this file
+#               must have changed in the same range.
+#
+# The rule is one-directional: re-locking without touching the recipe is fine,
+# because a rebuild against an unchanged recipe produces a new, equally valid
+# digest. That is what run #4 demonstrated.
 
 image=ghcr.io/shamiksaharcciit-oss/oneground-pod
 digest=sha256:81567d58615f41e708c5aff8eb3e32af1cd4121daac4a9dddd3dbbadf9d388ce

@@ -1,173 +1,158 @@
-# Build the pre-baked pod image and lock its digest. Task 017 item 1.
+# Check the pod image pin. Task 017d.
 #
-# WHY A DIGEST AND NEVER A TAG
-# ----------------------------
-# A tag is a name that can be moved. Two sessions a week apart naming
-# `:latest`, or even `:abc1234`, can run different bytes if anything repushes,
-# and nothing in either receipt would say so -- the same failure mode as
-# `qdrant:latest`, which the compose files already refuse for the same reason.
-# A digest is the bytes. Sessions reference `@sha256:...`, `pod plan` prints
-# it, and docker/pod/IMAGE.lock is what says which one.
+# THIS WORKFLOW DOES NOT BUILD THE IMAGE.
 #
-# The lock file is committed by a human, not by this workflow: an automation
-# that pushes to the branch it builds from is an automation that can move what
-# it is supposed to pin. The job prints the digest and fails if the committed
-# lock does not match on a push to main.
+# It used to. Run #4 built the same Dockerfile from the same requirements.txt
+# as run #1 and produced a different digest -- the base resolved identically
+# (sha256:c7ff5829...), but apt and pip fetch from services that do not promise
+# byte-identical responses over time, and layer metadata carries build
+# timestamps regardless. So "rebuild and compare against the lock" cannot pass
+# in a steady state, and a red run sat next to a perfectly good image on every
+# push: the locked digest names an image that exists, was pushed, and has been
+# pulled and run by two pod sessions, most recently by 017c, which proved
+# Postgres starts on it.
+#
+# Rebuild-to-compare was answering "are these bytes reproducible". They are
+# not, and never were going to be. The two questions worth asking are:
+#
+#   1. pullable   does the registry still serve the digest the lock names?
+#                 This is the only question whose answer changes what a
+#                 session does -- a session pins that digest.
+#
+#   2. co-change  if a commit touched the image's build inputs, did the lock
+#                 move in the same range? Not "does a rebuild reproduce it"
+#                 but "did whoever changed the recipe re-lock what it makes".
+#
+# A digest and never a tag, for the original reason: a tag is a name that can
+# be moved, and two sessions a week apart naming the same tag can run different
+# bytes with nothing in either receipt saying so.
+#
+# Building is a local, deliberate act: docker/pod/rebuild.sh builds, pushes,
+# writes the pushed digest into the lock, and tells you to commit the two
+# together. The logic for both checks lives in oneground/pod/imagecheck.py, so
+# it is unit-tested rather than only exercised by being run.
+#
+# THE TRIGGER SET
+# ---------------
+# The image's actual build inputs -- the Dockerfile and every path it COPYs --
+# and this workflow file. NOT everything under docker/pod/**: the session
+# scripts that sync at run time are not in the image and cannot change its
+# bytes. Commit 696dd03 touched only those and fired an 18-minute build for
+# nothing.
+#
+# `oneground/pod/test_imagecheck.py` asserts these paths match the set derived
+# from the Dockerfile, so a new COPY source that is not listed here fails the
+# suite rather than silently escaping the check.
 
 name: pod image
 
 on:
   push:
     paths:
-      - 'docker/pod/**'
+      - 'docker/pod/Dockerfile'
       - 'requirements.txt'
       - '.github/workflows/pod-image.yml'
   pull_request:
     paths:
-      - 'docker/pod/**'
+      - 'docker/pod/Dockerfile'
       - 'requirements.txt'
       - '.github/workflows/pod-image.yml'
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/oneground-pod
-
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: read
     steps:
+      # The co-change check diffs a commit range, so the range has to be in
+      # the clone. fetch-depth: 0 rather than a guess at how deep: a force
+      # push or a long PR can put the base further back than any fixed number,
+      # and a missing base makes `changed_files` raise rather than quietly
+      # report that nothing changed.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # The base image is CUDA-flavoured and the venv carries torch; the
-      # default runner disk does not comfortably hold both plus the layer
-      # cache. Reclaim before building rather than discovering it at 80%.
-      - name: reclaim runner disk
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
-          df -h /
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: the derived build-input set
+        run: |
+          echo "The image re-locks only when one of these changes:"
+          python -m oneground.pod.imagecheck inputs | sed 's/^/  /'
+
+      # Read-only: the check reads a manifest and pulls no layers, so the
+      # token needs packages:read and nothing more.
+      #
+      # buildx is set up because the check prefers
+      # `docker buildx imagetools inspect`: `docker manifest inspect` cannot
+      # read an OCI manifest on an older client, and this image is OCI.
+      # Measured on Docker 20.10.17 against a public image that exists:
+      #   unsupported manifest media type and no default available:
+      #   application/vnd.oci.image.manifest.v1+json
       - name: log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Tagged with the short SHA and nothing else. No `latest`, no branch
-      # name: a floating tag is exactly what this is trying to make impossible,
-      # and one sitting in the registry is an invitation to reference it.
-      - name: short sha
-        id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      # 1. The locked digest must still be servable. An empty lock is the
+      #    bootstrap case, kept from task 017 and reached by run #4: it warns
+      #    and passes, because a fixture that has not been built yet is not
+      #    drift. With a digest present that branch is unreachable.
+      - name: the locked digest must be pullable
+        run: python -m oneground.pod.imagecheck pullable
 
-      - name: build and push
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/pod/Dockerfile
-          # Pushed only from the default branch. A pull request builds the
-          # image -- which is the check that matters, since a broken Dockerfile
-          # should fail here and not on a billed pod -- without putting
-          # anything in the registry for a session to find.
-          push: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.sha.outputs.short }}
-          # NO GHA CACHE, deliberately. `cache-from: type=gha` failed this
-          # build three times running: the Actions cache handed back manifest
-          # entries whose blobs had been evicted, so buildx asked for them and
-          # got 404 BlobNotFound. Run 34706654417 died that way IN THE PUSH,
-          # after 5m55s, and never reached the lock check at all.
-          #
-          # This image rebuilds only when docker/pod/** or requirements.txt
-          # changes, which is rarely. An 18-minute build that always works is
-          # worth more than a 6-minute one that sometimes leaves a red tick
-          # against a green artifact -- especially here, where the red tick is
-          # the thing telling somebody whether the pod image is usable.
-          provenance: false
-
-      # A run that did not push has verified that the Dockerfile builds and
-      # nothing else. Run 34705655888 was a workflow_dispatch: `push` was
-      # false, so the lock check (push-only) was skipped and the run went
-      # green having put nothing in the registry and compared nothing. A green
-      # tick that means less than it looks is worth saying out loud.
-      - name: say what this run did NOT do
-        if: github.event_name != 'push' || github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      # 2. A change to the recipe must come with a change to the pin.
+      #    push:  before..after, with before zeroed on a branch's first push.
+      #    PR:    base..head.
+      - name: a build-input change must re-lock
+        env:
+          EVENT: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          echo "::notice::built only. Nothing was pushed and IMAGE.lock was not"
-          echo "checked -- both happen on a push to the default branch. A green"
-          echo "run here means the Dockerfile builds, not that the locked digest"
-          echo "is current."
-          {
-            echo "### built, not pushed"
-            echo
-            echo "The image was built and discarded. No registry write, and"
-            echo "\`docker/pod/IMAGE.lock\` was **not** compared against it."
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          ZERO=0000000000000000000000000000000000000000
+          if [ "$EVENT" = "pull_request" ]; then
+              BASE="$PR_BASE"; HEAD="$PR_HEAD"
+          elif [ "$EVENT" = "push" ]; then
+              BASE="$PUSH_BEFORE"; HEAD="$PUSH_AFTER"
+              if [ "$BASE" = "$ZERO" ] || [ -z "$BASE" ]; then
+                  # A branch's first push has no before. There is no range to
+                  # judge, and inventing one (HEAD~1, say) would judge a commit
+                  # this push did not contain.
+                  echo "::notice::first push on this ref; no range to check"
+                  exit 0
+              fi
+          else
+              echo "::notice::$EVENT has no commit range; co-change not checked"
+              exit 0
+          fi
+          echo "range: $BASE..$HEAD"
+          python -m oneground.pod.imagecheck co-change --base "$BASE" --head "$HEAD"
 
-      - name: the digest, and what to put in IMAGE.lock
-        if: steps.build.outputs.digest != ''
+      - name: what this run checked
+        if: always()
         run: |
-          DIGEST='${{ steps.build.outputs.digest }}'
-          IMAGE="${REGISTRY}/${IMAGE_NAME}"
-          echo "digest: $DIGEST"
-          echo
-          echo "docker/pod/IMAGE.lock should read:"
-          echo "  image=${IMAGE}"
-          echo "  digest=${DIGEST}"
-          echo "  tag=${{ steps.sha.outputs.short }}"
-          echo "  reference=${IMAGE}@${DIGEST}"
           {
-            echo "### pod image built"
+            echo "### pod image pin"
             echo
+            echo "This workflow does **not** build the image. It checks that"
+            echo "the digest in \`docker/pod/IMAGE.lock\` is still pullable,"
+            echo "and that a change to the image's build inputs came with a"
+            echo "change to the lock."
+            echo
+            echo "Rebuilding is local and deliberate:"
             echo '```'
-            echo "image=${IMAGE}"
-            echo "digest=${DIGEST}"
-            echo "tag=${{ steps.sha.outputs.short }}"
-            echo "reference=${IMAGE}@${DIGEST}"
+            echo "bash docker/pod/rebuild.sh"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-      # The lock is the contract. If it does not match what was just built on
-      # the default branch, sessions are pinned to an image that is no longer
-      # what this Dockerfile produces, and that has to be loud.
-      #
-      # But an EMPTY lock and a WRONG lock are different things, and the first
-      # version of this step treated them the same. That made the first build
-      # unpassable by construction: the lock cannot name a digest until a build
-      # has produced one, and the build failed because the lock did not name
-      # it. Run #1 built and pushed the image correctly and then failed here --
-      # a red tick against a green artifact, which is the worst combination,
-      # because the next reader takes it to mean the image is broken.
-      #
-      #   empty        the bootstrap case. Warn, say what to commit, succeed.
-      #   set + wrong  drift: sessions are pinned to something this Dockerfile
-      #                no longer produces. Fail.
-      - name: the committed lock must match what was built
-        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        run: |
-          DIGEST='${{ steps.build.outputs.digest }}'
-          LOCK=docker/pod/IMAGE.lock
-          test -f "$LOCK" || { echo "::error::$LOCK is missing"; exit 1; }
-          LOCKED=$(grep '^digest=' "$LOCK" | cut -d= -f2- || true)
-          if [ -z "$LOCKED" ]; then
-            echo "::warning::$LOCK has no digest yet; this build produced $DIGEST"
-            echo "Bootstrap: commit that digest to $LOCK."
-            echo "Until you do, no session can reference this image --"
-            echo "oneground/pod/image.py raises rather than falling back to the tag,"
-            echo "so an unfilled lock cannot silently become a floating-tag run."
-            exit 0
-          fi
-          if [ "$LOCKED" != "$DIGEST" ]; then
-            echo "::error::$LOCK pins $LOCKED but this build produced $DIGEST."
-            echo "Update $LOCK and commit it; sessions reference the locked digest."
-            exit 1
-          fi
-          echo "lock matches: $DIGEST"
