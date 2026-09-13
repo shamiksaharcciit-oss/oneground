@@ -30,6 +30,13 @@ services:
       # Single node. Verify measures latency shape on one node in this task;
       # cluster shapes are task 011 on a pod.
       QDRANT__CLUSTER__ENABLED: "false"
+      # Task 017g: gRPC, stated rather than relied on. The port was published
+      # above from the start, but nothing ever set the service port, so whether
+      # gRPC listened depended on the image's bundled default. The adapter now
+      # tries gRPC first (017f), and which transport it gets decides whether a
+      # refused latency row reads "noise" or "unanswerable" -- too load-bearing
+      # to leave to a default a version bump can move.
+      QDRANT__SERVICE__GRPC_PORT: "6334"
     volumes:
       - oneground-qdrant-storage:/qdrant/storage
     healthcheck:

@@ -567,6 +567,15 @@ fi
 export QDRANT__STORAGE__STORAGE_PATH=/root/qdrant-storage
 export QDRANT__STORAGE__SNAPSHOTS_PATH=/root/qdrant-snapshots
 export QDRANT__SERVICE__HTTP_PORT=6333
+# Task 017g. The HTTP port was set from the start and the gRPC one never was,
+# so whether gRPC listened on a pod depended on the release binary's bundled
+# default -- and the adapter asked for HTTP anyway until 017f. Both now stated.
+#
+# This is not cosmetic. Session 20260913-161921 could not attribute Qdrant's
+# latency at all: a 4.62 ms HTTP round trip was 60% of a 7.72 ms p95, over the
+# 20% limit. gRPC is the cheaper transport, and whether it is listening
+# decides whether that row reads "unanswerable" or becomes a number.
+export QDRANT__SERVICE__GRPC_PORT=6334
 export QDRANT__LOG_LEVEL=WARN
 rm -rf "$QDRANT__STORAGE__STORAGE_PATH"
 mkdir -p "$QDRANT__STORAGE__STORAGE_PATH"

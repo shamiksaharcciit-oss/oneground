@@ -82,6 +82,10 @@ qdrant)
     export QDRANT__STORAGE__STORAGE_PATH="${QDRANT__STORAGE__STORAGE_PATH:-/root/qdrant-storage}"
     export QDRANT__STORAGE__SNAPSHOTS_PATH="${QDRANT__STORAGE__SNAPSHOTS_PATH:-/root/qdrant-snapshots}"
     export QDRANT__SERVICE__HTTP_PORT="${QDRANT__SERVICE__HTTP_PORT:-6333}"
+    # Task 017g: restarted onto the same transports it was started with. An
+    # engine that came back without gRPC would silently move the adapter to
+    # HTTP mid-run, and the spread across runs would be measuring that.
+    export QDRANT__SERVICE__GRPC_PORT="${QDRANT__SERVICE__GRPC_PORT:-6334}"
     export QDRANT__LOG_LEVEL="${QDRANT__LOG_LEVEL:-WARN}"
 
     echo "restart: starting qdrant from $ENGINE_DIR"
