@@ -144,6 +144,98 @@ def compose_image(engine="qdrant"):
     return None
 
 
+def _probe_qdrant(endpoint, timeout):
+    """GET a readiness endpoint; it must answer 200. Task 017c.
+
+    `connect()` is not a probe: the Qdrant client is lazy and constructing it
+    touches no socket, so the old reconnect loop returned "reachable" the
+    instant the object existed -- which it would also have done against a
+    server that was still replaying its WAL, or gone.
+
+    `/readyz` is the right question and is not in every version, so a
+    `/collections` call is the fallback: it is the cheapest request that cannot
+    be answered without the server being up and serving.
+    """
+    import urllib.error
+    import urllib.request
+
+    base = str(endpoint).rstrip("/")
+    last = None
+    for path in ("/readyz", "/collections"):
+        url = base + path
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as r:
+                code = r.getcode()
+                r.read(256)
+            if code == 200:
+                return f"GET {path} -> 200"
+            last = f"GET {path} -> {code}"
+        except urllib.error.HTTPError as e:
+            last = f"GET {path} -> {e.code}"
+        except Exception as e:                        # socket/DNS/timeout
+            last = f"GET {path} -> {type(e).__name__}: {e}"
+    raise VerifyError(last or "no probe attempted")
+
+
+def _probe_pgvector(endpoint, timeout):
+    """Open a connection and execute `SELECT 1`. Task 017c.
+
+    A NEW connection on purpose, not the adapter's: the point is to prove the
+    server accepts a connection and executes a statement right now. A pooled
+    or already-open handle can look healthy against a server that has
+    restarted underneath it.
+
+    `pg_isready` is deliberately not what this uses. It reports that the
+    postmaster is accepting connections, which is true some seconds before the
+    database will actually run a query -- and "accepting connections" was
+    exactly the state the failed sessions needed to distinguish from "serving".
+    """
+    import psycopg
+
+    # Wrapped, so every probe fails the same way whoever calls it. Letting
+    # psycopg.ConnectionTimeout out would make the probe contract "raises
+    # something", and a caller deciding whether to keep measuring needs one
+    # answer, not a union of every driver's exception hierarchy.
+    try:
+        with psycopg.connect(str(endpoint),
+                             connect_timeout=max(1, int(timeout))) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                row = cur.fetchone()
+    except VerifyError:
+        raise
+    except Exception as e:                            # driver-specific
+        raise VerifyError(
+            f"SELECT 1 could not be executed: {type(e).__name__}: {e}") from e
+    if not row or row[0] != 1:
+        raise VerifyError(f"SELECT 1 returned {row!r}")
+    return "SELECT 1 -> 1"
+
+
+# Keyed by engine, like COMPOSE_FILES, CONTAINERS and DEFAULT_ENDPOINTS above.
+PROBES = {
+    "qdrant": _probe_qdrant,
+    "pgvector": _probe_pgvector,
+}
+
+
+def probe_ready(engine_name, endpoint, timeout=10.0):
+    """What the engine answered, or raise. Task 017c.
+
+    Returns the request that succeeded, so the log line says what was actually
+    checked instead of asserting reachability on no evidence.
+
+    An engine with no registered probe returns a couldnt_check sentence rather
+    than a success: nothing was asked, and saying "reachable" would be the
+    overstatement this function exists to remove.
+    """
+    probe = PROBES.get(str(engine_name))
+    if probe is None:
+        return (f"couldnt_check: no readiness probe for {engine_name}; "
+                "nothing was asked of it")
+    return probe(endpoint, timeout)
+
+
 def restart_engine(engine, cfg, engine_name, endpoint, log_fn=log,
                    timeout=180.0):
     """Restart the engine between load runs. Returns what actually happened.
@@ -198,20 +290,53 @@ def restart_engine(engine, cfg, engine_name, endpoint, log_fn=log,
                 + (f" -- {tail[-1][:200]}" if tail else ""))
 
     # Up is not the same as ready, and the whole point of the restart is lost
-    # if the next run starts measuring a process that is still opening its
-    # files. Reconnect until it answers.
-    deadline = time.time() + timeout
+    # Up is not the same as ready, and "connected" is not the same as either.
+    #
+    # This loop used to call `engine.connect()` and report "reachable again
+    # after 0.1 s" the moment it returned. For Qdrant that is a lie by
+    # construction: the client is lazy, so constructing it touches no socket
+    # and succeeds against a server that is gone. The only thing standing
+    # between a restart and a measurement run against a dead engine was
+    # restart_engine.sh's own curl poll -- one check, in a shell script, which
+    # is not where a measurement should put its whole trust.
+    #
+    # So: reconnect the adapter (the run needs a live client either way), and
+    # then PROBE with a request that cannot be answered without a serving
+    # engine. The word "reachable" is printed only when a probe succeeded, and
+    # it names what the probe sent.
+    started = time.time()
+    deadline = started + timeout
     last = None
     while time.time() < deadline:
         try:
             engine.connect(endpoint, cfg.get("credentials_env"))
-            waited = timeout - (deadline - time.time())
-            return f"restarted via {how}; reachable again after {waited:.1f} s"
-        except Exception as e:                        # adapter-specific
+            # The probe gets a slice of the caller's budget, not a
+            # fixed 10 s: a 2 s restart timeout must not spend 20 s
+            # inside one probe attempt.
+            answered = probe_ready(engine_name, endpoint,
+                                   timeout=max(1.0, min(10.0, timeout / 4.0)))
+            waited = time.time() - started
+            if str(answered).startswith(COULDNT_CHECK):
+                # No probe exists for this engine. Do not claim reachability.
+                return (f"restarted via {how}; client reconnected after "
+                        f"{waited:.1f} s, but {answered}")
+            return (f"restarted via {how}; reachable again after {waited:.1f} s "
+                    f"({answered})")
+        except Exception as e:                        # adapter- or probe-level
             last = e
             time.sleep(1.0)
-    return (f"restarted via {how}, but it did not answer within {timeout:.0f} s"
-            + (f" ({last})" if last else ""))
+
+    # Never fall through into a measurement. A load run against an engine that
+    # did not come back produces numbers, and they would be numbers about
+    # nothing -- with `load_restarts` carrying a sentence nobody reads until
+    # after the report has been believed.
+    waited = time.time() - started
+    raise VerifyError(
+        f"{engine_name}: restarted via {how}, but it did not answer a "
+        f"readiness probe within {waited:.1f} s"
+        + (f" (last: {type(last).__name__}: {last})" if last else "")
+        + ". Refusing to measure an engine that is not serving: a load run "
+        "against a dead engine still produces a p95.")
 
 
 def p95_spread(per_run):
