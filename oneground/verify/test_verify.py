@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 import numpy as np
 import pytest
@@ -439,6 +440,110 @@ def test_the_engine_name_is_substituted():
     msg = str(exc.value)
     assert "pgvector" in msg, msg
     assert "{engine}" not in msg, msg
+    # Task 018c: and it is the READINESS failure, not the spawn failure.
+    # Before the budgets were split this assertion could not be made, because
+    # on a slow machine the 2.0 s was spent starting the interpreter and the
+    # probe loop was never reached -- so the test went red for a reason that
+    # had nothing to do with what it is named for.
+    assert "did not answer a readiness probe" in msg, msg
+    assert "could not be run" not in msg, msg
+
+
+# ------------------------------------------- the two budgets (task 018c)
+
+def test_the_command_budget_is_never_below_the_floor_or_the_readiness_budget():
+    """The rule, as one expression with one test.
+
+    A spawn budget derived as a fraction of the readiness budget would have
+    the same defect in a smaller size; a floor that REPLACED the readiness
+    budget would shorten what a long-running session asked for. It is a
+    maximum of the two, so no caller ever gets less than it got before 018c.
+    """
+    floor = verify.RESTART_COMMAND_TIMEOUT
+    assert floor >= 30.0, "a floor under 30 s is not a floor for a process"
+    # The production default, unchanged: the only caller passes no timeout.
+    got = verify.restart_command_timeout(180.0)
+    assert got == 180.0, (
+        "the production path changed: a session's restart command used to get "
+        "180 s and now gets %s" % got)
+    # A short readiness budget gets the floor, not two seconds.
+    for ready in (2.0, 0.0):
+        got = verify.restart_command_timeout(ready)
+        assert got == floor, (
+            "a %.1f s readiness budget gave the command %s s; the two budgets "
+            "are still shared" % (ready, got))
+    # Never below either input, for any combination.
+    for ready in (0.0, 0.5, 2.0, 30.0, 59.9, 60.0, 120.0, 180.0, 3600.0):
+        got = verify.restart_command_timeout(ready)
+        assert got >= ready, (ready, got)
+        assert got >= floor, (ready, got)
+    # An explicit budget wins, including a deliberately tiny one: a caller
+    # that means "this command must return at once" must be able to say so.
+    got = verify.restart_command_timeout(180.0, command_timeout=0.5)
+    assert got == 0.5, ("an explicit command budget was overridden: %s" % got)
+
+
+def test_a_spawn_slower_than_the_readiness_budget_still_reaches_the_probe():
+    """The regression, with a command that is genuinely slow rather than a
+    mocked one.
+
+    This is task 018b's flake made deterministic. The command sleeps for
+    longer than the readiness budget; before 018c that consumed the whole
+    budget, `subprocess.run` raised `TimeoutExpired`, `restart_engine`
+    RETURNED "not restarted", and a caller waiting for the readiness verdict
+    got a sentence about the shell instead.
+
+    No monkeypatching: the slowness is real, so the test cannot pass because a
+    stub was wired up wrongly.
+    """
+    slow = sys.executable + ' -c "import time; time.sleep(2.5)"'
+    started = time.time()
+    with pytest.raises(verify.VerifyError) as exc:
+        _restart(_FakeEngine(), {}, "pgvector", env=slow, timeout=2.0)
+    msg = str(exc.value)
+    assert "did not answer a readiness probe" in msg, msg
+    assert "could not be run" not in msg, msg
+    # The command ran to completion, so the whole thing took longer than the
+    # readiness budget alone -- which is the point: the two are not shared.
+    assert time.time() - started > 2.5, "the command did not actually run"
+
+
+def test_an_explicit_command_budget_is_honoured_and_says_which_budget():
+    """The other half: a command that really will not return is still
+    reported, and the sentence names the budget it exceeded.
+
+    "could not be run" against two seconds reads as a broken command; against
+    sixty it reads as a stuck one, and they call for different next steps.
+    """
+    slow = sys.executable + ' -c "import time; time.sleep(30)"'
+    note = _restart(_FakeEngine(), {}, "qdrant", env=slow, timeout=2.0,
+                    command_timeout=0.5)
+    assert note.startswith("not restarted"), note
+    assert "could not be run within its 0.5 s command budget" in note, note
+    # And a whole number of seconds is printed as one: `60 s`, not `60.0 s`
+    # and not `0 s` for a sub-second budget.
+    assert "0.0 s" not in note and "its 0 s" not in note, note
+
+
+def test_the_readiness_budget_is_not_silently_widened():
+    """018c must not have bought reliability by waiting longer.
+
+    The flake would also have gone away if the readiness budget had been
+    raised, and that would have been moving a threshold to make a test pass.
+    It is still 2.0 s in the test above, and a probe that never answers must
+    still give up on schedule.
+    """
+    quick = sys.executable + ' -c "pass"'
+    started = time.time()
+    with pytest.raises(verify.VerifyError):
+        _restart(_FakeEngine(), {}, "pgvector", env=quick, timeout=2.0)
+    elapsed = time.time() - started
+    # Spawn plus a 2 s readiness wait. Generous at the top for a slow spawn,
+    # but nowhere near the 60 s command floor -- which is what it would be if
+    # the readiness loop had inherited the larger number.
+    assert elapsed < 30.0, (
+        "the readiness loop waited %.1f s against a 2.0 s budget; the two "
+        "budgets have been crossed the other way" % elapsed)
 
 
 def test_the_requirements_block_wins_over_the_environment():

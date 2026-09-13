@@ -276,9 +276,48 @@ def probe_ready(engine_name, endpoint, timeout=10.0):
     return probe(endpoint, timeout)
 
 
+# How long the restart COMMAND may take to RUN, as distinct from how long the
+# engine may take to answer afterwards. Task 018c.
+#
+# These are two different quantities and sharing one number for them was a
+# defect. "Wait up to three minutes for pgvector to come back" is a statement
+# about an engine reloading a corpus; "allow sixty seconds for `pg_ctl
+# restart` to return" is a statement about starting a process. A caller who
+# shortens the first never meant to shorten the second, and when the two were
+# one parameter a two-second readiness budget also gave the shell two seconds
+# to start -- so on a loaded machine the command timed out, `restart_engine`
+# returned "not restarted" instead of reaching the readiness loop, and the
+# test asserting the readiness path failed for a reason that had nothing to do
+# with readiness.
+#
+# The floor is applied as a MAXIMUM against the readiness budget, never a
+# replacement: `max(60, timeout)`. Every existing caller uses the 180 s
+# default and therefore gets exactly what it got before. Only a caller with a
+# readiness budget under a minute is affected, and what it gains is budget for
+# a different thing.
+RESTART_COMMAND_TIMEOUT = 60.0
+
+
+def restart_command_timeout(ready_timeout, command_timeout=None):
+    """The spawn budget for a given readiness budget. Never smaller than now.
+
+    Split out so the rule is one expression with one test, rather than an
+    inline `max()` a reader has to find before they can believe the docstring.
+    """
+    if command_timeout is not None:
+        return float(command_timeout)
+    return max(RESTART_COMMAND_TIMEOUT, float(ready_timeout))
+
+
 def restart_engine(engine, cfg, engine_name, endpoint, log_fn=log,
-                   timeout=180.0):
+                   timeout=180.0, command_timeout=None):
     """Restart the engine between load runs. Returns what actually happened.
+
+    `timeout` is the READINESS budget: how long the engine may take to answer
+    a probe after the restart command has returned. The command's own budget
+    is separate -- see `restart_command_timeout` -- because a slow process
+    spawn is not the engine being slow to come back, and charging one to the
+    other made a small readiness budget unusable.
 
     Task 017 item 2. Repeating a load run is only worth doing if the runs are
     comparable samples, and run 2 against a process that has been serving run
@@ -319,11 +358,19 @@ def restart_engine(engine, cfg, engine_name, endpoint, log_fn=log,
         return ("not restarted: no engine_restart_command and no known "
                 "container for this engine, so this run continues against the "
                 "process the previous run warmed")
+    spawn_budget = restart_command_timeout(timeout, command_timeout)
     try:
         r = subprocess.run(argv, shell=shell, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout)
+                           encoding="utf-8", errors="replace",
+                           timeout=spawn_budget)
     except (OSError, subprocess.SubprocessError) as e:
-        return f"not restarted: {how} could not be run ({e})"
+        # Naming the budget matters: "could not be run" against a 2 s limit
+        # reads as a broken command, and against a 60 s limit as a genuinely
+        # stuck one. They call for different next steps.
+        # `:g`, not `:.0f`: a 0.5 s budget printed as "0 s" reads as a bug in
+        # the message rather than a deliberately tight limit.
+        return (f"not restarted: {how} could not be run within its "
+                f"{spawn_budget:g} s command budget ({e})")
     if r.returncode != 0:
         tail = (r.stderr or r.stdout or "").strip().splitlines()
         return (f"not restarted: {how} exited {r.returncode}"
