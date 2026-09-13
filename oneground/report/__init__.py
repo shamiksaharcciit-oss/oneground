@@ -37,6 +37,7 @@ Outputs, all in the workdir:
 import json
 import os
 import platform
+import re
 import time
 
 import yaml
@@ -48,6 +49,7 @@ from .. import environment
 from .. import intake
 from ..receipts import (MANIFEST_NAME, library_versions, round_floats,
                         sha256_file, write_json_stable, write_manifest)
+from . import claims as cl
 from . import verdict as vd
 from .html import render_html
 
@@ -97,45 +99,62 @@ def _environment_of(verify_info):
 def decision_log(options, not_run_rows, recommended, constraints,
                  verify_info, tolerance=vd.CALIBRATION_TOLERANCE, k=10,
                  env_id=None):
-    """An ordered list of sentences, each one a rule firing.
+    """The decision log as `{kind, text, source}` entries.
+
+    Kept as the shape every existing reader speaks. The sentences themselves
+    are rendered from `Claim` objects -- see `decision_claims` and
+    `oneground/report/claims.py` -- so that each one can be checked against
+    the rows it is about rather than merely spell-checked.
+    """
+    return [c.as_entry() for c in decision_claims(
+        options, not_run_rows, recommended, constraints, verify_info,
+        tolerance=tolerance, k=k, env_id=env_id)]
+
+
+def decision_claims(options, not_run_rows, recommended, constraints,
+                    verify_info, tolerance=vd.CALIBRATION_TOLERANCE, k=10,
+                    env_id=None):
+    """One `Claim` per rule that fired, in order.
 
     Every entry names the constraint, the value, the threshold and the source
     file and field, so the log can be checked against the workdir line by
     line. The final entries say what would turn each couldn't-check into a
     verdict -- a log that only records what was decided is half a log.
+
+    Task 019: each is built structured and rendered afterwards, because
+    "does this sentence say something true about these rows" is not
+    computable once the sentence is a string. Two shipped defects say so.
     """
     lines = []
 
     def add(kind, text, source=""):
-        lines.append({"kind": kind, "text": text, "source": source})
+        """Kept for the tier-2 log and anything that is not about rows."""
+        lines.append(cl.Claim(kind=kind, predicate=kind,
+                              quantifier=cl.NONE, text=text, source=source))
+
+    def claim(c):
+        cl.render(c)
+        lines.append(c)
 
     n = len(options)
     judged = _judged_constraint_names(options, constraints)
-    add("scope",
-        f"{n} configuration(s) were measured and judged against "
-        f"{len(judged)} constraint(s): "
-        f"{', '.join(judged) or 'none'}.",
-        source="requirements:constraints")
+    claim(cl.Claim(
+        kind="scope", predicate="were measured and judged",
+        quantifier=cl.NONE, source="requirements:constraints",
+        extra={"n_options": n, "constraint_names": tuple(judged)}))
 
     for row in not_run_rows:
-        add("not_run",
-            f"{row['family']} was requested but produced no rows, so it is "
-            f"not judged: {row['reason']}",
-            source="simulate_info.json:dropped")
+        claim(cl.Claim(
+            kind="not_run", predicate="produced no rows", quantifier=cl.NONE,
+            subject=row["family"], detail=row["reason"],
+            source="simulate_info.json:dropped"))
 
     for opt in options:
         for v in opt.verdicts:
             if v.outcome == vd.FAILS:
-                where = (f" Measured in environment {env_id}."
-                         if env_id and v.constraint in ("latency_p95", "qps")
-                         else "")
                 # With two engines an unqualified "fails latency_p95" appears
                 # twice with different numbers and no way to tell them apart.
-                on = f" on {v.engine}" if v.engine else ""
-                add("fails",
-                    f"{opt.config} fails {v.constraint}{on}: "
-                    f"{v.reason}.{where}",
-                    source=v.source)
+                claim(_verdict_claim("fails", opt, v, env_id))
 
     # Latency and throughput verdicts name the environment they came from,
     # whichever way they went: a p95 is a fact about a machine, and a reader
@@ -143,22 +162,11 @@ def decision_log(options, not_run_rows, recommended, constraints,
     for opt in options:
         for v in opt.verdicts:
             if v.constraint in ("latency_p95", "qps") and v.outcome == vd.MEETS:
-                on = f" on {v.engine}" if v.engine else ""
-                add("meets_environment",
-                    f"{opt.config} meets {v.constraint}{on} in environment "
-                    f"{env_id or 'unrecorded'}: {v.reason}.",
-                    source=v.source)
+                claim(_verdict_claim("meets_environment", opt, v, env_id))
 
     for opt in options:
         if opt.outcome == vd.MEETS:
-            add("meets",
-                f"{opt.config} meets every constraint that could be checked: "
-                + "; ".join(
-                    f"{v.constraint}{f' on {v.engine}' if v.engine else ''} "
-                    f"{v.reason}"
-                    for v in opt.verdicts if v.outcome == vd.MEETS)
-                + "." + _not_on_every_engine(opt),
-                source=f"simulate.json:rows[{opt.config}]")
+            claim(_meets_claim(opt))
 
     # indistinguishability, stated once per group rather than per pair
     seen = set()
@@ -169,49 +177,61 @@ def decision_log(options, not_run_rows, recommended, constraints,
         if group in seen:
             continue
         seen.add(group)
-        vals = []
-        for cfg in group:
-            for o in options:
-                if o.config == cfg:
-                    vals.append(f"{cfg} {o.measurement.get(f'recall_at_{k}'):.4f}")
-        add("indistinguishable",
-            "These options are indistinguishable on recall: "
-            + "; ".join(vals)
-            + f". Their recall differs by less than the calibration tolerance "
-              f"({tolerance}), which is what this project can currently "
-              "defend, so choosing between them on recall would be reading "
-              "noise. They are separated only where they differ measurably. "
-            + "Overall: "
-            + "; ".join(f"{cfg} {o.outcome}" for cfg in group
-                        for o in options if o.config == cfg)
-            + " -- indistinguishable on recall is not indistinguishable "
-              "overall.",
-            source=f"simulate.json:rows[*].recall_at_{k}")
+        by_config = {o.config: o for o in options}
+        cites = tuple(
+            cl.Cite(member=cfg,
+                    value=by_config[cfg].measurement.get("recall_at_%d" % k),
+                    outcome=by_config[cfg].outcome,
+                    constraint="recall_at_%d" % k,
+                    source="simulate.json:rows[%s].recall_at_%d" % (cfg, k))
+            for cfg in group if cfg in by_config)
+        claim(cl.Claim(
+            kind="indistinguishable",
+            predicate="is indistinguishable on recall from the others",
+            # Universal, and admissible only because the group was BUILT as
+            # the set whose recall lies within tolerance of each other.
+            quantifier=cl.UNIVERSAL,
+            constraint="recall_at_%d" % k,
+            scope=tuple(c.member for c in cites),
+            holds_for=tuple(c.member for c in cites),
+            cites=cites,
+            source="simulate.json:rows[*].recall_at_%d" % k,
+            extra={"tolerance": tolerance,
+                   # A configured constant, not a measured value, and the
+                   # sentence quotes it. Declared so the "quotes a number it
+                   # does not cite" check knows where it came from.
+                   "literal_numbers": (str(tolerance),)}))
 
     # Two engines, one environment, one configuration: the comparison the
     # same-environment and same-configuration rules exist to make safe.
-    for entry in compare_engines(options, env_id, verify_info):
-        add(entry["kind"], entry["text"], source=entry["source"])
+    for c in compare_engine_claims(options, env_id, verify_info):
+        lines.append(c)
 
     if recommended is None:
-        add("recommendation",
-            "No option meets every constraint, so nothing is recommended. "
-            "Recommending an option whose constraints could not all be "
-            "checked would be rounding couldn't-check up to a verdict.",
-            source="(rule)")
+        claim(cl.Claim(kind="recommendation", predicate="is recommended",
+                       quantifier=cl.NONE, subject=None, source="(rule)"))
     else:
         margins = [v.constraint for v in recommended.verdicts
                    if vd.at_margin(v)]
-        add("recommendation",
-            f"Recommended: {recommended.config}. It meets every constraint "
-            f"that could be checked, and was ranked first by: fewest "
-            f"constraints at margin ({len(margins)}"
-            + (f": {', '.join(margins)}" if margins else "")
-            + f"), then lowest storage amplification "
-              f"({recommended.measurement.get('storage_amplification'):.2f}x), "
-              f"then lowest fan-out "
-              f"({recommended.measurement.get('fanout'):.0f}).",
-            source=f"simulate.json:rows[{recommended.config}]")
+        storage = recommended.measurement.get("storage_amplification")
+        claim(cl.Claim(
+            kind="recommendation", predicate="is recommended",
+            quantifier=cl.NONE, subject=recommended.config,
+            scope=(recommended.config,), holds_for=(recommended.config,),
+            cites=(cl.Cite(member=recommended.config,
+                           outcome=recommended.outcome,
+                           source="simulate.json:rows[%s]"
+                                  % recommended.config),),
+            source="simulate.json:rows[%s]" % recommended.config,
+            extra={"margins": margins,
+                   "checked_constraints": tuple(dict.fromkeys(
+                       v.constraint for v in recommended.verdicts
+                       if v.outcome != COULDNT_CHECK)),
+                   "storage": storage,
+                   "fanout": recommended.measurement.get("fanout"),
+                   # The ranking numbers are quoted in the sentence, so the
+                   # prose-quotes-an-uncited-number check is told about them.
+                   "literal_numbers": ("%.2f" % (storage or 0.0),)}))
 
     # What would turn each couldn't-check into a verdict.
     unresolved = {}
@@ -220,95 +240,94 @@ def decision_log(options, not_run_rows, recommended, constraints,
             if v.outcome == COULDNT_CHECK:
                 unresolved.setdefault(v.constraint, v)
     for name, v in sorted(unresolved.items()):
-        add("to_resolve", _how_to_resolve(name, v, verify_info),
-            source=v.source)
+        claim(cl.Claim(kind="to_resolve", predicate="would be decided by",
+                       quantifier=cl.NONE, constraint=name,
+                       detail=_how_to_resolve(name, v, verify_info),
+                       source=v.source))
 
     if not unresolved:
-        add("to_resolve",
-            "Every constraint was decidable from this workdir; nothing is "
-            "outstanding.", source="(rule)")
+        # Universal over the constraints, and true by construction: this
+        # branch runs only when none of them is couldnt_check. Declaring it
+        # NONE let the word "every" into a sentence the checker could not
+        # check -- the invariant found it, which is the point of the
+        # invariant.
+        decided = tuple(dict.fromkeys(
+            v.constraint for opt in options for v in opt.verdicts))
+        claim(cl.Claim(
+            kind="to_resolve", predicate="was decidable from this workdir",
+            quantifier=cl.UNIVERSAL, scope=decided, holds_for=decided,
+            cites=tuple(cl.Cite(member=n, constraint=n,
+                                source="report.json:options[*].judgement")
+                        for n in decided),
+            source="(rule)",
+            detail="Every constraint was decidable from this workdir; "
+                   "nothing is outstanding."))
     return lines
 
 
-def _not_on_every_engine(opt):
-    """The clause the `meets` line needs when an engine failed a constraint
-    the option is nonetheless recorded as meeting.
+def _verdict_claim(kind, opt, v, env_id):
+    """One per-verdict claim: `fails` and `meets_environment`.
 
-    Task 018, and the same defect 017f took out of `compare_engines`.
-    `collapse_by_constraint` folds per-engine verdicts permissively -- a
-    constraint `meets` when *at least one* engine meets it -- and its docstring
-    states the precondition plainly: "it is only safe because the decision log
-    names the engine every time". The `meets` line did not. On the 017e shape
-    it read
-
-        ... meets every constraint that could be checked: latency_p95 7.72 ms
-        <= 40 ms; qps 200.00 >= 200.
-
-    with pgvector's 317.41 ms and 119.10 two entries above it under `fails`.
-    Both entries were true; the one a reader carries away is the flat one.
+    The engine rides on the Cite rather than being interpolated by the caller,
+    which is what makes "on qdrant" impossible to forget -- and forgetting it
+    is exactly how the 015 and 017e defects read.
     """
-    mixed = {}
-    for v in opt.verdicts:
-        if v.engine is None:
-            continue
-        mixed.setdefault(v.constraint, []).append(v)
-    bad = {}
-    for name, group in mixed.items():
-        if any(v.outcome == vd.MEETS for v in group):
-            others = [v for v in group if v.outcome != vd.MEETS]
-            if others:
-                bad[name] = others
-    if not bad:
-        return ""
-    bits = "; ".join(
-        f"{name} does not on "
-        + ", ".join(f"{v.engine} ({v.outcome})" for v in sorted(
-            group, key=lambda v: str(v.engine)))
-        for name, group in sorted(bad.items()))
-    return (f" This is not true of every engine measured: {bits}. `meets` for "
-            "a configuration means it meets on at least one engine measured, "
-            "not on all of them")
+    member = v.engine if v.engine is not None else opt.config
+    return cl.Claim(
+        kind=kind, predicate=kind.split("_")[0], quantifier=cl.NONE,
+        subject=opt.config, constraint=v.constraint,
+        scope=(member,), holds_for=(member,),
+        cites=(cl.Cite(member=member, value=v.value, outcome=v.outcome,
+                       constraint=v.constraint, source=v.source,
+                       reason=v.reason),),
+        detail=v.reason, source=v.source, environment=env_id,
+        extra={"engine_scoped": v.engine is not None,
+               "environment_relevant": v.constraint in ("latency_p95", "qps")})
+
+
+def _meets_claim(opt):
+    """`<config> meets every constraint that could be checked: ...`
+
+    EXISTENTIAL, not universal, and that is the whole point. `Option.outcome`
+    is `meets` when each constraint meets on AT LEAST ONE engine -- see
+    `collapse_by_constraint` -- so the sentence is "there is an engine on
+    which this holds", and it has to name which. Calling it universal is the
+    015 defect restated in the type system.
+    """
+    # EVERY verdict is cited, not only the meeting ones. The sentence lists
+    # what meets -- that is what it is for -- but the claim quantifies over
+    # every engine, and a set the claim is about with no cited row is exactly
+    # the shape of the 015 defect.
+    cites = tuple(
+        cl.Cite(member=(v.engine if v.engine is not None else opt.config),
+                value=v.value, outcome=v.outcome, constraint=v.constraint,
+                source=v.source, reason=v.reason)
+        for v in opt.verdicts)
+    meeting = [v for v in opt.verdicts if v.outcome == vd.MEETS]
+    engines = [v.engine for v in opt.verdicts if v.engine is not None]
+    scope = tuple(dict.fromkeys(engines)) or (opt.config,)
+    holds = tuple(dict.fromkeys(
+        v.engine for v in meeting if v.engine is not None)) or (opt.config,)
+    return cl.Claim(
+        kind="meets", predicate="meets every constraint that could be checked",
+        quantifier=cl.EXISTENTIAL if engines else cl.NONE,
+        subject=opt.config, scope=scope, holds_for=holds, cites=cites,
+        asserts_outcome=vd.MEETS,
+        source="simulate.json:rows[%s]" % opt.config,
+        extra={"not_on_every_engine": _not_on_every_engine(opt),
+               "meets_outcome": vd.MEETS})
+
+
+def _not_on_every_engine(opt):
+    """See `claims.not_on_every_engine`. Kept as a name the report already
+    speaks; the sentence itself is composed in the renderer."""
+    return cl.not_on_every_engine(opt.verdicts, meets=vd.MEETS)
 
 
 def runner_up_lines(recommended, options):
-    """The "indistinguishable on recall from ..." line, with what it costs.
-
-    Naming an alternative beside a recommendation reads as an endorsement, so
-    the line has to say what the alternative's overall outcome is. On the
-    arxiv-150k report the runner-up is `couldnt_check`: it was not the
-    configuration the engine was built as, so its latency and throughput were
-    never measured. "indistinguishable on recall from hash_sharded[...]" alone
-    invited a reader to treat it as an equally supported choice.
-
-    Recall really is indistinguishable -- that part of the claim stands. What
-    was missing is everything the comparison does not cover.
-    """
-    if not recommended or not recommended.indistinguishable_from:
-        return []
-    by_config = {o.config: o for o in options or []}
-    out = ["    indistinguishable on recall from: "
-           + ", ".join(recommended.indistinguishable_from)]
-    for cfg in recommended.indistinguishable_from:
-        opt = by_config.get(cfg)
-        if opt is None:
-            continue
-        if opt.outcome == vd.MEETS:
-            out.append(f"      {cfg}: meets every constraint that could be "
-                       "checked")
-            continue
-        unchecked = [v.constraint for v in opt.verdicts
-                     if v.outcome == vd.COULDNT_CHECK]
-        failed = [v.constraint for v in opt.verdicts if v.outcome == vd.FAILS]
-        bits = []
-        if failed:
-            bits.append("fails " + ", ".join(failed))
-        if unchecked:
-            bits.append("could not be checked on " + ", ".join(unchecked))
-        out.append(f"      {cfg}: {opt.outcome}"
-                   + (" -- " + "; ".join(bits) if bits else "")
-                   + ". Indistinguishable on recall is not "
-                     "indistinguishable overall.")
-    return out
+    """See `claims.runner_up_lines`."""
+    return cl.runner_up_lines(recommended, options, meets=vd.MEETS,
+                              couldnt_check=COULDNT_CHECK)
 
 
 def run_declared(req, requirements_path, workdir, t0, log_fn=log,
@@ -680,8 +699,17 @@ def _tuning_note(verify_info, engines):
 
 
 def compare_engines(options, env_id, verify_info=None):
-    """Which engine met a constraint at a better number, where two were
-    measured on the same configuration in the same environment.
+    """The comparison entries, as `{kind, text, source}`.
+
+    The shape the decision log and its readers already speak; the sentences
+    come from `compare_engine_claims`.
+    """
+    return [c.as_entry()
+            for c in compare_engine_claims(options, env_id, verify_info)]
+
+
+def compare_engine_claims(options, env_id, verify_info=None):
+    """Which engine met a constraint at a better number, as `Claim`s.
 
     This is the comparison task 015 exists to make possible, and it is
     deliberately narrow. It fires only when:
@@ -694,9 +722,19 @@ def compare_engines(options, env_id, verify_info=None):
       * both engines produced an actual value for the constraint, not a
         `couldnt_check`.
 
-    Anything else produces a sentence saying why no comparison was made,
-    rather than silence. A missing comparison and an unfavourable one look
-    identical if only the favourable ones are printed.
+    Anything else produces a claim saying why no comparison was made, rather
+    than silence. A missing comparison and an unfavourable one look identical
+    if only the favourable ones are printed.
+
+    **This function is where `{best.outcome}` lived.** It ended "and both
+    carry {best.outcome} against the constraint", which takes the WINNER's
+    verdict and asserts it of everyone, so a comparison where qdrant met the
+    constraint and pgvector missed it read "both carry meets". It shipped in
+    task 015's report about a pgvector row that sustained 112.63 of an offered
+    200 -- a fail -- and would have said it again in 017e at 119.10. The
+    ranking was right both times; the sentence was wrong, and the sentence is
+    what gets read. Task 019 makes the quantifier a field rather than a turn
+    of phrase, so `check()` can refuse it.
     """
     out = []
     for opt in options:
@@ -708,67 +746,83 @@ def compare_engines(options, env_id, verify_info=None):
             usable = [v for v in group
                       if v.outcome != COULDNT_CHECK and v.value is not None]
             if len(usable) < 2:
-                unchecked = [f"{v.engine} ({v.outcome})" for v in group]
-                out.append({
-                    "kind": "no_engine_comparison",
-                    "text": (
-                        f"{opt.config}: {constraint} was not compared across "
-                        f"engines because fewer than two engines produced a "
-                        f"value -- {', '.join(unchecked)}. A comparison here "
-                        f"would be between a number and an absence"),
-                    "source": "verify.json:engines[*]"})
+                c = cl.Claim(
+                    kind="no_engine_comparison",
+                    predicate="was not compared across engines",
+                    # A denial: it says a comparison was NOT made. Checking it
+                    # as the assertion it contains is the 017f mistake.
+                    quantifier=cl.NEGATION,
+                    subject=opt.config, constraint=constraint,
+                    scope=tuple(v.engine for v in group),
+                    holds_for=(),
+                    cites=tuple(cl.Cite(member=v.engine, value=v.value,
+                                        outcome=v.outcome,
+                                        constraint=constraint,
+                                        source=v.source, reason=v.reason)
+                                for v in group),
+                    source="verify.json:engines[*]")
+                cl.render(c)
+                out.append(c)
                 continue
             lower_is_better = constraint in ("latency_p95",)
             best = (min(usable, key=lambda v: float(v.value))
                     if lower_is_better
                     else max(usable, key=lambda v: float(v.value)))
-            # Each engine's OWN outcome, next to its own number.
-            #
-            # This used to end "and both carry {best.outcome} against the
-            # constraint", which takes the WINNER's verdict and asserts it of
-            # everyone. So a comparison where qdrant met the constraint and
-            # pgvector missed it read "both carry meets". It shipped in task
-            # 015's report saying that about a pgvector row which sustained
-            # 112.63 of an offered 200 -- a fail -- and would have said it
-            # again in 017e at 119.10. The ranking was right both times; the
-            # sentence describing it was wrong, and the sentence is what gets
-            # read.
-            others = "; ".join(
-                f"{v.engine} {float(v.value):.2f} ({v.outcome})"
-                for v in usable if v is not best)
             outcomes = {v.outcome for v in usable}
-            verdicts = (
-                f"All {len(usable)} carry {best.outcome} against the "
-                "constraint." if len(outcomes) == 1 else
-                "The verdicts differ -- a better number here is not the same "
-                "as a passing one.")
-            # "Both" is wrong for three. Task 017f: the whole point of this
-            # line is that it describes a set accurately.
-            howmany = "Both" if len(usable) == 2 else f"All {len(usable)}"
-            # Naming the tuning is not a courtesy. "qdrant beats pgvector"
-            # read without it is a claim about the engines; what was measured
-            # is a claim about two default deployments, and the gap between
-            # those two sentences is most of what a reader would do next.
-            tuning = _tuning_note(verify_info, [v.engine for v in usable])
-            out.append({
-                "kind": "engine_comparison",
-                "text": (
-                    f"{opt.config}: on {constraint}, {best.engine} is the "
-                    f"better of {len(usable)} engines measured in environment "
-                    f"{env_id or 'unrecorded'} -- {best.engine} "
-                    f"{float(best.value):.2f} ({best.outcome}) against "
-                    f"{others}. {howmany} were measured on the same sample, "
-                    f"on the same host, sequentially. {verdicts} {tuning}"),
-                "source": "verify.json:engines[*]"})
+            # The quantifier is decided from the ROWS, never from the winner.
+            # When every engine carries the same outcome the sentence may say
+            # so universally; otherwise it is existential -- one engine is
+            # better -- and the renderer prints the denial.
+            uniform = len(outcomes) == 1
+            c = cl.Claim(
+                kind="engine_comparison",
+                predicate=("carry the same outcome against the constraint"
+                           if uniform else "is the better of the engines"),
+                quantifier=cl.UNIVERSAL if uniform else cl.EXISTENTIAL,
+                subject=opt.config, constraint=constraint,
+                scope=tuple(v.engine for v in usable),
+                holds_for=(tuple(v.engine for v in usable) if uniform
+                           else (best.engine,)),
+                cites=tuple(cl.Cite(member=v.engine, value=v.value,
+                                    outcome=v.outcome, constraint=constraint,
+                                    source=v.source, reason=v.reason)
+                            for v in usable),
+                environment=env_id,
+                source="verify.json:engines[*]",
+                # Naming the tuning is not a courtesy. "qdrant beats pgvector"
+                # read without it is a claim about the engines; what was
+                # measured is a claim about two default deployments, and the
+                # gap between those sentences is most of what a reader would
+                # do next.
+                detail=_tuning_note(verify_info, [v.engine for v in usable]),
+                extra={"best": best.engine})
+            cl.render(c)
+            out.append(c)
         if opt.engines_meeting:
-            out.append({
-                "kind": "engines_meeting",
-                "text": (
-                    f"{opt.config} meets every engine-scoped constraint on: "
-                    f"{', '.join(opt.engines_meeting)}. Deploying it means "
-                    f"choosing one of those; the others were measured and did "
-                    f"not clear"),
-                "source": "report.json:options[*].judgement.engines_meeting"})
+            c = cl.Claim(
+                kind="engines_meeting",
+                predicate="meets every engine-scoped constraint",
+                # Existential over the engines: it holds on these and not the
+                # others, and the sentence says which.
+                quantifier=cl.EXISTENTIAL,
+                subject=opt.config,
+                scope=tuple(dict.fromkeys(
+                    v.engine for v in opt.verdicts if v.engine is not None)),
+                holds_for=tuple(opt.engines_meeting),
+                asserts_outcome=vd.MEETS, holds_rule="no_fails",
+                cites=tuple(
+                    cl.Cite(member=e, outcome=vd.MEETS,
+                            source="report.json:options[*].judgement."
+                                   "engines_meeting")
+                    for e in dict.fromkeys(
+                        v.engine for v in opt.verdicts
+                        if v.engine is not None)),
+                source="report.json:options[*].judgement.engines_meeting",
+                extra={"engine_scoped_constraints": tuple(dict.fromkeys(
+                    v.constraint for v in opt.verdicts
+                    if v.engine is not None))})
+            cl.render(c)
+            out.append(c)
     return out
 
 
@@ -875,31 +929,8 @@ def _cite(line, what):
 
 
 def _how_to_resolve(name, v, verify_info):
-    """The sentence that says what is missing. Specific, not generic."""
-    if name == "latency_p95":
-        if "no verify run" in v.reason:
-            return ("To decide latency_p95: run `oneground verify` against a "
-                    "real engine in the environment the constraint targets. "
-                    "Latency is never taken from simulation.")
-        if "could not attribute" in v.reason:
-            env = (verify_info or {}).get("platform", "this machine")
-            return ("To decide latency_p95: re-run `oneground verify` where "
-                    "the round trip to the engine is small relative to the "
-                    "query. On " + env + " the baseline RTT was a large "
-                    "fraction of the query p95, so the number measured the "
-                    "path rather than the engine. A pod session with the "
-                    "client and engine in the same environment is the way to "
-                    "settle it (task 011).")
-        if "constraint targets" in v.reason:
-            return ("To decide latency_p95: measure in the environment the "
-                    "constraint names. " + v.reason + ".")
-        return f"To decide latency_p95: {v.reason}."
-    if name == "monthly_budget":
-        return ("To decide monthly_budget: a cost model with error bands is "
-                "not in this build (task 011). Nothing here estimates cost, "
-                "because a confident number from list prices would be "
-                "fiction.")
-    return f"To decide {name}: {v.reason}."
+    """See `claims.how_to_resolve`."""
+    return cl.how_to_resolve(name, v, verify_info)
 
 
 # --------------------------------------------------------------------------
@@ -1015,22 +1046,43 @@ def qps_max_lines(verify_data):
     So this is never a verdict: there is no `qps_max` constraint, nothing is
     judged against it, and `latency_p95`/`qps` never read it.
     """
-    lines = []
+    return [c.as_entry() for c in qps_max_claims(verify_data)]
+
+
+def qps_max_claims(verify_data):
+    """The ceiling, as claims. Never a verdict, so it quantifies over nothing.
+
+    One engine, one number, one host. There is no set here and therefore no
+    quantifier: `qps_max` is a measurement of the engine in front of it, and
+    the caveat that travels with it says so in the row rather than relying on
+    a reader having read this docstring.
+    """
+    out = []
     for engine, block in vd.engine_blocks(verify_data):
         ceiling = (block or {}).get("qps_max")
         if not isinstance(ceiling, dict) or ceiling.get("qps_max") is None:
             continue
-        who = f"{engine}: " if engine else ""
-        lines.append({
-            "kind": "qps_max",
-            "text": (f"{who}{ceiling['qps_max']:.1f} qps at concurrency "
-                     f"{ceiling['at_concurrency']} (p99 "
-                     f"{ceiling.get('p99_ms_at_max') or 0:.1f} ms). Ramp "
-                     f"stopped because {ceiling['stopped_because']}. "
-                     f"{ceiling.get('caveat', '')}"),
-            "source": "verify.json:qps_max",
-        })
-    return lines
+        c = cl.Claim(
+            kind="qps_max", predicate="sustained this rate before degrading",
+            quantifier=cl.NONE, constraint="qps_max",
+            scope=((engine,) if engine else ()),
+            holds_for=((engine,) if engine else ()),
+            cites=(cl.Cite(member=engine, value=ceiling["qps_max"],
+                           constraint="qps_max",
+                           source="verify.json:qps_max"),),
+            source="verify.json:qps_max",
+            detail=ceiling.get("caveat", ""),
+            extra={"concurrency": ceiling["at_concurrency"],
+                   "p99": ceiling.get("p99_ms_at_max"),
+                   "stopped": ceiling["stopped_because"],
+                   # The stop reason quotes its own p99 numbers, which the
+                   # claim does not cite as values of its own.
+                   "literal_numbers": tuple(
+                       re.findall(r"\d+\.\d{2}",
+                                  str(ceiling["stopped_because"])))})
+        cl.render(c)
+        out.append(c)
+    return out
 
 
 def _prices_postdate_the_run(prices, verify_info):
@@ -1126,12 +1178,22 @@ def run(requirements_path, log_fn=log, env_stamp=None):
                               (sim_info or {}).get("dropped"))
 
     recommended = vd.recommend(options, k=k)
-    dlog = decision_log(options, not_run_rows, recommended, constraints,
-                        verify_info, k=k, env_id=env_id)
-    # Appended rather than built inside `decision_log`, which is given the
+    claims = decision_claims(options, not_run_rows, recommended, constraints,
+                             verify_info, k=k, env_id=env_id)
+    # Appended rather than built inside `decision_claims`, which is given the
     # judged options and not the raw verify document. The ceiling is not a
     # judgement of any option -- it is a property of the engine on this host.
-    dlog.extend(qps_max_lines(verify_data))
+    claims.extend(qps_max_claims(verify_data))
+
+    # The invariant, on the way out. Task 019: every claim is checked against
+    # the rows it cites BEFORE the report is written, so a sentence that does
+    # not follow from its own rows cannot reach a file. This is the same move
+    # as refusing to write a fixture whose digests do not match -- the report
+    # is a receipt for the prose, and a receipt that is not checked is a
+    # decoration.
+    cl.raise_on_violation(claims, cl.rows_from_options(options),
+                          where="report %s" % getattr(req, "name", "run"))
+    dlog = [c.as_entry() for c in claims]
 
     inputs = _input_digests(workdir)
     counts = {o: sum(1 for x in options if x.outcome == o)
@@ -1173,6 +1235,10 @@ def run(requirements_path, log_fn=log, env_stamp=None):
         "not_run": not_run_rows,
         "recommendation": (recommended.config if recommended else None),
         "decision_log": dlog,
+        # The structured form of every sentence above. `decision_log` is what
+        # a reader reads; this is what a checker checks, and what makes the
+        # rendered surfaces reconstructible from the record alone.
+        "claims": [c.as_dict() for c in claims],
         "inputs": inputs,
     }
     write_json_stable(os.path.join(workdir, "report.json"),
@@ -1217,14 +1283,14 @@ def _summary(report, options, not_run_rows, recommended, workdir, elapsed):
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))
     for o in options:
-        bits = " ".join(
-            f"{v.constraint}{'@' + str(v.engine) if v.engine else ''}"
-            f"={v.outcome}" for v in o.verdicts)
-        print(f"  {o.config:<56} {o.outcome:<14} {bits}")
-        if o.engines_meeting:
+        # Composed in the renderer: a console row asserts what a sentence
+        # does, and 017e's defect was in a cell rather than in prose.
+        row = cl.option_row(o)
+        print(f"  {row['config']:<56} {row['outcome']:<14} {row['bits']}")
+        if row["engines_meeting"]:
+            names = ", ".join(row["engines_meeting"])
             print(f"  {'':<56} {'':<14} "
-                  f"-> meets every engine-scoped constraint on: "
-                  f"{', '.join(o.engines_meeting)}")
+                  f"-> meets every engine-scoped constraint on: {names}")
     for r in not_run_rows:
         print(f"  {r['family']:<56} {'not_run':<14} {r['reason'][:60]}")
     print()

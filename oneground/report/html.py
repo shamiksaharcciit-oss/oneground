@@ -27,6 +27,7 @@ import html as _html
 import json
 import os
 
+from . import claims as cl
 from . import verdict as vd
 
 TOKENS_CSS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -145,12 +146,12 @@ def _recommendation(report, recommended):
     # one against the same name, with nothing on the page saying which machine
     # each belonged to.
     rows = "".join(
-        f'<div class="rec-c"><span class="dot {OUTCOME_TOKEN[v.outcome]}">'
-        f'</span><span class="rec-cn">{esc(v.constraint)}'
-        + (f'<span class="rec-ce">{esc(str(v.engine))}</span>' if v.engine
+        f'<div class="rec-c"><span class="dot {r["token"]}">'
+        f'</span><span class="rec-cn">{esc(r["constraint"])}'
+        + (f'<span class="rec-ce">{esc(r["engine"])}</span>' if r["engine"]
            else "")
-        + f'</span><span class="rec-cr">{esc(v.reason)}</span></div>'
-        for v in recommended.verdicts)
+        + f'</span><span class="rec-cr">{esc(r["reason"])}</span></div>'
+        for r in cl.recommendation_rows(recommended.verdicts, OUTCOME_TOKEN))
     indist = ""
     if recommended.indistinguishable_from:
         indist = (
@@ -170,44 +171,38 @@ def _recommendation(report, recommended):
 </section>"""
 
 
-def _label(outcome):
-    return ("couldn&#39;t-check" if outcome == vd.COULDNT_CHECK
-            else esc(outcome))
+def _outcome_cell(row):
+    """The option's own outcome column, from the renderer's strings."""
+    return (f'<td class="v {OUTCOME_TOKEN[row["outcome"]]}">'
+            f'{cl.outcome_label(row["outcome"], html=True)}</td>')
 
 
 def _verdict_cell(group):
     """One table cell for every verdict a configuration carries on one
     constraint -- which, with two engines, is one per engine.
 
-    Task 018. This used to render `o.verdict_for(name)`: the FIRST verdict,
-    with no engine named. On the 017e shape -- qdrant meets the p95 budget,
-    pgvector misses it by an order of magnitude -- the cell read a flat green
-    `meets` and the failing number appeared nowhere on the page. That is the
-    `{best.outcome}` defect in a table: one engine's verdict standing in for
-    the set.
+    Task 017e's defect was here: the cell rendered `verdict_for(name)`, the
+    FIRST verdict, so a configuration whose p95 met the budget on Qdrant and
+    missed it on pgvector by forty times showed one flat green `meets` and the
+    failing number appeared nowhere on the page.
 
-    The cell's own colour is the COLLAPSED outcome, the same rule that decides
-    `Option.outcome` (`meets` when at least one engine meets), so the row does
-    not contradict its own overall column. Underneath it, each engine carries
-    its own verdict, because the collapse rule is only safe when the engine is
-    named every time -- `collapse_by_constraint` says so in its docstring, and
-    this is the half that was missing.
+    Task 019 moved the composition into `claims.verdict_cell`, which returns
+    strings. This function assembles tags and reaches into no Verdict, which
+    is what the grep-guard in `test_claims.py` enforces.
     """
-    collapsed = vd.collapse_by_constraint(group)[group[0].constraint]
-    title = "\n".join(
-        (f"{v.engine}: " if v.engine else "") + f"{v.reason}\nsource: {v.source}"
-        for v in group)
-    if len(group) == 1 and group[0].engine is None:
-        v = group[0]
-        return (f'<td class="v {OUTCOME_TOKEN[collapsed]}" '
-                f'title="{esc(title)}">{_label(collapsed)}'
-                f'<span class="src">{esc(v.source)}</span></td>')
-    per_engine = "".join(
-        f'<span class="by-engine {OUTCOME_TOKEN[v.outcome]}">'
-        f'{esc(str(v.engine or "unattributed"))} {_label(v.outcome)}</span>'
-        for v in group)
-    return (f'<td class="v {OUTCOME_TOKEN[collapsed]}" '
-            f'title="{esc(title)}">{_label(collapsed)}{per_engine}</td>')
+    cell = cl.verdict_cell(
+        group, OUTCOME_TOKEN, couldnt_check=vd.COULDNT_CHECK,
+        collapse=lambda g: vd.collapse_by_constraint(g)[g[0].constraint])
+    title = esc(cell["title"])
+    if not cell["per_engine"]:
+        return (f'<td class="v {cell["token"]}" title="{title}">'
+                f'{cell["label"]}<span class="src">{esc(cell["source"])}'
+                f'</span></td>')
+    per = "".join(
+        f'<span class="by-engine {e["token"]}">{esc(e["text"])}</span>'
+        for e in cell["per_engine"])
+    return (f'<td class="v {cell["token"]}" title="{title}">'
+            f'{cell["label"]}{per}</td>')
 
 
 def _options_table(options, not_run_rows, constraint_names):
@@ -223,10 +218,7 @@ def _options_table(options, not_run_rows, constraint_names):
             cells.append(_verdict_cell(group))
         body.append(
             f'<tr><td class="cfg"><code>{esc(o.config)}</code></td>'
-            f'<td class="v {OUTCOME_TOKEN[o.outcome]}">'
-            + ("couldn&#39;t-check" if o.outcome == vd.COULDNT_CHECK
-               else esc(o.outcome))
-            + "</td>"
+            + _outcome_cell(cl.option_row(o))
             + f'<td class="num">{_fmt(o.measurement.get("recall_at_10"))}</td>'
             + f'<td class="num">{_fmt(o.measurement.get("ceiling_at_10"))}</td>'
             + f'<td class="num">{_fmt(o.measurement.get("storage_amplification"), 2)}x</td>'

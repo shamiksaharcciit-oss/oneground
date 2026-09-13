@@ -17,6 +17,15 @@ name what it could not check and why.
 
 Related, and just as load-bearing:
 
+- **A sentence about rows is built as a `Claim` and rendered from it.** This
+  is a gate for any contribution that renders text about measurements -- a
+  decision-log entry, a table cell, a console row, a page. The measurement
+  layer has an oracle and the presentation layer does not, so the same defect
+  shipped twice: a report that said "both carry meets" about an engine that
+  failed, and a page that showed one flat green cell where one engine met the
+  budget and the other missed it by forty times. Read
+  [docs/CLAIMS.md](docs/CLAIMS.md) before adding a sentence; a grep-guard will
+  refuse a pull request that formats a verdict into a string anywhere else.
 - **Receipts and declarations are never blurred.** A receipt is re-derivable
   from the seeds and rules recorded beside it. A declaration is bytes someone
   froze. Both are legitimate; calling one the other is not.

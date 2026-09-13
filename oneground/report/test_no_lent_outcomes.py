@@ -167,33 +167,61 @@ def _module_ast(mod):
         return ast.parse(f.read())
 
 
+# The functions that emit decision-log entries. Task 019 moved most of them
+# from `add("<kind>", ...)` to `Claim(kind="<kind>", ...)`; both shapes are
+# collected, because the tier-2 log still uses `add` for sentences that are
+# not about rows.
+LOG_BUILDERS = ("decision_claims", "_declared_log", "compare_engine_claims",
+                "_verdict_claim", "_meets_claim", "qps_max_claims")
+
+# Helpers whose FIRST POSITIONAL argument is the kind. `_verdict_claim` takes
+# it as a parameter, so the literal lives at the call site rather than in the
+# function, and a walk that only read `kind=` keywords would miss `fails` and
+# `meets_environment` entirely -- reporting less coverage than it has while
+# looking like it had more.
+KIND_FIRST_ARG = ("add", "_verdict_claim")
+
+
 def _decision_log_kinds():
-    """Every `add("<kind>", ...)` literal in the two log builders."""
+    """Every decision-log kind emitted anywhere in `report/__init__.py`.
+
+    Reads two shapes: `add("<kind>", ...)` and `kind="<kind>"` on a Claim (or
+    on a dict literal, which `qps_max_lines` still builds). A kind that no
+    walk can see is a kind this file cannot promise to cover, so the builders
+    are named and a new one has to be added here deliberately.
+    """
     tree = _module_ast(rep)
     kinds = set()
+    seen_builders = set()
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.FunctionDef):
             continue
-        if fn.name not in ("decision_log", "_declared_log"):
+        if fn.name not in LOG_BUILDERS:
             continue
+        seen_builders.add(fn.name)
         for node in ast.walk(fn):
             if (isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Name)
-                    and node.func.id == "add"
+                    and node.func.id in KIND_FIRST_ARG
                     and node.args
                     and isinstance(node.args[0], ast.Constant)
                     and isinstance(node.args[0].value, str)):
                 kinds.add(node.args[0].value)
-    # `compare_engines` returns entries the log splices in under their own
-    # kinds, so they are part of the same surface.
-    for fn in ast.walk(tree):
-        if isinstance(fn, ast.FunctionDef) and fn.name == "compare_engines":
-            for node in ast.walk(fn):
-                if isinstance(node, ast.Dict):
-                    for k, v in zip(node.keys, node.values):
-                        if (isinstance(k, ast.Constant) and k.value == "kind"
-                                and isinstance(v, ast.Constant)):
-                            kinds.add(v.value)
+            if isinstance(node, ast.Call):
+                for kw in node.keywords:
+                    if (kw.arg == "kind"
+                            and isinstance(kw.value, ast.Constant)
+                            and isinstance(kw.value.value, str)):
+                        kinds.add(kw.value.value)
+            if isinstance(node, ast.Dict):
+                for k, v in zip(node.keys, node.values):
+                    if (isinstance(k, ast.Constant) and k.value == "kind"
+                            and isinstance(v, ast.Constant)):
+                        kinds.add(v.value)
+    missing = set(LOG_BUILDERS) - seen_builders
+    assert not missing, (
+        "LOG_BUILDERS names functions that no longer exist: %s -- the walk "
+        "would silently cover less than it claims" % sorted(missing))
     return kinds
 
 
@@ -262,6 +290,9 @@ COVERED_LOG_KINDS = {
     # can be lent. Driven by test_tier2.py; listed here so the derived-set
     # guard has something to match and a new tier-2 kind still shows up.
     "analogy", "capacity",
+    # Task 017 item 5, built by `qps_max_lines`: a measured ceiling, never a
+    # verdict, so it quantifies over nothing.
+    "qps_max",
 }
 # Every rendering path reachable from `render_html`, split by whether it can
 # put a verdict on the page. The split is the point: naming a path is cheap,
@@ -277,7 +308,7 @@ HTML_VERDICT_PATHS = {
     "_recommendation":  "one row per verdict; each carries its engine",
     "_options_table":   "one cell per constraint",
     "_verdict_cell":    "the cell itself: collapsed outcome + every engine",
-    "_label":           "renders an outcome word, including couldn't-check",
+    "_outcome_cell":    "the option's own outcome column",
     "_log":             "the decision log, verbatim, sentences and all",
 }
 
