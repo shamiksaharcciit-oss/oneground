@@ -31,12 +31,24 @@ loads the fixture's 460 MB of vectors and builds indexes over them, so it wants
 a few spare gigabytes; on a laptop already short of RAM the same work can take
 well over an hour of wall clock for the same few minutes of CPU -- the run that
 cut `0.1.0` took 2 h 06 m for 588 seconds of CPU, about 95% of it waiting on
-page faults, with 225 MB of physical memory free. Nothing is wrong when that
-happens and the result is identical; close some things or let it run.
+page faults, with 225 MB of physical memory free. The result is identical when
+it finishes; close some things or let it run.
 
-(The peak memory the command actually needs has not been measured. On the run
-above the working set was being trimmed continuously, so what it reported was
-how little the machine would let it keep, not how much it wanted.)
+**With too little memory it does not finish at all.** On a later run on the
+same machine every digest verified and the first value then raised
+
+    numpy ... Unable to allocate 211. MiB for an array with
+    shape (71888, 768) and data type float32
+
+and the command exited non-zero. Slow and stopped are different outcomes: the
+first wants patience, the second wants memory. Note what survives either way --
+the eleven digests are checked first, so a run that dies in the values has
+already told you the bytes are the published ones.
+
+(The peak memory the command actually needs has not been measured. On the slow
+run the working set was being trimmed continuously, so what it reported was
+how little the machine would let it keep, not how much it wanted; the 211 MiB
+above is one allocation that failed, not the total.)
 
 ---
 

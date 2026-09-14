@@ -113,6 +113,10 @@ Status of the build:
 | 017f | transport recording, runtime settings, the setup split, and the no-lent-outcome property | done |
 | 017g | gRPC negotiated and proved against a live engine; the port stated everywhere | done |
 | 018 | **`oneground 0.1.0`**: version, docs pass, release notes, fresh-machine check, tag | cut; ships 23 Sept |
+| 018b | the coverage walk widened to every rendering path; extras checked against what they install | done |
+| 018c | a spawn budget and a readiness budget are not the same number | done |
+| 019 | **the claim invariant**: every generated sentence checked against the rows it cites | done |
+| 018d | the tag moved to include 018b, 018c and 019 | done |
 
 Findings so far that changed the design: the pipeline is byte-deterministic
 (five of six artifacts identical across rebuilds, the sixth fixed in 001b);

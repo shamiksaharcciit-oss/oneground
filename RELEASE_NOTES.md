@@ -78,6 +78,13 @@ venv are in the image, so a session installs nothing. A missing digest is
 never a reason to fall back to a tag: `verify` refuses before anything is
 created. `pod status` prints where a session's setup time went.
 
+**A checked claim invariant.** Every generated sentence in a report must be
+reconstructible from the rows it cites — the options it quantifies over, the
+values it quotes and the source field each came from — and the check runs
+before the report is written. It exists because the same defect shipped once:
+a report that said "both carry meets" about an engine that had failed. See
+[docs/CLAIMS.md](docs/CLAIMS.md).
+
 ## The release assets
 
 Two, one per full fixture. Neither is in the repository: 480 MB does not
@@ -153,8 +160,15 @@ loads the fixture's 460 MB of vectors and builds indexes over them, so it wants
 a few spare gigabytes; on a laptop already short of RAM the same work takes far
 longer in wall clock for the same few minutes of CPU — the run that cut this
 release took **2 h 06 m for 588 seconds of CPU**, about 95% of it waiting on
-page faults, with 225 MB of physical memory free. Nothing is wrong when that
-happens, and the answer is identical; only the clock is different.
+page faults, with 225 MB of physical memory free. The answer is identical when
+it finishes; only the clock is different.
+
+**With too little memory it does not finish.** The value recomputation needs a
+few hundred megabytes contiguous, and when the machine cannot give it the
+command raises `numpy ... Unable to allocate` and exits non-zero — after
+verifying every digest, so the receipt half is already done. Slow and stopped
+are different outcomes and want different responses: the first wants patience,
+the second wants memory.
 
 On the machine that cut this release:
 
