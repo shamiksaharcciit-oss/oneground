@@ -1,4 +1,4 @@
-"""The lab's rendering contract, tested (task 021).
+"""The lab's rendering contract, tested (tasks 021 and 021b).
 
 **Synthetic throughout**, except the two tests that read the shipped view
 modules and the subprocess test. The published figures are checked from real
@@ -11,13 +11,17 @@ The properties:
                writable array; a malformed drawing is refused
     views      the ground and query trace draw the right figures from a state
                small enough to count by hand, and a missing column is a gap
-    epsilon    every state column says what moving epsilon does to it
+    epsilon    every state column says what moving epsilon does to it; recall
+               is drawn only at an epsilon that was simulated, and between
+               them the panel says so -- never interpolated, never blank
     hygiene    drawing loads no model family, faiss or measuring code
 
     python oneground/lab/test_lab.py
     python -m pytest oneground/lab/test_lab.py
 """
 
+import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -34,22 +38,28 @@ from oneground.lab.views import (VIEWS, GroundView,      # noqa: E402
                                  QueryTraceView)
 
 S = contract.state_format()
+SIMULATED, NOT_SIMULATED = contract.SIMULATED, contract.NOT_SIMULATED
 
 
-def _synthetic(tmp):
+def _label(eps):
+    return f"semantic_sharded[centroids=4,epsilon={eps},probe=2]"
+
+
+def _synthetic(tmp, eps=0.2):
     """A semantic_sharded state of 12 vectors, 4 regions, 3 queries, built so
     every figure can be counted by hand.
 
     Vector v's home is region v % 4 and its second-nearest is (v + 1) % 4.
-    Even vectors sit 1.1x as far from their second centroid as their first,
+    Even vectors sit 1.15x as far from their second centroid as their first,
     odd ones 1.3x: at epsilon 0.2 the even six are copied twice and the odd
-    six once, and at the 1.20 crispness threshold only the odd six are crisp.
+    six once (at 0.1, none is copied), and at the 1.20 crispness threshold
+    only the odd six are crisp. Written to `tmp/synthetic.state.npz`.
     """
-    n, r, cap, eps = 12, 4, 2, 0.2
+    n, r, cap = 12, 4, 2
     near = np.stack([np.arange(n) % r, (np.arange(n) + 1) % r],
                     axis=1).astype(np.int32)
     d0 = np.linspace(1.0, 2.0, n).astype(np.float32)
-    ratio = np.array([1.1, 1.3] * 6, dtype=np.float32)
+    ratio = np.array([1.15, 1.3] * 6, dtype=np.float32)
     dist = np.stack([d0, d0 * ratio], axis=1).astype(np.float32)
     within = dist <= dist[:, [0]] * (1 + eps)
     within[:, 0] = True
@@ -59,8 +69,9 @@ def _synthetic(tmp):
         copy_set=np.where(within, near, -1).astype(np.int32),
         centroid_dist=dist, max_assign=cap, epsilon=eps,
         nearest_region=near)
+    params = {"centroids": 4, "epsilon": eps, "probe": 2}
     partition = S.PartitionState(
-        family="semantic_sharded", kind="kmeans", seed=1, params={},
+        family="semantic_sharded", kind="kmeans", seed=1, params=params,
         region_ids=np.arange(r, dtype=np.int32),
         region_sizes=np.bincount(near[:, 0], minlength=r).astype(np.int64),
         centroids=np.zeros((r, 8), dtype=np.float32), distance=S.DISTANCE,
@@ -81,8 +92,8 @@ def _synthetic(tmp):
     ]
     candidates = S.build_candidates(per_query, truth, 3)
     state = S.ModelState(
-        family="semantic_sharded", config_label="semantic_sharded[synthetic]",
-        params={}, seed=1, n_base=n, n_queries=3, dim=8,
+        family="semantic_sharded", config_label=_label(eps), params=params,
+        seed=1, n_base=n, n_queries=3, dim=8,
         partition=partition, assignment=assignment, route=route,
         candidates=candidates,
         load=S.build_load(partition.region_ids, assignment, route,
@@ -92,9 +103,9 @@ def _synthetic(tmp):
     return S.read_state(path)
 
 
-def _state():
+def _state(eps=0.2):
     with tempfile.TemporaryDirectory() as tmp:
-        return _synthetic(tmp)
+        return _synthetic(tmp, eps)
 
 
 # ------------------------------------------------------------------ guard
@@ -219,36 +230,41 @@ def test_the_state_a_view_is_handed_is_read_only_synthetic():
     raise AssertionError("a view wrote into the state")
 
 
+def _refused(drawing, reads=(), head_cols=None):
+    """Whether `draw` refuses `drawing`, returned by a view that declares and
+    reads `reads`."""
+    head, cols = head_cols or _state()
+
+    class V(contract.View):
+        name = "v"
+
+        def render(self, state):
+            for c in reads:
+                state[c]
+            return drawing
+    V.reads = tuple(reads)
+    try:
+        contract.draw(V(), head, cols)
+    except contract.ContractError:
+        return True
+    return False
+
+
 def test_a_malformed_drawing_is_refused_synthetic():
-    head, cols = _state()
-
-    def refused(drawing):
-        class V(contract.View):
-            name = "v"
-            reads = ()
-
-            def render(self, state):
-                return drawing
-        try:
-            contract.draw(V(), head, cols)
-        except contract.ContractError:
-            return True
-        return False
-
     D, M = contract.Drawing, contract.Mark
-    assert refused({"figures": {}})
-    assert refused(D(view="other", marks=[], figures={}))
-    assert refused(D(view="v", marks=[M("blob", data={})], figures={}))
-    assert refused(D(view="v", marks=[M("point", data={"a": [1, 2],
-                                                       "b": [1]})],
-                     figures={}))
-    assert refused(D(view="v", marks=[M("point", data={"a": [1]},
-                                        encoding={"color": "b"})],
-                     figures={}))
-    assert refused(D(view="v", marks=[], figures={"x": 1},
-                     gaps={"x": "couldnt_check: both"}))
-    assert refused(D(view="v", marks=[], figures={},
-                     gaps={"x": "unknown, probably fine"}))
+    assert _refused({"figures": {}})
+    assert _refused(D(view="other", marks=[], figures={}))
+    assert _refused(D(view="v", marks=[M("blob", data={})], figures={}))
+    assert _refused(D(view="v", marks=[M("point", data={"a": [1, 2],
+                                                        "b": [1]})],
+                      figures={}))
+    assert _refused(D(view="v", marks=[M("point", data={"a": [1]},
+                                         encoding={"color": "b"})],
+                      figures={}))
+    assert _refused(D(view="v", marks=[], figures={"x": 1},
+                      gaps={"x": "couldnt_check: both"}))
+    assert _refused(D(view="v", marks=[], figures={},
+                      gaps={"x": "unknown, probably fine"}))
 
 
 # ------------------------------------------------------------------ views
@@ -268,21 +284,29 @@ def test_the_ground_view_tallies_the_state_synthetic():
     assert list(points.data["copy_count"]) == [2, 1] * 6
     assert d.reads == sorted(GroundView.reads)
     assert d.epsilon == contract.RECOUNT
-    assert d.source["config_label"] == "semantic_sharded[synthetic]"
+    assert d.source["config_label"] == _label(0.2)
 
 
 def test_the_query_trace_view_draws_each_query_synthetic():
     head, cols = _state()
-    expect = {0: (0, 1, 1, False), 1: (1, 2, 2, False), 2: (3, 0, 0, True)}
-    for q, (routed, outside, missed, from_candidates) in expect.items():
+    # query: routed, outside, and in the recall panel: missed, answerable
+    # from candidates alone, recall@3
+    expect = {0: (0, 1, 1, False, 2 / 3), 1: (1, 2, 2, False, 1 / 3),
+              2: (3, 0, 0, True, 1.0)}
+    for q, (routed, outside, missed, from_candidates, recall) in \
+            expect.items():
         d = contract.draw(QueryTraceView(q, k=3), head, cols)
         f = d.figures
         assert f["routed_region"] == routed, (q, f)
         assert f["outside_routed_region"] == outside, (q, f)
-        assert f["missed_by_route"] == missed, (q, f)
-        assert f["answerable_from_candidates_alone"] is from_candidates, q
         assert d.gaps == {}, d.gaps
-        assert d.epsilon == contract.REBUILD, "it reads what shards returned"
+        panel = d.panels["recall"]
+        assert panel["status"] == SIMULATED and panel["epsilon"] == 0.2
+        pf = panel["figures"]
+        assert pf["missed_by_route"] == missed, (q, pf)
+        assert pf["answerable_from_candidates_alone"] is from_candidates, q
+        assert abs(pf["recall_at_k"] - recall) < 1e-12, (q, pf)
+        assert d.epsilon == contract.REBUILD, "it read what shards returned"
 
 
 def test_a_state_without_true_ids_is_a_gap_not_a_guess_synthetic():
@@ -294,6 +318,10 @@ def test_a_state_without_true_ids_is_a_gap_not_a_guess_synthetic():
     assert d.figures["outside_routed_region_lower_bound"] == 0
     d2 = contract.draw(QueryTraceView(2, k=3), head, cols)
     assert d2.figures["outside_routed_region"] == 0, "all three were returned"
+    # between simulated epsilons the candidates cannot stand in for them
+    d3 = contract.draw(QueryTraceView(0, k=3, epsilon=0.15), head, cols)
+    assert d3.gaps["true_neighbours"].startswith(contract.COULDNT_CHECK)
+    assert d3.panels["recall"]["status"] == NOT_SIMULATED
 
 
 def test_every_view_declares_only_state_columns_and_no_vectors():
@@ -314,6 +342,169 @@ def test_every_state_column_says_what_moving_epsilon_does_to_it():
                                 "candidates.cand_id"]) == contract.REBUILD
 
 
+_COST = {"low": 3.2, "high": 6.6, "basis": "measured"}
+_ACTION = {"kind": "simulate", "epsilon": 0.15,
+           "command": "oneground simulate requirements.yaml --emit-state"}
+
+
+def test_between_simulated_epsilons_recall_is_not_drawn_synthetic():
+    """The trace at an epsilon nobody simulated: every geometric readout,
+    no recall, no candidates, no missed neighbours -- and a panel that says
+    so, with the cost and the action, rather than a blank."""
+    head, cols = _state()
+    at = contract.draw(QueryTraceView(0, k=3), head, cols)
+    d = contract.draw(QueryTraceView(0, k=3, epsilon=0.15,
+                                     simulated=[0.1, 0.2], cost=_COST,
+                                     action=_ACTION), head, cols)
+    panel = d.panels["recall"]
+    assert panel["status"] == NOT_SIMULATED
+    assert panel["epsilon"] == 0.15
+    assert panel["simulated_epsilons"] == [0.1, 0.2]
+    assert panel["cost_minutes"] == _COST
+    assert panel["action"] == _ACTION
+    assert "figures" not in panel
+    for key in ("routed_region", "outside_routed_region", "probed_regions"):
+        assert d.figures[key] == at.figures[key], key
+    drawn = json.dumps(d.as_dict())
+    for leak in ("recall_at_k", "missed_by_route", "returned_top_k",
+                 "answerable_from_candidates_alone"):
+        assert leak not in drawn, f"{leak} drawn at an unsimulated epsilon"
+    assert not [c for c in d.reads
+                if contract.ON_EPSILON[c] == contract.REBUILD], d.reads
+    assert d.epsilon == contract.UNCHANGED
+
+
+def test_the_recall_panel_is_never_blank_synthetic():
+    """With no declared cost or action, the panel still carries both: a
+    `couldnt_check` cost and a runnable action."""
+    head, cols = _state()
+    d = contract.draw(QueryTraceView(1, k=3, epsilon=0.05), head, cols)
+    panel = d.panels["recall"]
+    assert panel["status"] == NOT_SIMULATED
+    assert panel["cost_minutes"].startswith(contract.COULDNT_CHECK)
+    assert panel["action"]["kind"] == "simulate"
+    assert panel["action"]["epsilon"] == 0.05
+    assert panel["action"]["params"]["epsilon"] == 0.05
+
+
+def test_a_simulated_epsilon_is_drawn_from_its_own_state_synthetic():
+    """Epsilon 0.1 was simulated; its recall is in the 0.1 state. Asked over
+    the 0.2 state, the view refuses rather than drawing anything for 0.1."""
+    head, cols = _state()
+    try:
+        contract.draw(QueryTraceView(0, k=3, epsilon=0.1,
+                                     simulated=[0.1, 0.2]), head, cols)
+    except ValueError as e:
+        assert "0.1" in str(e)
+        return
+    raise AssertionError("recall for a simulated epsilon was drawn from a "
+                         "different state")
+
+
+def test_the_contract_refuses_interpolated_or_blank_recall_synthetic():
+    D = contract.Drawing
+
+    def drawing(panel):
+        return D(view="v", marks=[], figures={}, panels={"recall": panel})
+
+    not_sim = {"status": NOT_SIMULATED, "epsilon": 0.15,
+               "simulated_epsilons": [0.2], "cost_minutes": _COST,
+               "action": _ACTION}
+    # well-formed panels are drawn
+    assert not _refused(drawing(dict(not_sim)),
+                        reads=("route.probed_region",))
+    assert not _refused(drawing({"status": SIMULATED, "epsilon": 0.2,
+                                 "figures": {"recall_at_k": 0.5}}),
+                        reads=("candidates.cand_id",))
+    # interpolation: figures for an epsilon this state was not simulated at
+    assert _refused(drawing({"status": SIMULATED, "epsilon": 0.15,
+                             "figures": {"recall_at_k": 0.5}}))
+    assert _refused(drawing({**not_sim, "figures": {"recall_at_k": 0.6}}))
+    # blank
+    assert _refused(drawing({"status": SIMULATED, "epsilon": 0.2,
+                             "figures": {}}))
+    for key in ("epsilon", "simulated_epsilons", "cost_minutes", "action"):
+        assert _refused(drawing({k: v for k, v in not_sim.items()
+                                 if k != key})), key
+    # "not simulated" at the epsilon the state was simulated at
+    assert _refused(drawing({**not_sim, "epsilon": 0.2}))
+    # "not simulated", but drawn from what the shards returned
+    assert _refused(drawing(dict(not_sim)), reads=("candidates.cand_id",))
+    # a status that is neither
+    assert _refused(drawing({**not_sim, "status": "pending"}))
+
+
+def _run(root, name, eps, build_query_seconds, requirements):
+    """A run directory as simulate --emit-state leaves it: state/ with the
+    state and state_info.json, and simulate_info.json beside it."""
+    state_dir = os.path.join(root, name, "state")
+    os.makedirs(state_dir)
+    _synthetic(state_dir, eps)
+    with open(os.path.join(state_dir, "state_info.json"), "w",
+              encoding="utf-8") as f:
+        json.dump({"configurations": [{"family": "semantic_sharded",
+                                       "config_label": _label(eps),
+                                       "file": "synthetic.state.npz"}]}, f)
+    build, query = build_query_seconds
+    with open(os.path.join(root, name, "simulate_info.json"), "w",
+              encoding="utf-8") as f:
+        json.dump({"timings": {_label(eps): {"build_seconds": build,
+                                             "query_seconds": query}},
+                   "requirements_file": {"path": requirements}}, f)
+    return state_dir, os.path.join(state_dir, "synthetic.state.npz")
+
+
+def test_the_renderer_draws_recall_only_from_the_state_simulated_at_it_synthetic():
+    """`corpora/render_from_state.py` over a declared set of two runs:
+    epsilon 0.1 is drawn from the 0.1 run; 0.15, simulated by neither, gets
+    the base state's geometry and a panel with the measured cost and the
+    command -- and the same routed regions and outside counts."""
+    spec = importlib.util.spec_from_file_location(
+        "render_from_state_under_test",
+        os.path.join(REPO, "corpora", "render_from_state.py"))
+    R = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(R)
+    with tempfile.TemporaryDirectory() as tmp:
+        _, base = _run(tmp, "a", 0.2, (240.0, 60.0), "requirements.a.yaml")
+        b_dir, b_path = _run(tmp, "b", 0.1, (90.0, 30.0),
+                             "requirements.b.yaml")
+
+        at_01 = R.plan(base, [b_dir], "semantic_sharded", 0.1)
+        assert at_01["trace_path"] == b_path
+        assert at_01["simulated"] == [0.1, 0.2]
+        _, q01 = R.draw_query(at_01, 0, k=3)
+        assert q01["recall_panel"]["status"] == SIMULATED
+        assert q01["recall_panel"]["epsilon"] == 0.1
+
+        between = R.plan(base, [b_dir], "semantic_sharded", 0.15)
+        assert between["trace_path"] == base
+        _, q015 = R.draw_query(between, 0, k=3)
+        panel = q015["recall_panel"]
+        assert panel["status"] == NOT_SIMULATED
+        assert panel["simulated_epsilons"] == [0.1, 0.2]
+        assert (panel["cost_minutes"]["low"],
+                panel["cost_minutes"]["high"]) == (2.0, 5.0)
+        assert panel["action"]["command"] == \
+            "oneground simulate requirements.a.yaml --emit-state"
+        assert panel["action"]["grid"]["semantic_sharded"]["epsilon"] == \
+            [0.15]
+        for leak in ("recall_at_k", "missed_by_route",
+                     "answerable_from_candidates_alone"):
+            assert leak not in q015, leak
+        for entry in q015["true_neighbours"]:
+            assert "missed_by_route" not in entry
+
+        every_between = R.draw_every_query(between, k=3)
+        every_base = R.draw_every_query(R.plan(base, [b_dir],
+                                               "semantic_sharded"), k=3)
+        assert every_between["recall_panel_status"] == NOT_SIMULATED
+        assert "recall_at_k_mean" not in every_between
+        assert every_base["recall_panel_status"] == SIMULATED
+        assert abs(every_base["recall_at_k_mean"] - 6 / 9) < 1e-12
+        for key in ("routed_region", "outside_routed_region"):
+            assert every_between[key] == every_base[key], key
+
+
 # ---------------------------------------------------------------- hygiene
 def test_drawing_loads_no_model_family_or_measuring_code():
     """Not synthetic: a clean process draws both views and is then asked what
@@ -328,6 +519,7 @@ def test_drawing_loads_no_model_family_or_measuring_code():
         "    head, cols = T._synthetic(tmp)\n"
         "contract.draw(GroundView(), head, cols)\n"
         "contract.draw(QueryTraceView(1, k=3), head, cols)\n"
+        "contract.draw(QueryTraceView(1, k=3, epsilon=0.15), head, cols)\n"
         "bad = ('faiss', 'sklearn', 'scipy', 'torch', 'umap', "
         "'oneground.models', 'oneground.measures', 'oneground.truth', "
         "'oneground.simulate', 'oneground.characterize')\n"

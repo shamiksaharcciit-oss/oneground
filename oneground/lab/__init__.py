@@ -35,12 +35,14 @@ what a change of epsilon does to every state column, and so to every drawing.
 the teaser's two figures.
 """
 
-from .contract import (COULDNT_CHECK, ON_EPSILON, RECOUNT, REBUILD, UNCHANGED,
-                       VECTOR_COLUMNS, ContractError, Drawing, Mark,
-                       StateColumns, UndeclaredColumn, VectorColumn, View,
-                       draw, load_state, on_epsilon)
+from .contract import (COULDNT_CHECK, NOT_SIMULATED, ON_EPSILON, RECOUNT,
+                       REBUILD, SIMULATED, UNCHANGED, VECTOR_COLUMNS,
+                       ContractError, Drawing, Mark, StateColumns,
+                       UndeclaredColumn, VectorColumn, View, draw, load_state,
+                       on_epsilon, same_epsilon)
 
-__all__ = ["COULDNT_CHECK", "ON_EPSILON", "RECOUNT", "REBUILD", "UNCHANGED",
-           "VECTOR_COLUMNS", "ContractError", "Drawing", "Mark",
-           "StateColumns", "UndeclaredColumn", "VectorColumn", "View", "draw",
-           "load_state", "on_epsilon"]
+__all__ = ["COULDNT_CHECK", "NOT_SIMULATED", "ON_EPSILON", "RECOUNT",
+           "REBUILD", "SIMULATED", "UNCHANGED", "VECTOR_COLUMNS",
+           "ContractError", "Drawing", "Mark", "StateColumns",
+           "UndeclaredColumn", "VectorColumn", "View", "draw", "load_state",
+           "on_epsilon", "same_epsilon"]

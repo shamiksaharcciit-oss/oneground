@@ -7,7 +7,8 @@ things. **State** is that second half, written as an artifact beside the table
 and held to the same standard as the table.
 
 The format lives in [`oneground/models/state.py`](../oneground/models/state.py).
-The reference renderer is
+The lab's rendering contract lives in [`oneground/lab/`](../oneground/lab/).
+The reference renderer, which is also the state's acceptance test, is
 [`corpora/render_from_state.py`](../corpora/render_from_state.py).
 
 ---
@@ -23,8 +24,10 @@ which one the table was built from.
 
 When a view finds that the state is missing something, that is a defect in the
 state. Add the field in `state.py`, document it in `_MEANINGS`, have each family
-fill it, and extend the contract if it can be checked. Then render it. Task 020
-had to do this once, below.
+fill it, and extend the contract if it can be checked. Then render it. This has
+happened twice, both times below: task 020 added `candidates.true_ids` and task
+021 added `assignment.nearest_region`. Both times a consumer of the state that
+needed a column found the gap. Inspecting the model found neither.
 
 The same rule makes the renderer honest about gaps. `render_from_state.py`
 reports `couldnt_check` and names the missing field rather than filling it in,
@@ -40,7 +43,7 @@ measurement or a declared parameter.
 | part | per | holds |
 |---|---|---|
 | `PartitionState` | region | region ids, home populations, centroids (k-means only), `kind` (`kmeans` / `hash` / `single`), seed, parameters |
-| `AssignmentState` | base vector | home region, copy set (nearest first, `-1` unused), copy count, distance to its nearest `max_assign` centroids (`NaN` where the family has none) |
+| `AssignmentState` | base vector | home region, copy set (nearest first, `-1` unused), copy count, distance to its nearest `max_assign` centroids (`NaN` where the family has none), and which regions those are, copied into or not (`nearest_region`) |
 | `RouteState` | query | regions scored with their distances, regions probed in probe order, and why each was probed |
 | `CandidateState` | query | its exact top-`true_k` neighbour ids; every candidate a shard returned before the merge, with its shard, its score, whether it survived dedupe, and its rank in the true top-k |
 | `LoadState` | shard | vectors held (counting copies), queries that probed it, candidates it contributed |
@@ -110,6 +113,36 @@ region and outside count for all 2,000 queries. The comparison is in
 
 ---
 
+## The field task 021 found missing: `assignment.nearest_region`
+
+Task 021 asked what recomputes when ε moves.
+- **Copy counts** at any ε follow from `centroid_dist` alone.
+- **Copy sets** do not. They decide which regions a vector lands in, and so
+  shard membership, load, and which true neighbours a route can reach. For
+  those, a recount needs the ids of the regions the distances were taken to.
+- **What `copy_set` holds.** A region id only inside the closure at the
+  emitted ε. A recount could lower ε, but it could not raise it: it had the
+  distance to a region a vector would now be copied into, and no idea which
+  region that was.
+
+`AssignmentState.nearest_region` (N × `max_assign`, int32) holds those regions,
+nearest first, whether or not the vector was copied into them. The state
+contract checks every copy against it.
+
+**Additive.** It does not change `state_version`, because readers work from the
+header's column map. A state written before it simply lacks it, and a consumer
+that needs it reports `couldnt_check`. Adding it left `simulate.json`
+byte-identical and every other column unchanged on both published fixtures.
+The semantic state grew from 15.6 to 18.0 MB at 150,000 vectors.
+
+**Validated against runs, not assumed.** Copy counts, copy sets, vectors per
+shard, storage and routing ceiling@10 were recounted from the ε 0.2 state.
+They matched exactly what `simulate` emitted at ε 0.0, 0.1 and 0.3
+(StackExchange 20k) and at 0.1 and 0.3 (arXiv 150k), including every ε above
+0.2.
+
+---
+
 ## The contract
 
 `contract_violations(state, footprint)` returns every way a state breaks the
@@ -123,8 +156,9 @@ registered family (`oneground/models/test_conformance.py`):
 - candidate ids are a subset of the base ids, and so are `true_ids`
 
 It also checks the shapes that make those four well-defined: offsets are
-monotone from 0, copy-set slot 0 is the home region, and load totals equal the
-parts they are counted from.
+monotone from 0, copy-set slot 0 is the home region, every copy is in the
+region `nearest_region` names for its slot, and load totals equal the parts
+they are counted from.
 
 The suite also checks the state against the architecture itself: merging a
 state's candidates with `base.merge_candidates` must reproduce `search()`'s ids
@@ -134,6 +168,119 @@ different search is still wrong.
 A family implements `state(built, queries, k, config, gt_ids, seed)` and must
 not change what it measures to do so. `state()` is called after the row is
 measured and before the index is released.
+
+---
+
+## The rendering contract
+
+The rule above, made enforceable (task 021, `oneground/lab/`):
+
+> **A view takes state and returns a drawing.**
+
+- **Pure.** A view is a `View` with a `name`, the columns it `reads`, and
+  `render(state) -> Drawing`. It reads no files, no network and no clock.
+- **Only what it declared, never a vector.** The state a view is handed
+  (`StateColumns`) exposes only the declared columns. It refuses a vector
+  column (`partition.centroids`) even when declared, and returns read-only
+  arrays.
+- **Tally, never measure.**
+  - A view may select, gather by stored id, compare, count, sum, and take
+    fractions and percentiles of stored columns.
+  - It may not compute anything that needs a vector: no distance, similarity,
+    norm, projection, clustering or neighbour search.
+  - Crispness is a tally in this sense: the share of stored second centroid
+    distances above 1.20 × the first.
+- **A drawing is declarative:**
+  - `marks`: point, region, link and bar layers of equal-length columns;
+  - `figures`: the numbers it states;
+  - `gaps`: each a `couldnt_check` reason;
+  - `panels`: see below.
+
+  `draw` validates it and stamps on the columns actually read, the state's
+  identity, and what moving ε does to it.
+- **The guard.** `oneground/lab/guard.py` reads every module in `views/`,
+  registered or not. It fails the test suite on vector arithmetic (`@`,
+  dot/inner/einsum, `linalg`, norms, distances, clustering), on any import
+  outside a short allow-list (so no faiss, scikit-learn, scipy, torch, model
+  family or measuring module), on file I/O, and on dynamic code.
+  `render_from_state.py` refuses to draw while any view module breaks it.
+
+**The stated limit.** The guard checks names and syntax. It does not infer
+types, so `a * b` over two vectors would pass it. The runtime refusal of vector
+columns is the primary guarantee: a view is never handed a vector to multiply.
+Nor can the guard tell a legitimate tally over stored numbers from a new
+measurement assembled out of them. That line is drawn in
+`oneground/lab/__init__.py`, and review holds it.
+
+`corpora/render_from_state.py` is two views, `ground` and `query_trace`, over
+this contract. Task 020's acceptance comparison passes unchanged on its output.
+
+---
+
+## When ε moves
+
+ε is the closure rule's one parameter. It decides which regions a vector is
+copied into, and nothing upstream of that. `contract.ON_EPSILON` classifies
+every column. The recount rows were checked against states emitted at five
+other ε values, and the rebuild rows really do change.
+
+| what moving ε asks | columns |
+|---|---|
+| nothing | centroids, region ids and home populations, home region, centroid distances, nearest regions, every route column, true neighbours, shard ids, queries served |
+| a recount from state | copy count, copy set, vectors each shard holds; and from them the histogram, storage, p99 and routing ceiling@10 |
+| a rebuild: a new `simulate` run | every candidate column, `true_rank`, candidates contributed; and from them recall, index loss and the neighbours a route missed |
+
+**Measured** (task 021, `semantic_sharded` at the reference configuration, one
+laptop). Figures are median (p95). Every incremental move was checked against a
+full recount at the same ε.
+
+| | 20,000 vectors | 150,000 vectors |
+|---|---|---|
+| full recount from state: ground figures + ceiling@10 over 2,000 queries | 1.5 ms (2.0) | **9.6 ms (11.8)** |
+| draw the ground view | 0.6 ms | 4.4 ms |
+| incremental update, slider step of 0.005 | 0.12 ms (0.54) | 0.70 ms (5.8) |
+| incremental update, random jump | 1.4 ms (10.2) | 29 ms (161) |
+| incremental index: memory / build | 2.2 MB / 13 ms | 14.2 MB / 93 ms |
+| rebuild one ε: `simulate` build + query | 3–21 s | 194–398 s |
+| state file, semantic / columns the recount reads | 11.1 MB / 2.3 MB | 18.0 MB / 6.4 MB |
+
+**The design: a full recount per move.** A recount plus a ground redraw is
+about 14 ms at 150,000 vectors, inside a 16 ms frame. So every geometric
+readout moves continuously with the slider: copy counts and colours, the
+histogram, storage, p99, shard sizes and the routing ceiling. An incremental
+index is not used. It wins only on small steps, loses to a full recount on
+jumps, and costs 14 MB.
+
+**Recall is a declared set, rendered on request.** Recall, candidates and the
+neighbours a route missed need a rebuild, which takes seconds at 20,000 vectors
+and minutes at 150,000. They exist only at the ε values that were simulated,
+and the lab marks which those are.
+
+- **At a simulated ε,** the query trace is drawn from the state emitted at that
+  ε. Its recall panel is `simulated` and carries recall@k, the returned
+  candidates and the missed neighbours.
+- **Between simulated ε values,** the geometric readouts are still drawn, and
+  the recall panel reads **`not simulated at this epsilon`**. It carries:
+  - the ε values that were simulated;
+  - the cost of simulating one, in minutes, measured from those runs' declared
+    timings;
+  - the explicit action that would run it: the configuration at that ε and its
+    `oneground simulate … --emit-state` command.
+- **Never interpolated, never blank.** `contract.draw` refuses, for every view:
+  - a simulated panel with figures for an ε its state was not simulated at;
+  - a not-simulated panel that carries figures, or lacks its ε values, cost or
+    action;
+  - a not-simulated drawing that read any column ε rebuilds.
+
+  The query-trace view also refuses to draw recall for a simulated ε over a
+  state simulated at a different one: that recall lives in the other state.
+- **The renderer.** `render_from_state.py --epsilon E --simulated DIR …` draws
+  a declared set from the state directories it is given. ε values are compared
+  at six decimals, the precision `simulate` writes.
+
+The ground's live recount is designed and measured, not yet a lab module. When
+it is built, it is a declared state transform outside `views/`, because a view
+may not do it.
 
 ---
 
@@ -211,22 +358,20 @@ A reader never has to guess a layout. `read_state()` refuses any
 
 ## Not settled
 
-- **Interactivity.** What the lab lets a person change, and which views update
-  when they do, is undecided. The state supports drawing; it makes no claim
-  about editing.
-- **Incremental recomputation as ε moves.** A state is one configuration at one
-  ε. Moving ε changes copy sets, shard membership, every graph and every
-  candidate, so today moving it means a new `simulate` run.
-  `assignment.centroid_dist` holds enough to redraw copy counts at any
-  ε ≤ what `max_assign` allows without recomputing. It does not hold the
-  resulting recall, and a view that showed recall at an ε nobody simulated
-  would break the rule above.
+- **Controls other than ε.** The interaction model for ε is settled, above. What
+  else the lab lets a person change is not. Probe, centroid count and index
+  parameters have not been classified or measured the way ε has.
 - **The browser.** How state reaches a page is open: `.npz` directly, a
   converted columnar form, or a sampled one. So is whether 150,000 points can be
   drawn at all without sampling, and if they are sampled, how the sample is
-  declared. What is known, measured in task 020: at 150,000 × 768, uncompressed,
-  a `semantic_sharded` state is 15.6 MB and a `single_node_hnsw` state is
-  7.4 MB. The candidate columns grow with queries × probes × depth, not with
-  the corpus. On 20,000 vectors a three-shard `hash_sharded` state is 13.3 MB.
+  declared. What is known:
+  - **State files, uncompressed, at 150,000 × 768:** 18.0 MB for
+    `semantic_sharded` and 8.0 MB for `single_node_hnsw`, including
+    `nearest_region`.
+  - **Candidate columns** grow with queries × probes × depth, not with the
+    corpus.
+  - **The ground drawing,** one point per vector, is 2.2 MB of JSON at 150,000
+    vectors.
+  - **At 20,000 vectors,** a three-shard `hash_sharded` state is 13.3 MB.
 - **The ambiguity reason.** Code 3 is reserved for a family that probes by the
   ambiguity rule (d2 ≤ 1.10 · d1). No family does yet.

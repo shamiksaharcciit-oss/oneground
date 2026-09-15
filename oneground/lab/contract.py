@@ -20,6 +20,16 @@ VECTOR_COLUMNS = frozenset({"partition.centroids"})
 
 MARK_KINDS = frozenset({"point", "region", "link", "bar"})
 
+# A panel's two states (task 021b). Recall, candidates and the true neighbours
+# a route missed are what each shard's index returned, and moving epsilon
+# rebuilds every index: they exist only at epsilons that were simulated. The
+# lab's epsilon control is a declared set for them, rendered on request.
+# Between simulated epsilons a panel says so, with the cost of simulating one
+# and the action that would -- never blank, never interpolated. `draw`
+# enforces both, for every view.
+SIMULATED = "simulated"
+NOT_SIMULATED = "not simulated at this epsilon"
+
 # ---------------------------------------------------------------- epsilon
 # What moving epsilon does to each state column (task 021). Epsilon is the
 # closure rule's one parameter: it decides which regions a vector is copied
@@ -91,6 +101,15 @@ def on_epsilon(columns):
         if _SEVERITY[effect] > _SEVERITY[worst]:
             worst = effect
     return worst
+
+
+def same_epsilon(a, b):
+    """Two epsilons are the same simulated value. Compared at six decimals --
+    the precision simulate writes -- because a slider's float and a requirements
+    file's 0.1 must meet, and nothing between two simulated values may."""
+    if a is None or b is None:
+        return False
+    return round(float(a), 6) == round(float(b), 6)
 
 
 # ------------------------------------------------------------- the state
@@ -187,12 +206,18 @@ class Drawing:
     `gaps` are what it could not draw from this state, each a `couldnt_check`
     reason; a name is a figure or a gap, never both. `draw` fills in `params`,
     `reads`, `source` and `epsilon`, so a view cannot misstate them.
+
+    `panels` are figures that exist only at a simulated epsilon, each with a
+    `status`: `SIMULATED`, with its `figures`, or `NOT_SIMULATED`, with the
+    simulated epsilons, the cost in minutes and the action to run one. `draw`
+    checks every panel against the state it was drawn from.
     """
 
     view: str
     marks: List[Mark]
     figures: Dict[str, Any]
     gaps: Dict[str, str] = field(default_factory=dict)
+    panels: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
     params: Dict[str, Any] = field(default_factory=dict)
     reads: List[str] = field(default_factory=list)
@@ -203,7 +228,8 @@ class Drawing:
         return _jsonable({
             "view": self.view, "params": self.params, "source": self.source,
             "reads": self.reads, "on_epsilon": self.epsilon,
-            "figures": self.figures, "gaps": self.gaps, "notes": self.notes,
+            "figures": self.figures, "gaps": self.gaps, "panels": self.panels,
+            "notes": self.notes,
             "marks": [{"kind": m.kind, "encoding": m.encoding,
                        "data": m.data} for m in self.marks]})
 
@@ -270,4 +296,54 @@ def draw(view, header, columns):
                                            "state_version", "n_base",
                                            "n_queries")}
     d.epsilon = on_epsilon(d.reads)
+    _check_panels(view, d, header)
     return d
+
+
+def _check_panels(view, d, header):
+    """Every panel is simulated at this state's epsilon, or says it is not.
+
+    A simulated panel must carry figures, and only for the epsilon its state
+    was simulated at: figures for any other epsilon would be interpolation. A
+    not-simulated panel must carry no figures, must name the epsilon asked
+    for, the epsilons that were simulated, the cost in minutes and the action
+    that would simulate it -- a blank panel is not allowed -- and its drawing
+    must not have read any column that epsilon rebuilds.
+    """
+    state_eps = (header.get("assignment") or {}).get("epsilon")
+    for name, panel in d.panels.items():
+        where = f"{view.name}: panel {name!r}"
+        status = panel.get("status")
+        if status == SIMULATED:
+            if not panel.get("figures"):
+                raise ContractError(f"{where} is {SIMULATED} and empty; a "
+                                    "panel is never blank")
+            if state_eps is not None and not same_epsilon(
+                    panel.get("epsilon"), state_eps):
+                raise ContractError(
+                    f"{where} shows figures for epsilon "
+                    f"{panel.get('epsilon')} from a state simulated at "
+                    f"{state_eps}; that is interpolation")
+        elif status == NOT_SIMULATED:
+            if panel.get("figures"):
+                raise ContractError(f"{where} is {NOT_SIMULATED!r} and still "
+                                    "carries figures; it is never "
+                                    "interpolated")
+            for key in ("epsilon", "simulated_epsilons", "cost_minutes",
+                        "action"):
+                if panel.get(key) in (None, "", [], {}):
+                    raise ContractError(f"{where} is {NOT_SIMULATED!r} with "
+                                        f"no {key}; it is never blank")
+            if same_epsilon(panel["epsilon"], state_eps):
+                raise ContractError(
+                    f"{where} says {NOT_SIMULATED!r} at {panel['epsilon']}, "
+                    "the epsilon this state was simulated at")
+            rebuilt = sorted(c for c in d.reads
+                             if ON_EPSILON.get(c) == REBUILD)
+            if rebuilt:
+                raise ContractError(
+                    f"{where} is {NOT_SIMULATED!r}, yet the drawing read "
+                    f"columns epsilon rebuilds: {rebuilt}")
+        else:
+            raise ContractError(f"{where} has status {status!r}; it must be "
+                                f"{SIMULATED!r} or {NOT_SIMULATED!r}")
