@@ -481,6 +481,15 @@ def merge_candidates(per_shard_ids, per_shard_scores, k):
     is the same merge the fixture builder has always used; it is here so all
     three families do it identically rather than three times slightly
     differently.
+
+    Equal scores keep the order the shards' results were concatenated in: the
+    sort is stable (task 021c). Numpy's default argsort is not, and leaves
+    tied candidates in whatever order its algorithm happens to -- which can
+    differ between numpy builds and CPUs, so a receipt counted from it could
+    change without any input changing. Exact ties are real: copies of one
+    vector score identically, and so do duplicate vectors under different
+    ids. `oneground/lab/test_lab.py` holds this merge and the query-trace
+    view's recall to one written-out rule on deliberately tied scores.
     """
     if not per_shard_ids:
         return np.full(k, -1, dtype=np.int64), np.full(k, -np.inf,
@@ -488,7 +497,7 @@ def merge_candidates(per_shard_ids, per_shard_scores, k):
     cid = np.concatenate(per_shard_ids)
     csc = np.concatenate(per_shard_scores)
     seen, out_ids, out_scores = set(), [], []
-    for j in np.argsort(-csc):
+    for j in np.argsort(-csc, kind="stable"):
         vid = int(cid[j])
         if vid < 0 or vid in seen:
             continue

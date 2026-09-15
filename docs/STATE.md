@@ -29,6 +29,16 @@ happened twice, both times below: task 020 added `candidates.true_ids` and task
 021 added `assignment.nearest_region`. Both times a consumer of the state that
 needed a column found the gap. Inspecting the model found neither.
 
+> **The only test of whether the state is sufficient is a renderer that needs
+> the column.**
+
+The state contract and the conformance suite check that a state is internally
+consistent. Neither can say it holds enough, and both passed the two states
+that did not. So a change to the state lands with the rendering that needs it,
+and that rendering passing is its acceptance test: the published figures
+reproduced through `render_from_state.py`, and task 020's acceptance
+comparison. A column no renderer reads has not been tested for anything.
+
 The same rule makes the renderer honest about gaps. `render_from_state.py`
 reports `couldnt_check` and names the missing field rather than filling it in,
 and it exits non-zero when anything it was asked to draw is unanswerable.

@@ -505,6 +505,122 @@ def test_the_renderer_draws_recall_only_from_the_state_simulated_at_it_synthetic
             assert every_between[key] == every_base[key], key
 
 
+# ------------------------------------------------------------------- ties
+def _tied(tmp, n=400, n_q=3, per_shard=150, copies=30):
+    """A state whose candidates tie on score everywhere (task 021c).
+
+    Every vector's score is one of three values, fixed per vector, so a vector
+    returned by two shards -- a copy -- carries the same score both times, as
+    a real copy does, and every k boundary cuts through a run of equal
+    scores. Each query takes `per_shard` candidates from each of two shards,
+    `copies` of the second shard's being vectors the first also returned.
+    """
+    rng = np.random.default_rng(21)
+    r = 4
+    home = (np.arange(n) % r).astype(np.int32)
+    score_of = rng.choice(np.array([0.25, 0.5, 0.75], dtype=np.float32),
+                          size=n)
+    assignment = S.AssignmentState(
+        home_region=home, copy_count=np.ones(n, dtype=np.uint8),
+        copy_set=home.reshape(-1, 1).copy(),
+        centroid_dist=np.ones((n, 1), dtype=np.float32), max_assign=1,
+        epsilon=0.2, nearest_region=home.reshape(-1, 1).copy())
+    params = {"centroids": r, "epsilon": 0.2, "probe": 2}
+    partition = S.PartitionState(
+        family="semantic_sharded", kind="kmeans", seed=1, params=params,
+        region_ids=np.arange(r, dtype=np.int32),
+        region_sizes=np.bincount(home, minlength=r).astype(np.int64),
+        centroids=np.zeros((r, 8), dtype=np.float32), distance=S.DISTANCE,
+        kmeans_niter=20)
+    probed = np.tile(np.array([[0, 1]], dtype=np.int32), (n_q, 1))
+    route = S.RouteState(
+        scored_region=probed.copy(),
+        scored_dist=np.ones(probed.shape, dtype=np.float32),
+        probed_region=probed,
+        probe_reason=np.tile(np.array([[0, 1]], dtype=np.uint8), (n_q, 1)))
+    per_query, truth = [], []
+    for _ in range(n_q):
+        first = rng.choice(n, size=per_shard, replace=False)
+        again = rng.choice(first, size=copies, replace=False)
+        rest = rng.choice(np.setdiff1d(np.arange(n), first),
+                          size=per_shard - copies, replace=False)
+        second = rng.permutation(np.concatenate([again, rest]))
+        ids = np.concatenate([first, second]).astype(np.int64)
+        shards = np.array([0] * per_shard + [1] * per_shard, dtype=np.int32)
+        per_query.append((ids, shards, score_of[ids]))
+        truth.append(np.argsort(-score_of, kind="stable")[:100])
+    candidates = S.build_candidates(per_query,
+                                    np.array(truth, dtype=np.int64), 100)
+    state = S.ModelState(
+        family="semantic_sharded", config_label=_label(0.2), params=params,
+        seed=1, n_base=n, n_queries=n_q, dim=8, partition=partition,
+        assignment=assignment, route=route, candidates=candidates,
+        load=S.build_load(partition.region_ids, assignment, route,
+                          candidates))
+    assert S.contract_violations(state) == [], S.contract_violations(state)
+    path = S.write_state(os.path.join(tmp, "tied.state.npz"), state)
+    return S.read_state(path)
+
+
+def _merge_spec(ids, scores, k):
+    """How candidates merge, written out: the first occurrence of each id,
+    best score first, and equal scores in the order the shards' results were
+    concatenated. Nothing about it depends on a sort's internals."""
+    seen, out = set(), []
+    for j in sorted(range(len(ids)), key=lambda j: (-float(scores[j]), j)):
+        vid = int(ids[j])
+        if vid < 0 or vid in seen:
+            continue
+        seen.add(vid)
+        out.append(vid)
+        if len(out) == k:
+            break
+    return out
+
+
+def test_tied_scores_merge_one_way_in_simulate_and_in_the_view_synthetic():
+    """Task 021c. `base.merge_candidates` produces the ids simulate's recall
+    is counted from; the query-trace view recounts recall from state. On
+    scores that tie across the k boundary, both must pick exactly the ids
+    `_merge_spec` picks. A merge whose ties fall however the sort happens to
+    leave them is a receipt that can change between two runs of the same
+    code, which is the class of defect task 012b closed for the faiss build.
+    """
+    # imported here, not at the top: the hygiene test imports this module in
+    # a clean process and must not find the model package loaded
+    from oneground.models.base import merge_candidates
+
+    with tempfile.TemporaryDirectory() as tmp:
+        head, cols = _tied(tmp)
+    offsets = cols["candidates.offsets"]
+    boundary_ties = 0
+    for q in range(int(head["n_queries"])):
+        lo, hi = int(offsets[q]), int(offsets[q + 1])
+        ids = cols["candidates.cand_id"][lo:hi]
+        scores = cols["candidates.cand_score"][lo:hi]
+        shard = cols["candidates.cand_shard"][lo:hi]
+        by_id = {}
+        for vid, s in zip(ids.tolist(), scores.tolist()):
+            by_id.setdefault(vid, s)
+        ranked = sorted(by_id.values(), reverse=True)
+        for k in (1, 10, 50, 100):
+            spec = _merge_spec(ids, scores, k)
+            # split by shard, as a family calls it
+            merged, _ = merge_candidates(
+                [ids[shard == 0], ids[shard == 1]],
+                [scores[shard == 0], scores[shard == 1]], k)
+            assert merged.tolist() == spec, (
+                f"merge_candidates breaks tied scores differently from the "
+                f"spec (query {q}, k {k})")
+            drawn = contract.draw(QueryTraceView(q, k=k), head, cols) \
+                .panels["recall"]["figures"]["returned_top_k"]
+            assert drawn == spec, (f"the view breaks tied scores differently "
+                                   f"from the spec (query {q}, k {k})")
+            boundary_ties += ranked[k - 1] == ranked[k]
+    assert boundary_ties > 0, ("no k boundary fell inside a run of tied "
+                               "scores; the test would prove nothing")
+
+
 # ---------------------------------------------------------------- hygiene
 def test_drawing_loads_no_model_family_or_measuring_code():
     """Not synthetic: a clean process draws both views and is then asked what
