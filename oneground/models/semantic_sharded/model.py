@@ -254,5 +254,87 @@ class SemanticSharded:
             copies_p99=int(np.percentile(copies, 99)),
         )
 
+    # -- state -------------------------------------------------------------
+    def state(self, built, queries, k, config, gt_ids, seed):
+        """What this configuration did, as a `state.ModelState` (task 020).
+
+        Nothing here is a new measurement. The closure is recomputed with the
+        call `build` made, under the same thread setting, and refused if its
+        copy counts differ from build's own. The probed regions come from
+        `_probed`, the router search used. The candidates are search's
+        per-shard calls, repeated at the same depth.
+
+        Queries are scored against at least two centroids even at probe=1, so
+        the ambiguity rule (d2 <= 1.10 * d1) can be drawn from state.
+        """
+        import inspect
+
+        from ...measures.crispness import centroid_dists, kmeans
+        from .. import state as S
+
+        st = built.state
+        vectors, cents = st["vectors"], st["centroids"]
+        n, dim = vectors.shape
+        nq = len(queries)
+        n_cent = int(len(cents))
+        eps = float(config.get("epsilon", 0.2))
+        probe = int(config.get("probe", 2))
+
+        with single_threaded_faiss(st.get("deterministic", True)):
+            d, near = centroid_dists(vectors, cents, MAX_ASSIGN)
+        within = d <= d[:, [0]] * (1 + eps)
+        within[:, 0] = True
+        copies = within.sum(axis=1)
+        if not np.array_equal(copies, st["copies"]):
+            raise RuntimeError(
+                "semantic_sharded.state(): the recomputed closure's copy "
+                "counts differ from build's, so this state would describe a "
+                "different partition from the one measured")
+        home = near[:, 0].astype(np.int32)
+
+        partition = S.PartitionState(
+            family=NAME, kind="kmeans", seed=int(seed),
+            params={"centroids": n_cent, "epsilon": eps, "probe": probe},
+            region_ids=np.arange(n_cent, dtype=np.int32),
+            region_sizes=np.bincount(home, minlength=n_cent).astype(np.int64),
+            centroids=np.asarray(cents, dtype=np.float32),
+            distance=S.DISTANCE,
+            # build's own call and simulate's shared cache both run kmeans at
+            # its default; read the default rather than restate it
+            kmeans_niter=int(
+                inspect.signature(kmeans).parameters["niter"].default))
+        assignment = S.AssignmentState(
+            home_region=home, copy_count=copies.astype(np.uint8),
+            copy_set=np.where(within, near, -1).astype(np.int32),
+            centroid_dist=d.astype(np.float32), max_assign=MAX_ASSIGN,
+            epsilon=eps)
+
+        q_r = self._probed(built, queries, config)
+        sd, sr = centroid_dists(queries, cents, max(probe, 2))
+        reason = np.full(q_r.shape, S.ROUTE_PROBE, dtype=np.uint8)
+        reason[:, 0] = S.ROUTE_DEFAULT
+        route = S.RouteState(scored_region=sr.astype(np.int32),
+                             scored_dist=sd.astype(np.float32),
+                             probed_region=q_r.astype(np.int32),
+                             probe_reason=reason)
+
+        shards, ids_of = st["shards"], st["ids_of"]
+        for s in shards.values():
+            s.hnsw.efSearch = int(config.get("efSearch", 96))
+        per_query, padded = S.collect_candidates(
+            shards, ids_of, queries, q_r,
+            int(config.get("shard_depth", SHARD_DEPTH)))
+        candidates = S.build_candidates(per_query, gt_ids,
+                                        int(np.shape(gt_ids)[1]))
+        return S.ModelState(
+            family=NAME, config_label=config.label,
+            params=dict(config.params), seed=int(seed), n_base=int(n),
+            n_queries=int(nq), dim=int(dim), partition=partition,
+            assignment=assignment, route=route, candidates=candidates,
+            load=S.build_load(partition.region_ids, assignment, route,
+                              candidates),
+            notes=[f"faiss padding slots mapped through ids_of as search "
+                   f"maps them: {padded}"])
+
 
 MODEL = SemanticSharded()

@@ -315,6 +315,161 @@ def test_the_fixture_verify_parser_is_defined_once():
         assert expected in through_cli, expected
 
 
+# --------------------------------------- the package guard (task 020b)
+def _checkout(root, git_file=False):
+    """A minimal oneground checkout: a `.git` and a `oneground/` package."""
+    os.makedirs(os.path.join(root, "oneground"), exist_ok=True)
+    open(os.path.join(root, "oneground", "__init__.py"), "w").close()
+    if git_file:
+        # what `git worktree add` leaves: a file pointing at the shared repo
+        with open(os.path.join(root, ".git"), "w", encoding="utf-8") as f:
+            f.write("gitdir: /elsewhere/.git/worktrees/x\n")
+    else:
+        os.makedirs(os.path.join(root, ".git"), exist_ok=True)
+    return root
+
+
+def test_a_checkout_running_its_own_package_passes_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = _checkout(tmp)
+        sub = os.path.join(tree, "runs", "deep")
+        os.makedirs(sub)
+        own = os.path.join(tree, "oneground")
+        assert env.package_tree_mismatch(cwd=tree, package=own) is None
+        # from a subdirectory the tree is still the tree
+        assert env.package_tree_mismatch(cwd=sub, package=own) is None
+
+
+def test_a_checkout_running_another_trees_package_is_found_synthetic():
+    with tempfile.TemporaryDirectory() as a, \
+            tempfile.TemporaryDirectory() as b:
+        here, other = _checkout(a), _checkout(b)
+        bad = env.package_tree_mismatch(
+            cwd=here, package=os.path.join(other, "oneground"))
+        assert bad is not None
+        tree, own, imported = bad
+        assert env._same_path(tree, here)
+        assert env._same_path(own, os.path.join(here, "oneground"))
+        assert env._same_path(imported, os.path.join(other, "oneground"))
+
+
+def test_a_git_worktree_is_a_working_tree_synthetic():
+    """`git worktree add` leaves `.git` as a file. Task 020 was in one."""
+    with tempfile.TemporaryDirectory() as a, \
+            tempfile.TemporaryDirectory() as b:
+        here, other = _checkout(a, git_file=True), _checkout(b)
+        assert env._same_path(env.working_tree_root(here), here)
+        assert env.package_tree_mismatch(
+            cwd=here, package=os.path.join(other, "oneground")) is not None
+
+
+def test_a_copy_installed_inside_the_tree_is_still_foreign_synthetic():
+    """Under the tree is not the tree's package: a venv in the checkout holds
+    an installed, possibly stale copy, which is the thing being stopped."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = _checkout(tmp)
+        installed = os.path.join(tree, ".venv", "Lib", "site-packages",
+                                 "oneground")
+        os.makedirs(installed)
+        assert env.package_tree_mismatch(cwd=tree,
+                                         package=installed) is not None
+
+
+def test_outside_a_oneground_checkout_nothing_is_judged_synthetic():
+    """A user's own project, with oneground pip-installed, is not refused:
+    there is no second copy of the package there to confuse it with."""
+    with tempfile.TemporaryDirectory() as proj, \
+            tempfile.TemporaryDirectory() as other:
+        os.makedirs(os.path.join(proj, ".git"))          # their repository
+        elsewhere = os.path.join(_checkout(other), "oneground")
+        assert env.package_tree_mismatch(cwd=proj, package=elsewhere) is None
+
+
+def test_a_foreign_package_is_refused_with_both_paths_synthetic():
+    with tempfile.TemporaryDirectory() as a, \
+            tempfile.TemporaryDirectory() as b:
+        here, other = _checkout(a), _checkout(b)
+        foreign = os.path.join(other, "oneground")
+        log = _Log()
+        stamp, code = env.guard_or_exit(
+            "oneground simulate", _reqs(a, "pyyaml==6.0.3\n"), log=log,
+            cwd=here, package=foreign)
+        assert stamp is None and code == 2
+        assert "REFUSED" in log.text, log.text
+        assert os.path.join(here, "oneground") in log.text, log.text
+        assert foreign in log.text, log.text
+        assert "-m oneground.cli" in log.text, "the refusal must say what to do"
+
+
+def test_allow_unpinned_does_not_wave_a_foreign_package_through_synthetic():
+    """That flag is about library versions; it says nothing about which
+    source tree is running."""
+    with tempfile.TemporaryDirectory() as a, \
+            tempfile.TemporaryDirectory() as b:
+        here, other = _checkout(a), _checkout(b)
+        log = _Log()
+        stamp, code = env.guard_or_exit(
+            "oneground simulate", _reqs(a, "numpy==0.0.1\n"),
+            allow_unpinned=True, log=log, cwd=here,
+            package=os.path.join(other, "oneground"))
+        assert stamp is None and code == 2, (code, log.text)
+        assert "REFUSED" in log.text and "WARNING" not in log.text, log.text
+
+
+def test_the_package_is_printed_whatever_the_outcome_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _Log()
+        env.guard("cmd", _reqs(tmp, "pyyaml==6.0.3\n"), log=log, cwd=tmp)
+        assert env.package_dir() in log.text, log.text
+
+
+def test_a_guarded_command_run_from_another_checkout_refuses():
+    """Not synthetic: a real process, a real guarded command.
+
+    It imports THIS checkout's package while standing in a different
+    oneground checkout -- the editable-install situation, inverted so it can
+    be staged without touching any real second tree. `oneground simulate`
+    must stop before reading its requirements file, exit 2, name both
+    packages, and write nothing.
+    """
+    import subprocess
+
+    repo = os.path.normpath(os.path.join(os.path.dirname(
+        os.path.abspath(__file__)), ".."))
+    with tempfile.TemporaryDirectory() as tmp:
+        other = _checkout(tmp)
+        code = ("import sys; sys.path.insert(0, %r); "
+                "from oneground.cli import main; "
+                "sys.exit(main(['simulate', 'requirements.yaml']))" % repo)
+        r = subprocess.run([sys.executable, "-c", code], cwd=other,
+                           capture_output=True, text=True, timeout=600)
+        out = r.stdout + r.stderr
+        assert r.returncode == 2, (r.returncode, out)
+        assert "REFUSED" in out, out
+        assert os.path.join(repo, "oneground") in out, out
+        assert os.path.basename(tmp) in out, out
+        assert sorted(os.listdir(other)) == [".git", "oneground"], \
+            os.listdir(other)
+
+
+def test_this_test_run_imports_the_package_of_the_checkout_it_tests():
+    """Not synthetic: the guard's question, asked of the test run itself.
+
+    Whichever module imports `oneground` first decides, for the whole
+    process, which tree is under test. If that was another checkout's copy,
+    every result in this run describes code nobody changed -- worse than a
+    wrong number, because nothing looks wrong. This file is collected by path
+    from the checkout being tested, so the package it sees must be that
+    checkout's.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    bad = env.package_tree_mismatch(cwd=here)
+    assert bad is None, (
+        "this test run imported another tree's oneground package:\n"
+        "  tests collected from  %s\n  package imported      %s"
+        % (bad[1], bad[2]))
+
+
 # ---------------------------------- no machine identifiers (task 014)
 def test_a_local_environment_id_is_os_and_arch_never_a_hostname():
     """`local:<hostname>` reached calibration/history.jsonl, a file every

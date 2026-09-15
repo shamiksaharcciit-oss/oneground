@@ -49,7 +49,6 @@ def _row(config, family, params, recall, storage, memory, fanout):
         "storage_amplification": storage, "stored_vectors": 150000,
         "est_memory_bytes": memory, "fanout": fanout, "shards": 1,
         "p50_copies": 1, "p95_copies": 1, "p99_copies_per_vector": 1,
-        "build_seconds": 1.0, "query_seconds": 1.0,
     }
 
 

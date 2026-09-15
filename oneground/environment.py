@@ -213,22 +213,142 @@ def stamp(requirements_path=REQUIREMENTS, allowed_unpinned=False):
     return out
 
 
-def describe(requirements_path=REQUIREMENTS):
-    """The one line every guarded command prints, whatever the outcome."""
+# ------------------------------------------------ the package guard (020b)
+#
+# The same class of mistake as the system interpreter, one level down. Task
+# 020 worked in a second `git worktree` of this repository, beside a venv
+# with an editable install. That install resolves `oneground` to the checkout
+# it was installed from, wherever a command is run. So in the second tree, the
+# `oneground` console script -- or any process not started from the tree's
+# root -- runs the FIRST checkout's code against the second tree's inputs and
+# writes the second tree's outputs: a complete, correct-looking run of code
+# nobody is looking at. A test run is exposed the same way: whichever module
+# imports `oneground` first decides, for the whole process, which tree is
+# under test.
+#
+# It gets the answer the interpreter got: print both paths, every time, and
+# refuse on a mismatch.
+
+
+class ForeignPackage(RuntimeError):
+    """The imported oneground package is not the working tree's own."""
+
+
+def package_dir():
+    """The directory of the `oneground` package this process imported."""
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def working_tree_root(start=None):
+    """The nearest directory at or above `start` holding a `.git`, or None.
+
+    `.git` may be a directory (a clone) or a file (a `git worktree`, whose
+    `.git` points back at the shared repository). Both are working trees, and
+    the second is where task 020 met this.
+    """
+    here = os.path.abspath(start or os.getcwd())
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def _same_path(a, b):
+    return (os.path.normcase(os.path.realpath(a))
+            == os.path.normcase(os.path.realpath(b)))
+
+
+def package_tree_mismatch(cwd=None, package=None):
+    """(tree, its_package, imported) when this process runs another tree's
+    code; None when it does not, or when there is nothing to judge.
+
+    Judged only inside a oneground checkout: a working tree with its own
+    `oneground/__init__.py`. There, the package doing the work must be that
+    checkout's own `oneground/`. Anywhere else -- a user's project with
+    oneground pip-installed, or no working tree at all -- there is no second
+    copy to confuse it with, and nothing is judged.
+
+    Being somewhere under the tree is not enough, and is not what is checked:
+    a venv inside the checkout holds an installed copy of the package under
+    the tree, and an installed copy is exactly the stale code this stops.
+    """
+    tree = working_tree_root(cwd)
+    if tree is None:
+        return None
+    own = os.path.join(tree, "oneground")
+    if not os.path.isfile(os.path.join(own, "__init__.py")):
+        return None
+    imported = package_dir() if package is None else package
+    if _same_path(imported, own):
+        return None
+    return tree, own, imported
+
+
+def guard_package(command, cwd=None, package=None, log=print):
+    """Refuse when this process is running another checkout's oneground.
+
+    There is no flag past it. `--allow-unpinned` stamps an artifact made
+    under other library versions, and a reader can weigh that stamp; no stamp
+    turns a run of one source tree into an artifact of another. The way past
+    is to run the tree you mean, which the message says how to do.
+    """
+    bad = package_tree_mismatch(cwd, package)
+    if bad is None:
+        return
+    tree, own, imported = bad
+    for line in (
+        "",
+        f"REFUSED: `{command}` writes a canonical artifact, and the oneground "
+        "package this",
+        "process imported is not the one in the working tree it is running "
+        "in:",
+        "",
+        f"    working tree        {tree}",
+        f"    its package         {own}",
+        f"    package imported    {imported}",
+        "",
+        "  Every number would be computed by the imported package's code, while",
+        "  the inputs and outputs are this tree's. A venv's editable install",
+        "  does this without a word: it resolves `oneground` to the checkout it",
+        "  was installed from, wherever the command runs.",
+        "",
+        "  Run this tree's code from this tree's root:",
+        "",
+        f"      cd {tree}",
+        "      <venv python> -m oneground.cli ...",
+        "",
+        "  There is no flag past this. --allow-unpinned does not apply: it is",
+        "  about library versions, and this is about which code is running.",
+    ):
+        log(line)
+    raise ForeignPackage(
+        f"{command}: imported {imported}, working tree is {tree}")
+
+
+def describe(requirements_path=REQUIREMENTS, package=None):
+    """What every guarded command prints, whatever the outcome: the
+    interpreter (task 013b) and the package it imported (task 020b)."""
     where = "venv" if in_venv() else "SYSTEM INTERPRETER"
-    return f"python  {sys.executable}  ({where})"
+    return (f"python  {sys.executable}  ({where})\n"
+            f"package {package_dir() if package is None else package}")
 
 
 def guard(command, requirements_path=REQUIREMENTS, allow_unpinned=False,
-          log=print):
-    """Print the interpreter, refuse if unpinned. Returns the stamp.
+          log=print, cwd=None, package=None):
+    """Print the interpreter and package; refuse if either is wrong. Returns
+    the stamp.
 
-    Raises `UnpinnedEnvironment` when the versions differ and
-    `allow_unpinned` is false. The caller turns that into an exit code; the
+    Raises `ForeignPackage` when the imported package is not the working
+    tree's own, and `UnpinnedEnvironment` when the versions differ and
+    `allow_unpinned` is false. The caller turns either into an exit code; the
     message is written for someone who has just been stopped and needs to know
     what to type next.
     """
-    log(describe(requirements_path))
+    log(describe(requirements_path, package))
+    guard_package(command, cwd, package, log=log)
     bad = running_pin_mismatches(requirements_path)
     if not bad:
         return stamp(requirements_path)
@@ -281,28 +401,34 @@ def guard(command, requirements_path=REQUIREMENTS, allow_unpinned=False,
 
 
 def guard_or_exit(command, requirements_path=REQUIREMENTS,
-                  allow_unpinned=False, log=print):
+                  allow_unpinned=False, log=print, cwd=None, package=None):
     """`guard`, but returns (stamp, exit_code) instead of raising.
 
     Command handlers use this so a refusal is an ordinary non-zero exit rather
     than a traceback: being stopped by a guard is not a crash.
+
+    The package check runs on both paths, before `allow_unpinned` is
+    consulted: that flag answers a question about library versions and must
+    not wave through a run of the wrong source tree. `cwd` and `package`
+    exist so the check can be tested without a second real checkout.
     """
-    if allow_unpinned:
-        log(describe(requirements_path))
-        s = stamp(requirements_path, allowed_unpinned=True)
-        if not s["pinned"]:
-            log("")
-            log(f"WARNING: --allow-unpinned. This artifact will be stamped "
-                f"`{UNPINNED_NOTE}`.")
-            for m in s["mismatches"]:
-                log(f"    {m['package']:<16} running {m['running']:<12} "
-                    f"pinned {m['pinned']}")
-            log("")
-        return s, 0
     try:
+        if allow_unpinned:
+            log(describe(requirements_path, package))
+            guard_package(command, cwd, package, log=log)
+            s = stamp(requirements_path, allowed_unpinned=True)
+            if not s["pinned"]:
+                log("")
+                log(f"WARNING: --allow-unpinned. This artifact will be stamped "
+                    f"`{UNPINNED_NOTE}`.")
+                for m in s["mismatches"]:
+                    log(f"    {m['package']:<16} running {m['running']:<12} "
+                        f"pinned {m['pinned']}")
+                log("")
+            return s, 0
         return guard(command, requirements_path, allow_unpinned=False,
-                     log=log), 0
-    except UnpinnedEnvironment:
+                     log=log, cwd=cwd, package=package), 0
+    except (UnpinnedEnvironment, ForeignPackage):
         return None, 2
 
 

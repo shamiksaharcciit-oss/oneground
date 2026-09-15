@@ -99,7 +99,7 @@ def _cmd_simulate(args, rest):
     if rest:
         raise SystemExit(f"oneground simulate: unexpected arguments: "
                          f"{' '.join(rest)}")
-    simulate.run(args.requirements)
+    simulate.run(args.requirements, emit_state=args.emit_state)
     return 0
 
 
@@ -237,6 +237,12 @@ def build_parser():
                              "sample")
     s_.add_argument("requirements",
                     help="path to the same requirements.yaml characterize used")
+    s_.add_argument("--emit-state", action="store_true",
+                    help="also write state/ beside simulate.json: where every "
+                         "vector went, how every query was routed and what "
+                         "every shard returned, one file per configuration "
+                         "(docs/STATE.md). Off by default; simulate.json is "
+                         "unchanged by it.")
     envmod.add_argument(s_)
 
     v_ = sub.add_parser("verify",

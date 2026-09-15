@@ -140,5 +140,49 @@ class SingleNodeHNSW:
             shards=1,
         )
 
+    # -- state -------------------------------------------------------------
+    def state(self, built, queries, k, config, gt_ids, seed):
+        """What this configuration did, as a `state.ModelState` (task 020).
+
+        One region holding everything, one copy of every vector, one probe per
+        query for reason fan-out, and the index's own top-k as the candidates:
+        search's call, repeated. faiss padding (-1) is not a candidate and is
+        dropped, as it is from a recall count.
+        """
+        from .. import state as S
+        idx, vectors = built.state["index"], built.state["vectors"]
+        n, dim = vectors.shape
+        nq = len(queries)
+
+        partition = S.PartitionState(
+            family=NAME, kind="single", seed=int(seed), params={},
+            region_ids=np.array([0], dtype=np.int32),
+            region_sizes=np.array([n], dtype=np.int64))
+        assignment = S.AssignmentState(
+            home_region=np.zeros(n, dtype=np.int32),
+            copy_count=np.ones(n, dtype=np.uint8),
+            copy_set=np.zeros((n, 1), dtype=np.int32),
+            centroid_dist=np.full((n, 1), np.nan, dtype=np.float32),
+            max_assign=1)
+        route = S.RouteState(
+            scored_region=np.zeros((nq, 0), dtype=np.int32),
+            scored_dist=np.zeros((nq, 0), dtype=np.float32),
+            probed_region=np.zeros((nq, 1), dtype=np.int32),
+            probe_reason=np.full((nq, 1), S.ROUTE_FANOUT, dtype=np.uint8))
+
+        idx.hnsw.efSearch = int(config.get("efSearch", 128))
+        scores, ids = idx.search(queries, k)
+        per_query = [(ids[q], np.zeros(len(ids[q]), dtype=np.int32),
+                      scores[q]) for q in range(nq)]
+        candidates = S.build_candidates(per_query, gt_ids,
+                                        int(np.shape(gt_ids)[1]))
+        return S.ModelState(
+            family=NAME, config_label=config.label,
+            params=dict(config.params), seed=int(seed), n_base=int(n),
+            n_queries=int(nq), dim=int(dim), partition=partition,
+            assignment=assignment, route=route, candidates=candidates,
+            load=S.build_load(partition.region_ids, assignment, route,
+                              candidates))
+
 
 MODEL = SingleNodeHNSW()

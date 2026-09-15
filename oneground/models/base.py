@@ -441,6 +441,20 @@ class Model(Protocol):
     def footprint(self, built: BuiltIndex) -> Footprint:
         ...
 
+    def state(self, built: BuiltIndex, queries: np.ndarray, k: int,
+              config: Config, gt_ids: np.ndarray, seed: int):
+        """What this configuration did, as a `state.ModelState` (task 020).
+
+        Where every vector went, how every query was routed, and every
+        candidate each shard returned -- what the lab draws. Called by
+        `simulate --emit-state` after the row is measured and before the index
+        is released. It must not change anything the family measures, must
+        meet `state.contract_violations` against the family's own footprint,
+        and its candidates must merge back to exactly what `search` returned.
+        See docs/STATE.md.
+        """
+        ...
+
 
 # --------------------------------------------------------------------------
 # shared helpers
