@@ -491,6 +491,47 @@ def test_state_contract_names_each_break_synthetic():
     assert "outside [0," in broken(id_not_a_base_id)
 
 
+def test_a_semantic_state_recounts_its_own_epsilon_synthetic():
+    """Task 021: the closure at the emitted epsilon, recounted from the state's
+    distances and nearest regions alone, is exactly the copy set the family
+    built -- the precondition for recounting at any other epsilon."""
+    x, q = _corpus()
+    model = models.get("semantic_sharded")
+    for eps in (0.0, 0.1, 0.5):
+        cfg = Config.make("semantic_sharded", {"centroids": 8, "epsilon": eps,
+                                               "probe": 2, "M": 16,
+                                               "efSearch": 64})
+        st, _, fp = _state(model, x, q, cfg)
+        a = st.assignment
+        d = a.centroid_dist
+        within = d <= d[:, [0]] * (1 + eps)
+        within[:, 0] = True
+        assert np.array_equal(np.where(within, a.nearest_region, -1),
+                              a.copy_set), f"epsilon {eps}: copy sets differ"
+        assert np.array_equal(within.sum(axis=1), a.copy_count), eps
+
+
+def test_the_contract_names_a_missing_or_wrong_nearest_region_synthetic():
+    import copy
+
+    from oneground.models import state as S
+
+    x, q = _corpus()
+    st, _, fp = _state(models.get("semantic_sharded"), x, q)
+
+    missing = copy.deepcopy(st)
+    missing.assignment.nearest_region = None
+    assert "nearest_region is missing" in \
+        " | ".join(S.contract_violations(missing, fp))
+
+    wrong = copy.deepcopy(st)
+    a = wrong.assignment
+    row = int(np.where(a.copy_count > 1)[0][0])
+    a.nearest_region[row, 1] = (a.nearest_region[row, 1] + 1) % 8
+    assert "does not hold in that slot" in \
+        " | ".join(S.contract_violations(wrong, fp))
+
+
 def _main():
     tests = [(n, o) for n, o in sorted(globals().items())
              if n.startswith("test_") and callable(o)]

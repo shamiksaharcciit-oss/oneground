@@ -44,6 +44,20 @@ missed" could be answered for any query that lost one. Those are exactly the
 queries a routing view exists to show. Task 020 step 4 measured the gap and
 added the field; see `docs/STATE.md`.
 
+THE FIELD TASK 021 ADDED
+------------------------
+`AssignmentState.nearest_region`. Moving epsilon is the lab's first control,
+and task 021 asked what recomputes when it moves. The copy counts at any
+epsilon follow from `centroid_dist` alone. The copy SETS -- which regions a
+vector lands in, and so shard membership, load and which true neighbours a
+route can reach -- need the ids of the regions those distances were taken to.
+`copy_set` holds an id only inside the closure at the emitted epsilon, so a
+recount could lower epsilon and could not raise it.
+
+The column is additive. It does not change `state_version`: every reader
+works from the header's column map, and a state written before it simply
+lacks the column, which a view that needs it reports as `couldnt_check`.
+
 THE ENCODING
 ------------
 One file per configuration, `<family>__<id8>.state.npz`: an uncompressed zip
@@ -132,6 +146,13 @@ class AssignmentState:
     order; slot 0 is the home region. `copy_set` is -1 where a vector was not
     copied into that slot's region. `centroid_dist` is NaN for a family with
     no centroids -- not zero, because zero would read as "on the centroid".
+
+    `nearest_region` is (N, max_assign): the regions `centroid_dist` measures
+    the distance to, nearest first, whether or not the vector was copied into
+    them. `copy_set` names a region only inside the closure at this state's
+    epsilon, so without this column a recount at a LARGER epsilon has the
+    distance to a region it would now copy into and no idea which region that
+    is. Task 021 found that; see the module docstring.
     """
 
     home_region: np.ndarray                # int32 (N,)
@@ -140,6 +161,7 @@ class AssignmentState:
     centroid_dist: np.ndarray              # float32 (N, max_assign)
     max_assign: int
     epsilon: Optional[float] = None
+    nearest_region: Optional[np.ndarray] = None   # int32 (N, max_assign)
 
 
 @dataclass
@@ -408,6 +430,22 @@ def contract_violations(state, footprint=None):
     if np.any(a.copy_set[:, 0] != a.home_region):
         v.append("copy_set slot 0 is not the home region")
 
+    # every copy is in one of the nearest regions, in the slot it names
+    nr = a.nearest_region
+    if nr is None:
+        v.append("assignment.nearest_region is missing: a recount at another "
+                 "epsilon could not say which region a new copy lands in")
+    elif nr.shape != a.copy_set.shape:
+        v.append(f"nearest_region shape {nr.shape} != copy_set shape "
+                 f"{a.copy_set.shape}")
+    else:
+        if np.any(nr[:, 0] != a.home_region):
+            v.append("nearest_region slot 0 is not the home region")
+        used = a.copy_set >= 0
+        if np.any(a.copy_set[used] != nr[used]):
+            v.append("copy_set names a region that nearest_region does not "
+                     "hold in that slot")
+
     # copy counts agree with the footprint's storage amplification
     counted = int((a.copy_set >= 0).sum())
     if int(a.copy_count.astype(np.int64).sum()) != counted:
@@ -443,6 +481,10 @@ _MEANINGS = {
     "assignment.copy_set": "regions it is stored in, nearest first; -1 unused",
     "assignment.centroid_dist": "non-squared Euclidean distance to its "
                                 "nearest max_assign centroids; NaN if none",
+    "assignment.nearest_region": "the regions centroid_dist measures, nearest "
+                                 "first, whether or not the vector was copied "
+                                 "into them; what a recount at another "
+                                 "epsilon needs",
     "route.scored_region": "regions the router scored, nearest first",
     "route.scored_dist": "non-squared Euclidean distance to each; NaN pad",
     "route.probed_region": "regions searched, in probe order; -1 pad",
@@ -465,7 +507,7 @@ _MEANINGS = {
 
 _PARTS = (("partition", ("region_ids", "region_sizes", "centroids")),
           ("assignment", ("home_region", "copy_count", "copy_set",
-                          "centroid_dist")),
+                          "centroid_dist", "nearest_region")),
           ("route", ("scored_region", "scored_dist", "probed_region",
                      "probe_reason")),
           ("candidates", ("offsets", "cand_id", "cand_shard", "cand_score",

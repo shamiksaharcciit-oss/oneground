@@ -307,7 +307,7 @@ class SemanticSharded:
             home_region=home, copy_count=copies.astype(np.uint8),
             copy_set=np.where(within, near, -1).astype(np.int32),
             centroid_dist=d.astype(np.float32), max_assign=MAX_ASSIGN,
-            epsilon=eps)
+            epsilon=eps, nearest_region=near.astype(np.int32))
 
         q_r = self._probed(built, queries, config)
         sd, sr = centroid_dists(queries, cents, max(probe, 2))

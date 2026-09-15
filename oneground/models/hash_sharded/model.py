@@ -231,7 +231,7 @@ class HashSharded:
             home_region=assign, copy_count=np.ones(n, dtype=np.uint8),
             copy_set=assign.reshape(-1, 1),
             centroid_dist=np.full((n, 1), np.nan, dtype=np.float32),
-            max_assign=1)
+            max_assign=1, nearest_region=assign.reshape(-1, 1))
         # search iterates `shards.items()`; the probe order is that order
         order = np.asarray(list(shards), dtype=np.int32)
         probed = np.tile(order, (nq, 1))

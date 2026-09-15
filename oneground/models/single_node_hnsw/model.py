@@ -163,7 +163,7 @@ class SingleNodeHNSW:
             copy_count=np.ones(n, dtype=np.uint8),
             copy_set=np.zeros((n, 1), dtype=np.int32),
             centroid_dist=np.full((n, 1), np.nan, dtype=np.float32),
-            max_assign=1)
+            max_assign=1, nearest_region=np.zeros((n, 1), dtype=np.int32))
         route = S.RouteState(
             scored_region=np.zeros((nq, 0), dtype=np.int32),
             scored_dist=np.zeros((nq, 0), dtype=np.float32),
