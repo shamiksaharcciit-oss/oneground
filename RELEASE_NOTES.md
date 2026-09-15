@@ -180,6 +180,10 @@ stackexchange-150k  digests 11 verified, 0 contradicted, 0 couldnt_check
                     values   6 verified, 0 contradicted, 2 couldnt_check
 ```
 
+The arXiv fixture on `main` carries 17 digests, because a published report
+(`fixtures/arxiv-150k/report/`, declared) was added after the `v0.1.0` tag; the
+tagged release carries the 11 above.
+
 `fixtures/arxiv-150k.fixture.yaml` carries `status: verified` because of that
 run — on Windows, against a build made on Linux with a CUDA GPU, under the
 same pinned versions.

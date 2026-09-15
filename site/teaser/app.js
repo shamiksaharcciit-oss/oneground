@@ -41,7 +41,7 @@ const REGION_LIT = '#5E82AE';       // the region a query routes to
 
 // The release these numbers were produced under. The only two outward links
 // on the page are this one and PyPI, and neither is fetched until clicked.
-const RELEASE_URL = 'https://github.com/shamiksaharcciit-oss/oneground/releases/tag/v0.1.0';
+const RELEASE_URL = 'https://github.com/shamiksaharcciit-oss/oneground/releases/tag/v0.1.0-preview';
 
 const OUTCOMES = ['meets', 'fails', 'couldnt_check'];
 const OUTCOME_LABEL = { meets: 'meets', fails: 'fails', couldnt_check: "couldn't check" };
