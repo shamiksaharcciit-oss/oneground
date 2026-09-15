@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>oneground report -- arxiv-150k-via-characterize</title>
+<style>
+/* oneground design tokens. See tokens.md for what each one means.
+   Kept as a standalone file so a rendered report can inline it verbatim --
+   reports are self-contained and never fetch anything. */
+:root {
+  --slate:  #1B2432;
+  --panel:  #243040;
+  --ink:    #E7EAEF;
+  --muted:  #8B96A5;
+  --ochre:  #C99A3B;
+
+  /* Outcome colours carry meaning. Nothing else may use them. */
+  --teal:   #4FC1AD;   /* meets */
+  --coral:  #E36C5E;   /* fails */
+  --amber:  #D9A441;   /* couldnt_check */
+
+  --font-ui:   "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--slate);color:var(--ink);
+  font-family:var(--font-ui);line-height:1.55;
+  font-size:15px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:48px 28px 96px}
+code,.digest{font-family:var(--font-mono);font-size:.86em}
+h1{font-size:1.7rem;margin:.2em 0 .5em;font-weight:600;letter-spacing:-.01em}
+h2{font-size:1.05rem;margin:3rem 0 .4rem;font-weight:600;
+  color:var(--ink);letter-spacing:.01em}
+.note{color:var(--muted);margin:.2rem 0 1.1rem;font-size:.9rem;max-width:70ch}
+.masthead{display:flex;justify-content:space-between;align-items:baseline;
+  border-bottom:1px solid #33405422;padding-bottom:14px;margin-bottom:34px}
+.masthead .name{color:var(--ochre);font-weight:600;letter-spacing:.02em}
+.masthead .env{color:var(--muted);font-size:.85rem}
+
+/* the recommendation: the only emphasised element */
+.rec{background:var(--panel);border-radius:10px;padding:26px 28px;
+  border-left:3px solid var(--teal)}
+.rec-none{border-left-color:var(--amber)}
+.rec-label{text-transform:uppercase;letter-spacing:.14em;font-size:.68rem;
+  color:var(--muted)}
+.rec-config{font-size:1.1rem;color:var(--ink)}
+.rec-why{color:var(--muted);max-width:74ch;font-size:.9rem}
+.pills{margin:.5rem 0 1rem}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;
+  font-size:.76rem;margin-right:8px;border:1px solid currentColor}
+.rec-constraints{display:grid;gap:6px}
+.rec-c{display:grid;grid-template-columns:12px 190px 1fr;gap:10px;
+  align-items:baseline;font-size:.88rem}
+.rec-cn{color:var(--muted);font-family:var(--font-mono);font-size:.8rem}
+.rec-ce{color:var(--ochre);font-family:var(--font-mono);font-size:.72rem;
+  margin-left:.5em}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;
+  background:currentColor;transform:translateY(-1px)}
+
+.teal{color:var(--teal)} .coral{color:var(--coral)} .amber{color:var(--amber)}
+.muted{color:var(--muted)}
+
+table{width:100%;border-collapse:collapse;font-size:.84rem}
+th{text-align:left;font-weight:500;color:var(--muted);padding:8px 10px;
+  border-bottom:1px solid #33405433;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.07em}
+td{padding:9px 10px;border-bottom:1px solid #2b374a55;vertical-align:top}
+tbody tr:hover{background:#27334699}
+.opts .cfg code{color:var(--ink)}
+.num{text-align:right;font-family:var(--font-mono);font-size:.8rem;
+  color:var(--ink)}
+td.v{white-space:nowrap}
+.src{display:block;color:var(--muted);font-family:var(--font-mono);
+  font-size:.66rem;margin-top:2px;opacity:.75}
+/* one line per engine inside a verdict cell: the collapsed outcome above,
+   each engine's own beneath it, so a cell can never present one engine's
+   answer as the configuration's. */
+.by-engine{display:block;font-family:var(--font-mono);font-size:.68rem;
+  margin-top:3px;opacity:.95}
+.notrun td{color:var(--muted)}
+.kind{color:var(--muted);font-size:.78rem}
+.receipts .digest{color:var(--muted);font-size:.72rem;word-break:break-all}
+
+.cnums{display:grid;gap:8px;background:var(--panel);border-radius:10px;
+  padding:20px 24px;margin-top:14px}
+.cnum{display:grid;grid-template-columns:220px 120px 1fr;gap:12px;
+  align-items:baseline;font-size:.88rem}
+.cn{color:var(--muted)}
+.cv{font-family:var(--font-mono);text-align:right}
+.cnote{color:var(--muted);font-size:.78rem}
+figure.ground{margin:0 0 16px}
+figure.ground img{width:100%;border-radius:10px;display:block}
+figcaption{color:var(--muted);font-size:.8rem;margin-top:8px}
+
+ol.log{list-style:none;counter-reset:l;padding:0;margin:0}
+ol.log li{counter-increment:l;padding:10px 0 10px 46px;position:relative;
+  border-bottom:1px solid #2b374a55;font-size:.88rem}
+ol.log li::before{content:counter(l);position:absolute;left:0;top:10px;
+  color:var(--muted);font-family:var(--font-mono);font-size:.74rem}
+.lk{display:inline-block;min-width:0;margin-right:10px;color:var(--muted);
+  font-family:var(--font-mono);font-size:.7rem;text-transform:uppercase;
+  letter-spacing:.08em}
+.log-fails .lk{color:var(--coral)}
+.log-meets .lk{color:var(--teal)}
+.log-to_resolve .lk,.log-not_run .lk,.log-indistinguishable .lk{color:var(--amber)}
+.log-recommendation .lk{color:var(--ochre)}
+.lt{display:block;margin-top:2px;max-width:86ch}
+footer{margin-top:56px;padding-top:18px;border-top:1px solid #33405422;
+  color:var(--muted);font-size:.8rem;max-width:80ch}
+</style>
+</head><body><div class="wrap">
+
+<div class="masthead">
+  <span class="name">oneground</span>
+  <span class="env">arxiv-150k-via-characterize &middot; verify on runpod (Linux-6.8.0-117-generic-x86_64-with-glibc2.39) &middot;
+    generated 2026-09-13T23:17:19Z</span>
+</div>
+
+
+<section class="rec rec-none">
+  <div class="rec-label">recommendation</div>
+  <h1>Nothing is recommended</h1>
+  <p class="rec-why">No option meets every constraint. Recommending an option
+  whose constraints could not all be checked would be rounding
+  couldn&#39;t-check up to a verdict, so the report does not do it.</p>
+  <div class="pills"><span class="pill teal">0 meets</span><span class="pill coral">6 fails</span><span class="pill amber">2 couldn&#39;t-check</span></div>
+</section>
+
+<section>
+  <h2>Options</h2>
+  <p class="note">Every configuration the sweep measured, and every family
+  that was asked for and produced no rows. Hover a verdict for its reason and
+  the file and field it came from.</p>
+  <table class="opts">
+    <thead><tr>
+      <th>configuration</th><th>outcome</th>
+      <th>recall@10</th><th>ceiling@10</th><th>storage</th><th>fan-out</th>
+      <th>recall_at_k</th><th>storage_amplification</th><th>latency_p95</th><th>qps</th><th>monthly_budget</th>
+    </tr></thead>
+    <tbody><tr><td class="cfg"><code>hash_sharded[M=32,efSearch=96,shards=3]</code></td><td class="v amber">couldn&#39;t-check</td><td class="num">0.9984</td><td class="num">1.0000</td><td class="num">1.00x</td><td class="num">3</td><td class="v teal" title="recall@10 0.9984 &gt;= 0.95
+source: simulate.json:rows[hash_sharded[M=32,efSearch=96,shards=3]].recall_at_10">meets<span class="src">simulate.json:rows[hash_sharded[M=32,efSearch=96,shards=3]].recall_at_10</span></td><td class="v teal" title="1.00x stored copies per vector &lt;= 2.0x
+source: simulate.json:rows[hash_sharded[M=32,efSearch=96,shards=3]].storage_amplification">meets<span class="src">simulate.json:rows[hash_sharded[M=32,efSearch=96,shards=3]].storage_amplification</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v teal" title="EUR 140 +/- 35/month; upper bound EUR 175 &lt;= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)
+source: report.json:costs[config].monthly_high">meets<span class="src">report.json:costs[config].monthly_high</span></td></tr><tr><td class="cfg"><code>semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]</code></td><td class="v coral">fails</td><td class="num">0.9318</td><td class="num">0.9323</td><td class="num">3.72x</td><td class="num">2</td><td class="v coral" title="recall@10 0.9318 &lt; 0.95
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].recall_at_10">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].recall_at_10</span></td><td class="v coral" title="3.72x stored copies per vector &gt; 2.0x
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].storage_amplification">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].storage_amplification</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v teal" title="EUR 140 +/- 35/month; upper bound EUR 175 &lt;= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.85 GB at 70% headroom; prices declared, as_of 2026-09-11)
+source: report.json:costs[config].monthly_high">meets<span class="src">report.json:costs[config].monthly_high</span></td></tr><tr><td class="cfg"><code>semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]</code></td><td class="v coral">fails</td><td class="num">0.8952</td><td class="num">0.8952</td><td class="num">2.67x</td><td class="num">2</td><td class="v coral" title="recall@10 0.8952 &lt; 0.95
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].recall_at_10">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].recall_at_10</span></td><td class="v coral" title="2.67x stored copies per vector &gt; 2.0x
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].storage_amplification">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].storage_amplification</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v teal" title="EUR 140 +/- 35/month; upper bound EUR 175 &lt;= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.33 GB at 70% headroom; prices declared, as_of 2026-09-11)
+source: report.json:costs[config].monthly_high">meets<span class="src">report.json:costs[config].monthly_high</span></td></tr><tr><td class="cfg"><code>semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]</code></td><td class="v coral">fails</td><td class="num">0.8378</td><td class="num">0.8382</td><td class="num">3.72x</td><td class="num">1</td><td class="v coral" title="recall@10 0.8378 &lt; 0.95
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].recall_at_10">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].recall_at_10</span></td><td class="v coral" title="3.72x stored copies per vector &gt; 2.0x
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].storage_amplification">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].storage_amplification</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v teal" title="EUR 140 +/- 35/month; upper bound EUR 175 &lt;= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.85 GB at 70% headroom; prices declared, as_of 2026-09-11)
+source: report.json:costs[config].monthly_high">meets<span class="src">report.json:costs[config].monthly_high</span></td></tr><tr><td class="cfg"><code>semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]</code></td><td class="v coral">fails</td><td class="num">0.7755</td><td class="num">0.7756</td><td class="num">2.67x</td><td class="num">1</td><td class="v coral" title="recall@10 0.7755 &lt; 0.95
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].recall_at_10">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].recall_at_10</span></td><td class="v coral" title="2.67x stored copies per vector &gt; 2.0x
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].storage_amplification">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].storage_amplification</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v teal" title="EUR 140 +/- 35/month; upper bound EUR 175 &lt;= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.33 GB at 70% headroom; prices declared, as_of 2026-09-11)
+source: report.json:costs[config].monthly_high">meets<span class="src">report.json:costs[config].monthly_high</span></td></tr><tr><td class="cfg"><code>semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]</code></td><td class="v coral">fails</td><td class="num">0.7205</td><td class="num">0.7205</td><td class="num">1.00x</td><td class="num">2</td><td class="v coral" title="recall@10 0.7205 &lt; 0.95
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]].recall_at_10">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]].recall_at_10</span></td><td class="v teal" title="1.00x stored copies per vector &lt;= 2.0x
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]].storage_amplification">meets<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]].storage_amplification</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v teal" title="EUR 140 +/- 35/month; upper bound EUR 175 &lt;= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)
+source: report.json:costs[config].monthly_high">meets<span class="src">report.json:costs[config].monthly_high</span></td></tr><tr><td class="cfg"><code>semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]</code></td><td class="v coral">fails</td><td class="num">0.5472</td><td class="num">0.5473</td><td class="num">1.00x</td><td class="num">1</td><td class="v coral" title="recall@10 0.5472 &lt; 0.95
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]].recall_at_10">fails<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]].recall_at_10</span></td><td class="v teal" title="1.00x stored copies per vector &lt;= 2.0x
+source: simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]].storage_amplification">meets<span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]].storage_amplification</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v amber" title="qdrant: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params
+pgvector: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it
+source: verify_info.json:engine_facts.index_params">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine amber">pgvector couldn&amp;#39;t-check</span></td><td class="v teal" title="EUR 140 +/- 35/month; upper bound EUR 175 &lt;= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)
+source: report.json:costs[config].monthly_high">meets<span class="src">report.json:costs[config].monthly_high</span></td></tr><tr><td class="cfg"><code>single_node_hnsw[M=32,efConstruction=200,efSearch=128]</code></td><td class="v amber">couldn&#39;t-check</td><td class="num">0.9976</td><td class="num">1.0000</td><td class="num">1.00x</td><td class="num">1</td><td class="v teal" title="recall@10 0.9976 &gt;= 0.95
+source: simulate.json:rows[single_node_hnsw[M=32,efConstruction=200,efSearch=128]].recall_at_10">meets<span class="src">simulate.json:rows[single_node_hnsw[M=32,efConstruction=200,efSearch=128]].recall_at_10</span></td><td class="v teal" title="1.00x stored copies per vector &lt;= 2.0x
+source: simulate.json:rows[single_node_hnsw[M=32,efConstruction=200,efSearch=128]].storage_amplification">meets<span class="src">simulate.json:rows[single_node_hnsw[M=32,efConstruction=200,efSearch=128]].storage_amplification</span></td><td class="v amber" title="qdrant: the verify run could not attribute latency in k=10_under_load: couldnt_check: environment noise -- the baseline RTT p95 (4.62 ms) is 60% of the query p95 (7.72 ms), over the 20% limit, so this measures the path to the engine more than the engine. Recall is unaffected and is reported.
+source: verify.json:searches[k=10_under_load].latency_shape_single_client
+pgvector: p95 &gt; 40.0 ms in all 3 runs (best 316.87 ms) on runpod (environment 1ombs4scr257a5) -- runs 317.41, 332.23, 316.87; spread 15.36 ms (from k=10_under_load: under load at concurrency 32)
+source: verify.json:searches[k=10_under_load].latency_shape_single_client.p95_across_runs">couldn&#39;t-check<span class="by-engine amber">qdrant couldn&amp;#39;t-check</span><span class="by-engine coral">pgvector fails</span></td><td class="v teal" title="qdrant: sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator&#x27;s tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine&#x27;s ceiling. See qps_max
+source: verify.json:load.completed
+pgvector: did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator&#x27;s tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine&#x27;s ceiling. See qps_max
+source: verify.json:load.completed">meets<span class="by-engine teal">qdrant meets</span><span class="by-engine coral">pgvector fails</span></td><td class="v teal" title="EUR 140 +/- 35/month; upper bound EUR 175 &lt;= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)
+source: report.json:costs[config].monthly_high">meets<span class="src">report.json:costs[config].monthly_high</span></td></tr></tbody>
+  </table>
+</section>
+
+<section>
+  <h2>The ground</h2>
+  <p class="note">What the corpus is shaped like, measured before any
+  architecture was considered.</p>
+  <p class="note">This run produced no projection, so there is no ground view here. A published image from another corpus would be a picture of something else. Re-run <code>oneground characterize --project</code> to draw this sample&#39;s own.</p>
+  <div class="cnums"><div class="cnum"><span class="cn">intrinsic dimensionality</span><span class="cv">32.55</span><span class="cnote">of 768 declared</span></div><div class="cnum"><span class="cn">boundary crispness</span><span class="cv">0.036</span><span class="cnote">d2 &gt; 1.20 x d1, 256 regions</span></div><div class="cnum"><span class="cn">ambiguous query rate</span><span class="cv">0.891</span><span class="cnote">d2 &lt;= 1.10 x d1</span></div><div class="cnum"><span class="cn">region skew (top 10)</span><span class="cv">0.075</span><span class="cnote">even would be 0.039</span></div><div class="cnum"><span class="cn">drift before / after</span><span class="cv">0.523 / 0.551</span></div></div>
+</section>
+
+<section>
+  <h2>Decision log</h2>
+  <p class="note">One entry per rule that fired, in order. The last entries
+  say what would turn each couldn&#39;t-check into a verdict.</p>
+  <ol class="log"><li class="log-scope"><span class="lk">scope</span><span class="lt">8 configuration(s) were measured and judged against 5 constraint(s): recall_at_k, storage_amplification, latency_p95, qps, monthly_budget.</span><span class="src">requirements:constraints</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2] fails recall_at_k: recall@10 0.9318 &lt; 0.95.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].recall_at_10</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2] fails storage_amplification: 3.72x stored copies per vector &gt; 2.0x.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].storage_amplification</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2] fails recall_at_k: recall@10 0.8952 &lt; 0.95.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].recall_at_10</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2] fails storage_amplification: 2.67x stored copies per vector &gt; 2.0x.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].storage_amplification</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1] fails recall_at_k: recall@10 0.8378 &lt; 0.95.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].recall_at_10</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1] fails storage_amplification: 3.72x stored copies per vector &gt; 2.0x.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].storage_amplification</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1] fails recall_at_k: recall@10 0.7755 &lt; 0.95.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].recall_at_10</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1] fails storage_amplification: 2.67x stored copies per vector &gt; 2.0x.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].storage_amplification</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2] fails recall_at_k: recall@10 0.7205 &lt; 0.95.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]].recall_at_10</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1] fails recall_at_k: recall@10 0.5472 &lt; 0.95.</span><span class="src">simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]].recall_at_10</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">single_node_hnsw[M=32,efConstruction=200,efSearch=128] fails latency_p95 on pgvector: p95 &gt; 40.0 ms in all 3 runs (best 316.87 ms) on runpod (environment 1ombs4scr257a5) -- runs 317.41, 332.23, 316.87; spread 15.36 ms (from k=10_under_load: under load at concurrency 32). Measured in environment 1ombs4scr257a5.</span><span class="src">verify.json:searches[k=10_under_load].latency_shape_single_client.p95_across_runs</span></li><li class="log-fails"><span class="lk">fails</span><span class="lt">single_node_hnsw[M=32,efConstruction=200,efSearch=128] fails qps on pgvector: did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator&#x27;s tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine&#x27;s ceiling. See qps_max. Measured in environment 1ombs4scr257a5.</span><span class="src">verify.json:load.completed</span></li><li class="log-meets_environment"><span class="lk">meets_environment</span><span class="lt">single_node_hnsw[M=32,efConstruction=200,efSearch=128] meets qps on qdrant in environment 1ombs4scr257a5: sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator&#x27;s tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine&#x27;s ceiling. See qps_max.</span><span class="src">verify.json:load.completed</span></li><li class="log-indistinguishable"><span class="lk">indistinguishable</span><span class="lt">These options are indistinguishable on recall: hash_sharded[M=32,efSearch=96,shards=3] 0.9984; single_node_hnsw[M=32,efConstruction=200,efSearch=128] 0.9976. Their recall differs by less than the calibration tolerance (0.01), which is what this project can currently defend, so choosing between them on recall would be reading noise. They are separated only where they differ measurably. Overall: hash_sharded[M=32,efSearch=96,shards=3] couldnt_check; single_node_hnsw[M=32,efConstruction=200,efSearch=128] couldnt_check -- indistinguishable on recall is not indistinguishable overall.</span><span class="src">simulate.json:rows[*].recall_at_10</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">hash_sharded[M=32,efSearch=96,shards=3]: latency_p95 was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">hash_sharded[M=32,efSearch=96,shards=3]: qps was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]: latency_p95 was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]: qps was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]: latency_p95 was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]: qps was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]: latency_p95 was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]: qps was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]: latency_p95 was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]: qps was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]: latency_p95 was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]: qps was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]: latency_p95 was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]: qps was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (couldnt_check). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-no_engine_comparison"><span class="lk">no_engine_comparison</span><span class="lt">single_node_hnsw[M=32,efConstruction=200,efSearch=128]: latency_p95 was not compared across engines because fewer than two engines produced a value -- qdrant (couldnt_check), pgvector (fails). A comparison here would be between a number and an absence</span><span class="src">verify.json:engines[*]</span></li><li class="log-engine_comparison"><span class="lk">engine_comparison</span><span class="lt">single_node_hnsw[M=32,efConstruction=200,efSearch=128]: on qps, qdrant is the better of 2 engines measured in environment 1ombs4scr257a5 -- qdrant 200.00 (meets) against pgvector 119.10 (fails). Both were measured on the same sample, on the same host, sequentially. The verdicts differ -- a better number here is not the same as a passing one. How each was configured is on the record -- qdrant: 8 settings read from the engine, index build background (hnsw_config, index_build, on_disk_payload, ...); pgvector: 16 settings read from the engine, index build synchronous (effective_cache_size, hnsw.ef_search_applied, hnsw.ef_search_note, ...) -- so this compares these two deployments as they were configured; a differently tuned row for either engine would be a different measurement.</span><span class="src">verify.json:engines[*]</span></li><li class="log-engines_meeting"><span class="lk">engines_meeting</span><span class="lt">single_node_hnsw[M=32,efConstruction=200,efSearch=128] meets every engine-scoped constraint on: qdrant. Deploying it means choosing one of those; the others were measured and did not clear</span><span class="src">report.json:options[*].judgement.engines_meeting</span></li><li class="log-recommendation"><span class="lk">recommendation</span><span class="lt">No option meets every constraint, so nothing is recommended. Recommending an option whose constraints could not all be checked would be rounding couldn&#x27;t-check up to a verdict.</span><span class="src">(rule)</span></li><li class="log-to_resolve"><span class="lk">to_resolve</span><span class="lt">To decide latency_p95: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it.</span><span class="src">verify_info.json:engine_facts.index_params</span></li><li class="log-to_resolve"><span class="lk">to_resolve</span><span class="lt">To decide qps: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row&#x27;s architecture was simulated and never built, so a measurement of the built index says nothing about it.</span><span class="src">verify_info.json:engine_facts.index_params</span></li><li class="log-qps_max"><span class="lk">qps_max</span><span class="lt">qdrant: 381.2 qps at concurrency 4 (p99 15.7 ms). Ramp stopped because p99 31.7 ms exceeded 5x the first step&#x27;s 5.6 ms at concurrency 8. the ceiling under THIS load shape, on THIS host: one namespace, this query set, this k, this client on this machine, open-loop with no think time. It is not the engine&#x27;s capacity, it is not a number to compare against another engine measured elsewhere, and it is never what the `qps` constraint is judged against -- that is a sustain check against an offered rate, and the two answer different questions.</span><span class="src">verify.json:qps_max</span></li><li class="log-qps_max"><span class="lk">qps_max</span><span class="lt">pgvector: 120.9 qps at concurrency 4 (p99 53.6 ms). Ramp stopped because p99 101.6 ms exceeded 5x the first step&#x27;s 18.1 ms at concurrency 8. the ceiling under THIS load shape, on THIS host: one namespace, this query set, this k, this client on this machine, open-loop with no think time. It is not the engine&#x27;s capacity, it is not a number to compare against another engine measured elsewhere, and it is never what the `qps` constraint is judged against -- that is a sustain check against an offered rate, and the two answer different questions.</span><span class="src">verify.json:qps_max</span></li></ol>
+</section>
+
+<section>
+  <h2>Receipt</h2>
+  <p class="note">Every file this report was derived from. <em>receipt</em>
+  means re-derivable from the seeds and rules; <em>declared</em> means
+  recorded rather than re-derivable. Nothing on this page came from anywhere
+  else.</p>
+  <table class="receipts">
+    <thead><tr><th>file</th><th>kind</th><th>sha256</th></tr></thead>
+    <tbody><tr><td><code>MANIFEST.sha256</code></td><td class="kind">receipt</td><td><code class="digest">20b76bfb2268504431b95b69c4cb513dae6442a6c6a7652018130e879995f351</code></td></tr><tr><td><code>build_info.json</code></td><td class="kind">declared</td><td><code class="digest">efa0ee1504aba706bd4b8c3214a3a33ac8e2bbce09fc966e3298744d95251294</code></td></tr><tr><td><code>characterization.json</code></td><td class="kind">receipt</td><td><code class="digest">da41fb73897f52f845541931fb1005f9caef3cd59c285912faf9c2d902267199</code></td></tr><tr><td><code>queries_ids.json</code></td><td class="kind">receipt</td><td><code class="digest">3690bdf2e6b09197f51b2ea6ce8666b6ba5bdb8622116e2b15accf02f5fcf100</code></td></tr><tr><td><code>sample_ids.json</code></td><td class="kind">receipt</td><td><code class="digest">ea580b430fe7a72ce95dc4600883aa8ea2fa9b4fc3b7faf0f77fd53d0646d1b6</code></td></tr><tr><td><code>simulate.json</code></td><td class="kind">receipt</td><td><code class="digest">e084bb68a4d325de05b3643b5e9ae4f267549d2e1abefac787c210f6ff8eb250</code></td></tr><tr><td><code>simulate_info.json</code></td><td class="kind">declared</td><td><code class="digest">da041af2697685dfe1b9892c77ba0cbc329125635405d01b8188b34b03f40418</code></td></tr><tr><td><code>verify.json</code></td><td class="kind">receipt (measurements)</td><td><code class="digest">32071cfc08ecf2996a6d0bdca8aae8bb1280ff455597ca95fa94cad1f929cc93</code></td></tr><tr><td><code>verify_info.json</code></td><td class="kind">declared</td><td><code class="digest">01f515cf7b29fbe64e9a2c9c24f6ecb3ba52eb9c9c2cc4b4979785b74a40c7b0</code></td></tr></tbody>
+  </table>
+</section>
+
+<footer>
+    <p><strong>Calibration this report was generated under</strong> (<code>calibration\history.jsonl</code>):</p>
+  <ul>
+    <li>engine qdrant: last calibrated 2026-09-13 on arxiv-smoke as single_node_hnsw[M=32,efConstruction=200,efSearch=128] -- verified, deviation +0.00000 against tolerance 0.05</li>
+    <li>engine pgvector: last calibrated 2026-09-13 on arxiv-smoke as single_node_hnsw[M=32,efConstruction=200,efSearch=128] -- verified, deviation +0.00000 against tolerance 0.05</li>
+  </ul>
+  <p>The tolerance used to call two options indistinguishable on recall is
+  0.01, taken from the fixture specs&#39; own
+  tolerance on published reference recall. It is not yet a measured
+  distribution of simulated-minus-measured error.</p>
+  <p>Latency verdicts are made only from a <code>verify</code> run in the
+  environment the constraint targets, never from simulation. Latency measured
+  by this project is a shape -- sequential, single client -- and is never
+  throughput.</p>
+  <p>This file makes no network requests. Fonts fall back to the system;
+  the ground view, if present, is embedded.</p>
+</footer>
+</div></body></html>

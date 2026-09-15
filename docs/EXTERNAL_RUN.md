@@ -55,7 +55,7 @@ above is one allocation that failed, not the total.)
 ## What a successful run prints
 
 ```
-summary: digests 11 verified, 0 contradicted, 0 couldnt_check
+summary: digests 17 verified, 0 contradicted, 0 couldnt_check
          values   8 verified, 0 contradicted, 0 couldnt_check
 ```
 

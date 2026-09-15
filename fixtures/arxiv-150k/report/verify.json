@@ -1,0 +1,505 @@
+{
+  "elapsed_seconds": 2637.200337,
+  "engines": [
+    {
+      "calibration": {
+        "definition": "simulated - measured",
+        "measured_recall_at_10": 0.9992,
+        "simulated_config": "single_node_hnsw[M=32,efConstruction=200,efSearch=128]",
+        "simulated_recall_at_10": 0.99755
+      },
+      "calibration_error_recall": -0.00165,
+      "compose_image": null,
+      "dimension": 768,
+      "elapsed_seconds": 1114.391759,
+      "endpoint": "http://localhost:6333",
+      "engine": "qdrant",
+      "engine_version": "1.19.1",
+      "environment_id": "1ombs4scr257a5",
+      "index": {
+        "fully_indexed": true,
+        "indexed_vectors": 150000,
+        "points": 150000,
+        "seconds": 4.535689
+      },
+      "ingest": {
+        "batches": 293,
+        "engine_reported_count": 150000,
+        "engine_reported_count_kind": "declared",
+        "n_vectors": 150000,
+        "seconds": 40.671422,
+        "vectors_per_second": 3688.093346
+      },
+      "load": {
+        "achieved_qps": 200.0,
+        "completed": 59999,
+        "concurrency": 32,
+        "cpu_samples": 0,
+        "duration_seconds": 300.0,
+        "engine_cpu_pct": null,
+        "engine_mem_bytes": null,
+        "error_rate": 0.0,
+        "errors": 0,
+        "latency_under_load": {
+          "max_ms": 41.144729,
+          "mean_ms": 5.449227,
+          "p50_ms": 4.812539,
+          "p95_ms": 7.659488,
+          "p99_ms": 8.004584
+        },
+        "note": "latency here is measured UNDER LOAD at the stated concurrency and is a different quantity from the single-client latency shape. Recall is not measured here; it comes from a separate sequential pass so load can never be counted as a recall miss.",
+        "target_qps": 200.0,
+        "warmup_seconds_excluded": 15.0
+      },
+      "load_restarts": [
+        "restarted via `bash corpora/restart_engine.sh qdrant`; reachable again after 0.0 s (GET /readyz -> 200)",
+        "restarted via `bash corpora/restart_engine.sh qdrant`; reachable again after 0.0 s (GET /readyz -> 200)"
+      ],
+      "load_runs": [
+        {
+          "achieved_qps": 200.0,
+          "completed": 59999,
+          "concurrency": 32,
+          "cpu_samples": 0,
+          "duration_seconds": 300.0,
+          "engine_cpu_pct": null,
+          "engine_mem_bytes": null,
+          "error_rate": 0.0,
+          "errors": 0,
+          "latency_under_load": {
+            "max_ms": 41.144729,
+            "mean_ms": 5.449227,
+            "p50_ms": 4.812539,
+            "p95_ms": 7.659488,
+            "p99_ms": 8.004584
+          },
+          "note": "latency here is measured UNDER LOAD at the stated concurrency and is a different quantity from the single-client latency shape. Recall is not measured here; it comes from a separate sequential pass so load can never be counted as a recall miss.",
+          "target_qps": 200.0,
+          "warmup_seconds_excluded": 15.0
+        },
+        {
+          "achieved_qps": 200.0,
+          "completed": 60000,
+          "concurrency": 32,
+          "cpu_samples": 0,
+          "duration_seconds": 300.0,
+          "engine_cpu_pct": null,
+          "engine_mem_bytes": null,
+          "error_rate": 0.0,
+          "errors": 0,
+          "latency_under_load": {
+            "max_ms": 9.406885,
+            "mean_ms": 5.572096,
+            "p50_ms": 4.870946,
+            "p95_ms": 7.720748,
+            "p99_ms": 8.063388
+          },
+          "note": "latency here is measured UNDER LOAD at the stated concurrency and is a different quantity from the single-client latency shape. Recall is not measured here; it comes from a separate sequential pass so load can never be counted as a recall miss.",
+          "target_qps": 200.0,
+          "warmup_seconds_excluded": 15.0
+        },
+        {
+          "achieved_qps": 200.0,
+          "completed": 60000,
+          "concurrency": 32,
+          "cpu_samples": 0,
+          "duration_seconds": 300.0,
+          "engine_cpu_pct": null,
+          "engine_mem_bytes": null,
+          "error_rate": 0.0,
+          "errors": 0,
+          "latency_under_load": {
+            "max_ms": 13.278292,
+            "mean_ms": 5.963426,
+            "p50_ms": 5.119343,
+            "p95_ms": 7.802654,
+            "p99_ms": 8.157085
+          },
+          "note": "latency here is measured UNDER LOAD at the stated concurrency and is a different quantity from the single-client latency shape. Recall is not measured here; it comes from a separate sequential pass so load can never be counted as a recall miss.",
+          "target_qps": 200.0,
+          "warmup_seconds_excluded": 15.0
+        }
+      ],
+      "mode": "local",
+      "n_base": 150000,
+      "n_queries": 2000,
+      "qps_max": {
+        "at_concurrency": 4,
+        "baseline_p99_ms": 5.572165,
+        "caveat": "the ceiling under THIS load shape, on THIS host: one namespace, this query set, this k, this client on this machine, open-loop with no think time. It is not the engine's capacity, it is not a number to compare against another engine measured elsewhere, and it is never what the `qps` constraint is judged against -- that is a sustain check against an offered rate, and the two answer different questions.",
+        "error_rate_limit": 0.005,
+        "ladder": [
+          {
+            "achieved_qps": 224.49,
+            "completed": 4490,
+            "concurrency": 1,
+            "error_rate": 0.0,
+            "errors": 0,
+            "p50_ms": 4.407035,
+            "p95_ms": 5.160246,
+            "p99_ms": 5.572165
+          },
+          {
+            "achieved_qps": 309.95,
+            "completed": 6199,
+            "concurrency": 2,
+            "error_rate": 0.0,
+            "errors": 0,
+            "p50_ms": 6.390136,
+            "p95_ms": 7.946977,
+            "p99_ms": 8.843457
+          },
+          {
+            "achieved_qps": 381.25,
+            "completed": 7626,
+            "concurrency": 4,
+            "error_rate": 0.0,
+            "errors": 0,
+            "p50_ms": 10.3641,
+            "p95_ms": 14.071364,
+            "p99_ms": 15.734415
+          },
+          {
+            "achieved_qps": 408.64,
+            "completed": 8173,
+            "concurrency": 8,
+            "degraded": true,
+            "error_rate": 0.0,
+            "errors": 0,
+            "p50_ms": 19.207602,
+            "p95_ms": 27.834458,
+            "p99_ms": 31.703462
+          }
+        ],
+        "open_loop": true,
+        "p99_ms_at_max": 15.734415,
+        "p99_multiple": 5.0,
+        "qps_max": 381.25,
+        "step_seconds": 20.0,
+        "stopped_because": "p99 31.7 ms exceeded 5x the first step's 5.6 ms at concurrency 8"
+      },
+      "rtt_baseline_ms": {
+        "concurrency": 1,
+        "mean_ms": 2.551688,
+        "n_queries": 50,
+        "note": "sequential, single client, client-side wall clock. This is a latency shape and is not throughput; nothing here was measured under load.",
+        "p50_ms": 2.163104,
+        "p95_ms": 4.62157,
+        "p99_ms": 5.158692
+      },
+      "searches": {
+        "k=10": {
+          "latency_measured_but_not_attributable": {
+            "concurrency": 1,
+            "mean_ms": 4.024372,
+            "n_queries": 2000,
+            "note": "sequential, single client, client-side wall clock. This is a latency shape and is not throughput; nothing here was measured under load.",
+            "p50_ms": 4.005742,
+            "p95_ms": 4.837502,
+            "p99_ms": 5.204546
+          },
+          "latency_shape_single_client": "couldnt_check: environment noise -- the baseline RTT p95 (4.62 ms) is 96% of the query p95 (4.84 ms), over the 20% limit, so this measures the path to the engine more than the engine. Recall is unaffected and is reported.",
+          "recall_at_10": 0.9992,
+          "rtt_share_of_p95": 0.955363
+        },
+        "k=100": {
+          "latency_measured_but_not_attributable": {
+            "concurrency": 1,
+            "mean_ms": 4.295302,
+            "n_queries": 2000,
+            "note": "sequential, single client, client-side wall clock. This is a latency shape and is not throughput; nothing here was measured under load.",
+            "p50_ms": 4.242174,
+            "p95_ms": 4.959211,
+            "p99_ms": 5.235725
+          },
+          "latency_shape_single_client": "couldnt_check: environment noise -- the baseline RTT p95 (4.62 ms) is 93% of the query p95 (4.96 ms), over the 20% limit, so this measures the path to the engine more than the engine. Recall is unaffected and is reported.",
+          "recall_at_100": 0.99808,
+          "rtt_share_of_p95": 0.931916
+        },
+        "k=10_under_load": {
+          "latency_measured_but_not_attributable": {
+            "concurrency": 32,
+            "max_ms": 41.144729,
+            "mean_ms": 5.449227,
+            "n_queries": 59999,
+            "note": "measured UNDER LOAD at concurrency 32; not a single-client shape; p95_ms is the MEDIAN of 3 runs (min 7.66, max 7.80, spread 0.14 ms) -- see p95_across_runs, and the verdict rule, which does not decide from one run",
+            "p50_ms": 4.812539,
+            "p95_across_runs": {
+              "max": 7.802654,
+              "median": 7.720748,
+              "min": 7.659488,
+              "n_runs": 3,
+              "p95_ms_per_run": [
+                7.659488,
+                7.720748,
+                7.802654
+              ],
+              "spread": 0.143166
+            },
+            "p95_ms": 7.720748,
+            "p99_ms": 8.004584
+          },
+          "latency_shape_single_client": "couldnt_check: environment noise -- the baseline RTT p95 (4.62 ms) is 60% of the query p95 (7.72 ms), over the 20% limit, so this measures the path to the engine more than the engine. Recall is unaffected and is reported.",
+          "recall_at_10": 0.9992,
+          "rtt_share_of_p95": 0.598591
+        }
+      }
+    },
+    {
+      "calibration": {
+        "definition": "simulated - measured",
+        "measured_recall_at_10": 0.99845,
+        "simulated_config": "single_node_hnsw[M=32,efConstruction=200,efSearch=128]",
+        "simulated_recall_at_10": 0.99755
+      },
+      "calibration_error_recall": -0.0009,
+      "compose_image": null,
+      "dimension": 768,
+      "elapsed_seconds": 1522.786293,
+      "endpoint": "postgresql://oneground:oneground@localhost:55432/oneground",
+      "engine": "pgvector",
+      "engine_version": "0.8.6",
+      "environment_id": "1ombs4scr257a5",
+      "index": {
+        "fully_indexed": true,
+        "indexed_vectors": 150000,
+        "points": 150000,
+        "seconds": 0.012805
+      },
+      "ingest": {
+        "batches": 293,
+        "engine_reported_count": 150000,
+        "engine_reported_count_kind": "declared",
+        "n_vectors": 150000,
+        "seconds": 125.430737,
+        "vectors_per_second": 1195.879129
+      },
+      "load": {
+        "achieved_qps": 119.1,
+        "completed": 35731,
+        "concurrency": 32,
+        "cpu_samples": 0,
+        "duration_seconds": 300.0,
+        "engine_cpu_pct": null,
+        "engine_mem_bytes": null,
+        "error_rate": 0.0,
+        "errors": 0,
+        "latency_under_load": {
+          "max_ms": 642.782547,
+          "mean_ms": 268.663477,
+          "p50_ms": 267.661132,
+          "p95_ms": 317.410637,
+          "p99_ms": 344.857925
+        },
+        "note": "latency here is measured UNDER LOAD at the stated concurrency and is a different quantity from the single-client latency shape. Recall is not measured here; it comes from a separate sequential pass so load can never be counted as a recall miss.",
+        "shortfall": "achieved 119.1 qps against a target of 200. Something is the bottleneck -- the engine, the client, or the host they share. This generator reports the shortfall; it does not diagnose it.",
+        "target_qps": 200.0,
+        "warmup_seconds_excluded": 15.0
+      },
+      "load_restarts": [
+        "restarted via `bash corpora/restart_engine.sh pgvector`; reachable again after 0.0 s (SELECT 1 -> 1)",
+        "restarted via `bash corpora/restart_engine.sh pgvector`; reachable again after 0.0 s (SELECT 1 -> 1)"
+      ],
+      "load_runs": [
+        {
+          "achieved_qps": 119.1,
+          "completed": 35731,
+          "concurrency": 32,
+          "cpu_samples": 0,
+          "duration_seconds": 300.0,
+          "engine_cpu_pct": null,
+          "engine_mem_bytes": null,
+          "error_rate": 0.0,
+          "errors": 0,
+          "latency_under_load": {
+            "max_ms": 642.782547,
+            "mean_ms": 268.663477,
+            "p50_ms": 267.661132,
+            "p95_ms": 317.410637,
+            "p99_ms": 344.857925
+          },
+          "note": "latency here is measured UNDER LOAD at the stated concurrency and is a different quantity from the single-client latency shape. Recall is not measured here; it comes from a separate sequential pass so load can never be counted as a recall miss.",
+          "shortfall": "achieved 119.1 qps against a target of 200. Something is the bottleneck -- the engine, the client, or the host they share. This generator reports the shortfall; it does not diagnose it.",
+          "target_qps": 200.0,
+          "warmup_seconds_excluded": 15.0
+        },
+        {
+          "achieved_qps": 116.37,
+          "completed": 34912,
+          "concurrency": 32,
+          "cpu_samples": 0,
+          "duration_seconds": 300.0,
+          "engine_cpu_pct": null,
+          "engine_mem_bytes": null,
+          "error_rate": 0.0,
+          "errors": 0,
+          "latency_under_load": {
+            "max_ms": 893.661544,
+            "mean_ms": 274.944064,
+            "p50_ms": 274.842313,
+            "p95_ms": 332.234458,
+            "p99_ms": 440.023387
+          },
+          "note": "latency here is measured UNDER LOAD at the stated concurrency and is a different quantity from the single-client latency shape. Recall is not measured here; it comes from a separate sequential pass so load can never be counted as a recall miss.",
+          "shortfall": "achieved 116.4 qps against a target of 200. Something is the bottleneck -- the engine, the client, or the host they share. This generator reports the shortfall; it does not diagnose it.",
+          "target_qps": 200.0,
+          "warmup_seconds_excluded": 15.0
+        },
+        {
+          "achieved_qps": 122.58,
+          "completed": 36775,
+          "concurrency": 32,
+          "cpu_samples": 0,
+          "duration_seconds": 300.0,
+          "engine_cpu_pct": null,
+          "engine_mem_bytes": null,
+          "error_rate": 0.0,
+          "errors": 0,
+          "latency_under_load": {
+            "max_ms": 708.082955,
+            "mean_ms": 261.04707,
+            "p50_ms": 260.221962,
+            "p95_ms": 316.8743,
+            "p99_ms": 401.276012
+          },
+          "note": "latency here is measured UNDER LOAD at the stated concurrency and is a different quantity from the single-client latency shape. Recall is not measured here; it comes from a separate sequential pass so load can never be counted as a recall miss.",
+          "shortfall": "achieved 122.6 qps against a target of 200. Something is the bottleneck -- the engine, the client, or the host they share. This generator reports the shortfall; it does not diagnose it.",
+          "target_qps": 200.0,
+          "warmup_seconds_excluded": 15.0
+        }
+      ],
+      "mode": "local",
+      "n_base": 150000,
+      "n_queries": 2000,
+      "qps_max": {
+        "at_concurrency": 4,
+        "baseline_p99_ms": 18.085388,
+        "caveat": "the ceiling under THIS load shape, on THIS host: one namespace, this query set, this k, this client on this machine, open-loop with no think time. It is not the engine's capacity, it is not a number to compare against another engine measured elsewhere, and it is never what the `qps` constraint is judged against -- that is a sustain check against an offered rate, and the two answer different questions.",
+        "error_rate_limit": 0.005,
+        "ladder": [
+          {
+            "achieved_qps": 92.55,
+            "completed": 1851,
+            "concurrency": 1,
+            "error_rate": 0.0,
+            "errors": 0,
+            "p50_ms": 10.547733,
+            "p95_ms": 15.625713,
+            "p99_ms": 18.085388
+          },
+          {
+            "achieved_qps": 117.2,
+            "completed": 2344,
+            "concurrency": 2,
+            "error_rate": 0.0,
+            "errors": 0,
+            "p50_ms": 16.561043,
+            "p95_ms": 27.5829,
+            "p99_ms": 30.893412
+          },
+          {
+            "achieved_qps": 120.9,
+            "completed": 2418,
+            "concurrency": 4,
+            "error_rate": 0.0,
+            "errors": 0,
+            "p50_ms": 32.522193,
+            "p95_ms": 41.464385,
+            "p99_ms": 53.623068
+          },
+          {
+            "achieved_qps": 95.7,
+            "completed": 1914,
+            "concurrency": 8,
+            "degraded": true,
+            "error_rate": 0.0,
+            "errors": 0,
+            "p50_ms": 83.429133,
+            "p95_ms": 97.735695,
+            "p99_ms": 101.575532
+          }
+        ],
+        "open_loop": true,
+        "p99_ms_at_max": 53.623068,
+        "p99_multiple": 5.0,
+        "qps_max": 120.9,
+        "step_seconds": 20.0,
+        "stopped_because": "p99 101.6 ms exceeded 5x the first step's 18.1 ms at concurrency 8"
+      },
+      "rtt_baseline_ms": {
+        "concurrency": 1,
+        "mean_ms": 0.384189,
+        "n_queries": 50,
+        "note": "sequential, single client, client-side wall clock. This is a latency shape and is not throughput; nothing here was measured under load.",
+        "p50_ms": 0.346867,
+        "p95_ms": 0.484261,
+        "p99_ms": 0.912803
+      },
+      "searches": {
+        "k=10": {
+          "latency_shape_single_client": {
+            "concurrency": 1,
+            "mean_ms": 10.471783,
+            "n_queries": 2000,
+            "note": "sequential, single client, client-side wall clock. This is a latency shape and is not throughput; nothing here was measured under load.",
+            "p50_ms": 10.186546,
+            "p95_ms": 15.421265,
+            "p99_ms": 18.960278
+          },
+          "recall_at_10": 0.99845,
+          "rtt_share_of_p95": 0.031402
+        },
+        "k=100": {
+          "latency_shape_single_client": {
+            "concurrency": 1,
+            "mean_ms": 12.59502,
+            "n_queries": 2000,
+            "note": "sequential, single client, client-side wall clock. This is a latency shape and is not throughput; nothing here was measured under load.",
+            "p50_ms": 12.375141,
+            "p95_ms": 17.936267,
+            "p99_ms": 20.321831
+          },
+          "recall_at_100": 0.99167,
+          "rtt_share_of_p95": 0.026999
+        },
+        "k=10_under_load": {
+          "latency_shape_single_client": {
+            "concurrency": 32,
+            "max_ms": 642.782547,
+            "mean_ms": 268.663477,
+            "n_queries": 35731,
+            "note": "measured UNDER LOAD at concurrency 32; not a single-client shape; p95_ms is the MEDIAN of 3 runs (min 316.87, max 332.23, spread 15.36 ms) -- see p95_across_runs, and the verdict rule, which does not decide from one run",
+            "p50_ms": 267.661132,
+            "p95_across_runs": {
+              "max": 332.234458,
+              "median": 317.410637,
+              "min": 316.8743,
+              "n_runs": 3,
+              "p95_ms_per_run": [
+                317.410637,
+                332.234458,
+                316.8743
+              ],
+              "spread": 15.360159
+            },
+            "p95_ms": 317.410637,
+            "p99_ms": 344.857925
+          },
+          "recall_at_10": 0.99845,
+          "rtt_share_of_p95": 0.001526
+        }
+      }
+    }
+  ],
+  "engines_measured": [
+    "qdrant",
+    "pgvector"
+  ],
+  "environment_id": "1ombs4scr257a5",
+  "run": "arxiv-150k-via-characterize",
+  "schema": 1,
+  "schema_engines": 1,
+  "sequential": true,
+  "sequential_note": "engines were measured one after the other on the same host, never concurrently. They therefore never contend with each other -- and equally, this says nothing about how either behaves while the other is running.",
+  "target": "runpod"
+}

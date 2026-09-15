@@ -1,0 +1,26 @@
+{
+  "characterization": {
+    "ambiguous_query_rate": 0.8915,
+    "boundary_crispness": 0.036247,
+    "drift": {
+      "cutoff": "2019-01-01",
+      "drift_after": 0.551401,
+      "drift_before": 0.523212,
+      "drift_n_after": 1035,
+      "drift_n_before": 965
+    },
+    "intrinsic_dimensionality": 32.553257,
+    "skew_top10_share": 0.0754
+  },
+  "definitions": {
+    "ambiguity_ratio": 1.1,
+    "centroids": 256,
+    "crispness_ratio": 1.2,
+    "seed": 20260908
+  },
+  "dimension": 768,
+  "n_base": 150000,
+  "n_queries": 2000,
+  "run": "arxiv-150k-via-characterize",
+  "schema": 1
+}

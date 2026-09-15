@@ -1,0 +1,228 @@
+{
+  "engines": [
+    {
+      "compose_image": null,
+      "endpoint": "http://localhost:6333",
+      "engine": "qdrant",
+      "engine_facts": {
+        "dim": 768,
+        "engine": "qdrant",
+        "index_params": {
+          "ef_construct": 200,
+          "full_scan_threshold": 10000,
+          "m": 32,
+          "max_indexing_threads": 0,
+          "on_disk": false
+        },
+        "index_type": "hnsw",
+        "kind": "declared",
+        "metric": "Dot",
+        "namespace": "oneground-20260913-162514-verify",
+        "nodes": null,
+        "note": "every field here is what the engine reported about itself, not something oneground measured",
+        "point_count": 150000,
+        "raw": {
+          "config": {
+            "hnsw_config": {
+              "ef_construct": 200,
+              "full_scan_threshold": 10000,
+              "inline_storage": null,
+              "m": 32,
+              "max_indexing_threads": 0,
+              "memory": null,
+              "on_disk": false,
+              "payload_m": null
+            },
+            "metadata": null,
+            "optimizer_config": {
+              "default_segment_number": 0,
+              "deleted_threshold": 0.2,
+              "flush_interval_sec": 5,
+              "indexing_threshold": 1,
+              "max_optimization_threads": null,
+              "max_segment_size": null,
+              "memmap_threshold": null,
+              "prevent_unoptimized": null,
+              "vacuum_min_vector_number": 1000
+            },
+            "params": {
+              "on_disk_payload": true,
+              "payload": null,
+              "read_fan_out_delay_ms": null,
+              "read_fan_out_factor": null,
+              "replication_factor": 1,
+              "shard_number": 1,
+              "sharding_method": null,
+              "sparse_vectors": null,
+              "vectors": {
+                "datatype": null,
+                "distance": "Dot",
+                "hnsw_config": null,
+                "memory": null,
+                "multivector_config": null,
+                "on_disk": null,
+                "quantization_config": null,
+                "size": 768
+              },
+              "write_consistency_factor": 1
+            },
+            "quantization_config": null,
+            "strict_mode_config": null,
+            "wal_config": {
+              "wal_capacity_mb": 32,
+              "wal_retain_closed": 1,
+              "wal_segments_ahead": 0
+            }
+          },
+          "indexed_vectors_count": 150000,
+          "optimizer_status": "ok",
+          "payload_schema": {},
+          "points_count": 150000,
+          "segments_count": 5,
+          "status": "green",
+          "update_queue": {
+            "deferred_points": null,
+            "length": 0
+          },
+          "warnings": null
+        },
+        "replicas": 1,
+        "runtime_settings": {
+          "hnsw_config": {
+            "ef_construct": 200,
+            "full_scan_threshold": 10000,
+            "inline_storage": null,
+            "m": 32,
+            "max_indexing_threads": 0,
+            "memory": null,
+            "on_disk": false,
+            "payload_m": null
+          },
+          "index_build": "background",
+          "index_build_note": "Qdrant builds its HNSW graph asynchronously, so the measured ingest rate excludes it; `wait_for_index` polls indexed_vectors_count until it catches up and the wait is reported separately.",
+          "on_disk_payload": true,
+          "optimizer_config": {
+            "default_segment_number": 0,
+            "deleted_threshold": 0.2,
+            "flush_interval_sec": 5,
+            "indexing_threshold": 1,
+            "max_optimization_threads": null,
+            "max_segment_size": null,
+            "memmap_threshold": null,
+            "prevent_unoptimized": null,
+            "vacuum_min_vector_number": 1000
+          },
+          "replication_factor": 1,
+          "shard_number": 1,
+          "wal_config": {
+            "wal_capacity_mb": 32,
+            "wal_retain_closed": 1,
+            "wal_segments_ahead": 0
+          },
+          "write_consistency_factor": 1
+        },
+        "shards": 1,
+        "version": "1.19.1"
+      },
+      "engine_params": {
+        "ef_construct": 200,
+        "ef_construction": 200,
+        "hnsw_ef": 128,
+        "indexing_threshold": 1,
+        "m": 32
+      },
+      "engine_version": "1.19.1"
+    },
+    {
+      "compose_image": null,
+      "endpoint": "postgresql://oneground:oneground@localhost:55432/oneground",
+      "engine": "pgvector",
+      "engine_facts": {
+        "dim": 768,
+        "engine": "pgvector",
+        "index_params": {
+          "ef_construction": 200,
+          "m": 32,
+          "opclass": "vector_ip_ops"
+        },
+        "index_type": "hnsw",
+        "kind": "declared",
+        "metric": "inner_product",
+        "namespace": "oneground-20260913-162514-verify",
+        "nodes": 1,
+        "note": "every field here is what the engine reported about itself, not something oneground measured",
+        "point_count": 150000,
+        "raw": {
+          "index_build_seconds": 300.37080550193787,
+          "index_build_seconds_note": "measured by oneground around a synchronous CREATE INDEX; this is the only half of pgvector's ingest cost that Qdrant reports in the background instead",
+          "index_ready": true,
+          "index_size_bytes": 614400000,
+          "index_valid": true,
+          "indexdef": "CREATE INDEX \"oneground-20260913-162514-verify_hnsw\" ON public.\"oneground-20260913-162514-verify\" USING hnsw (embedding vector_ip_ops) WITH (m='32', ef_construction='200')",
+          "opclass": "vector_ip_ops",
+          "pgvector_version": "0.8.6",
+          "postgres_version": "16.15 (Ubuntu 16.15-1.pgdg24.04+2)",
+          "requested_params": {
+            "ef_construct": 200,
+            "ef_construction": 200,
+            "hnsw_ef": 128,
+            "indexing_threshold": 1,
+            "m": 32
+          },
+          "requested_params_note": "what oneground asked for, not what the catalog reports. hnsw.ef_search is a session GUC and is never an index property; the value used for a search is recorded by verify under search_params."
+        },
+        "replicas": 1,
+        "runtime_settings": {
+          "effective_cache_size": "5242888kB",
+          "hnsw.ef_search_applied": 128,
+          "hnsw.ef_search_note": "applied is the value oneground set for its searches; session is the connection's current value, which is the server default because search() resets it. ef_search is a session GUC and is never an index property.",
+          "hnsw.ef_search_session": "40",
+          "index_build": "synchronous",
+          "index_build_note": "CREATE INDEX does not return until the HNSW graph is built, so pgvector's index cost is INSIDE the ingest phase. Qdrant indexes in the background and reports it separately; the two engines' ingest rates are not the same quantity until this is added.",
+          "index_build_seconds": 300.37080550193787,
+          "jit": "on",
+          "maintenance_work_mem": "524288kB",
+          "max_connections": "100",
+          "max_parallel_maintenance_workers": "2",
+          "max_parallel_workers_per_gather": "0",
+          "random_page_cost": "4",
+          "server_version": "16.15 (Ubuntu 16.15-1.pgdg24.04+2)",
+          "shared_buffers": "327688kB",
+          "synchronous_commit": "on",
+          "work_mem": "4096kB"
+        },
+        "shards": 1,
+        "version": "0.8.6"
+      },
+      "engine_params": {
+        "ef_construct": 200,
+        "ef_construction": 200,
+        "hnsw_ef": 128,
+        "indexing_threshold": 1,
+        "m": 32
+      },
+      "engine_version": "0.8.6"
+    }
+  ],
+  "environment_id": "1ombs4scr257a5",
+  "kind": {
+    "verify.json": "receipt (measurements)",
+    "verify_info.json": "declared"
+  },
+  "library_versions": {
+    "faiss-cpu": "1.15.0",
+    "numpy": "2.5.3",
+    "sentence-transformers": "6.0.1",
+    "torch": "2.14.0+cu130",
+    "umap-learn": "0.5.12"
+  },
+  "note": "engine_facts is what each engine reported about itself. Nothing in this file was measured by oneground.",
+  "platform": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
+  "python_version": "3.12.3",
+  "requirements_file": {
+    "path": "/workspace/oneground/requirements.arxiv-150k.pod.yaml",
+    "sha256": "a4bda0d1a34bb0a82962c8d9843b8bbbc2fbb110cb54bc3c567af89be67690c7"
+  },
+  "run_at": "2026-09-13T17:09:13Z",
+  "target": "runpod"
+}

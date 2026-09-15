@@ -139,3 +139,12 @@ Rebuilding a fixture from source is `corpora/run_fixture_build.sh`, which the
 pod sessions in `sessions/` drive. `stackexchange-150k` streams its 34 GB
 source at a pinned revision and stores none of it; `arxiv-150k` reads a local
 snapshot. See `docs/POD.md`.
+
+`fixtures/arxiv-150k/report/` publishes a developer's own run of the product
+path — `oneground report` over the arXiv workdir from the two-engine matched
+session `20260913-161921` — so a reader can see a real report rather than a
+description of one: `report.json`, `report.html`, and the `simulate`, `verify`
+and `characterize` outputs it was judged from. It is **declared**, not a
+receipt: one machine, one day, one pod, and its digests in the fixture's
+`MANIFEST.sha256` confirm only that these are the bytes that run produced. It
+is not a fixture value and nothing is verified against it.

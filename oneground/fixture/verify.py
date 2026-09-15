@@ -134,7 +134,11 @@ DECLARED = "declared"
 #   ground_view_*    derived from the receipts beside them, illustrative, and
 #                    recomputable by corpora/export_ground_view.py
 DECLARED_FILES = {"build_info.json", "projection.npy"}
-DECLARED_GLOBS = ("ground_view_*.parquet",)
+# `report/*`: task 018f publishes the developer's own `oneground report` run of
+# the arXiv workdir beside the fixture. It is the product path's output on one
+# machine on one day -- timestamps, an environment id, a price table -- so it is
+# declared, never a receipt: nothing about it is re-derivable from the seeds.
+DECLARED_GLOBS = ("ground_view_*.parquet", "report/*")
 
 
 def kind_of(name):
