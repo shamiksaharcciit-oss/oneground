@@ -21,12 +21,16 @@ minutes, and carries the action that would run it. Asked for an epsilon that
 was simulated, but over a state simulated at a different one, the view
 refuses: that recall is in the other state, not here.
 `contract.draw` enforces all of this.
+
+Which epsilons count as simulated comes from the `EpsilonSet` the composer
+builds once and hands to every view, so this view and the ground cannot
+disagree about it (task 023).
 """
 
 import numpy as np
 
 from ..contract import (COULDNT_CHECK, NOT_SIMULATED, SIMULATED, Drawing,
-                        Mark, View, same_epsilon)
+                        EpsilonSet, Mark, View, same_epsilon)
 
 K_TRUE = 10
 
@@ -43,23 +47,18 @@ class QueryTraceView(View):
         "candidates.survived_dedupe", "candidates.true_rank",
     )
 
-    def __init__(self, query=15, k=K_TRUE, epsilon=None, simulated=(),
-                 cost=None, action=None):
-        """`epsilon` is the epsilon asked for (default: the state's own).
-        `simulated` declares the epsilons simulated for this configuration;
-        `cost` (minutes) and `action` are what the recall panel offers between
-        them. All three are declared by whoever holds the set of runs, since
-        a view reads no files."""
+    def __init__(self, query=15, k=K_TRUE, eps=None):
+        """`eps` is the `EpsilonSet`: where the control stands, which epsilons
+        were simulated, and the cost and action the recall panel offers
+        between them. Default: this state's own epsilon."""
         self.query = int(query)
         self.k = int(k)
-        self.epsilon = None if epsilon is None else float(epsilon)
-        self.simulated = tuple(sorted(float(e) for e in simulated))
-        self.cost = cost
-        self.action = action
+        self.eps = eps or EpsilonSet()
 
     def params(self):
-        return {"query": self.query, "k": self.k, "epsilon": self.epsilon,
-                "simulated_epsilons": list(self.simulated)}
+        return {"query": self.query, "k": self.k,
+                "epsilon": self.eps.epsilon,
+                "simulated_epsilons": list(self.eps.simulated)}
 
     def render(self, state):
         h = state.header
@@ -69,17 +68,15 @@ class QueryTraceView(View):
             raise ValueError(f"query {q} is not in [0, {n_q})")
 
         state_eps = h["assignment"]["epsilon"]
+        want, simulated = self.eps.at(state_eps)
         if state_eps is None:
-            if self.epsilon is not None:
+            if self.eps.epsilon is not None:
                 raise ValueError(f"{h['family']} has no epsilon; draw its "
                                  "trace without one")
-            want, simulated, at_state = None, [], True
+            at_state = True
         else:
-            want = float(state_eps) if self.epsilon is None else self.epsilon
-            simulated = sorted(set(self.simulated) | {float(state_eps)})
             at_state = same_epsilon(want, state_eps)
-            if not at_state and any(same_epsilon(want, e)
-                                    for e in simulated):
+            if not at_state and any(same_epsilon(want, e) for e in simulated):
                 raise ValueError(
                     f"epsilon {want} was simulated: draw the query trace over "
                     f"the state emitted at {want}, not over the one simulated "
@@ -117,7 +114,7 @@ class QueryTraceView(View):
         figures = {
             "query": q,
             "epsilon": want,
-            "simulated_epsilons": simulated,
+            "simulated_epsilons": list(simulated),
             "routed_region": routed,
             "probed_regions": [r for r in probed if r >= 0],
             "true_neighbours_located": len(found),
@@ -162,11 +159,11 @@ class QueryTraceView(View):
             panel = {
                 "status": NOT_SIMULATED,
                 "epsilon": want,
-                "simulated_epsilons": simulated,
-                "cost_minutes": self.cost or (
+                "simulated_epsilons": list(simulated),
+                "cost_minutes": self.eps.cost or (
                     f"{COULDNT_CHECK}: no measured simulate timings were "
                     "declared for this configuration"),
-                "action": self.action or self._default_action(h, want),
+                "action": self.eps.action or self._default_action(h, want),
             }
         return Drawing(view=self.name, marks=marks, figures=figures,
                        gaps=gaps, panels={"recall": panel})

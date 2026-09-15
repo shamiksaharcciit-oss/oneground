@@ -185,10 +185,14 @@ def plan(base_path, simulated_dirs, family, epsilon=None):
               "grid": {family: {k: [v] for k, v in params.items()}},
               "requirements": req,
               "command": f"oneground simulate {req} --emit-state"}
+    # One source for which epsilons were simulated, handed to both views, so
+    # the ground and the query trace cannot disagree about it (task 023).
+    eps = contract.EpsilonSet.make(epsilon=want, simulated=sorted(by_eps),
+                                   cost=cost, action=action)
     return {"base_path": base_path, "base": base,
             "trace_path": trace_path, "trace": trace,
             "epsilon": want, "simulated": sorted(by_eps),
-            "cost": cost, "action": action}
+            "cost": cost, "action": action, "eps": eps}
 
 
 def _figures_and_gaps(drawing):
@@ -197,15 +201,23 @@ def _figures_and_gaps(drawing):
     return out
 
 
-def draw_ground(head, cols):
-    d = contract.draw(GroundView(), head, cols)
-    return d, contract._jsonable(_figures_and_gaps(d))
+def draw_ground(p, k=K_TRUE):
+    """The ground, recounted from the base state at the epsilon asked for.
+
+    Always the base state: the closure at any epsilon follows from the stored
+    distances and nearest regions, so the ground does not need the state that
+    was simulated at this epsilon -- and there may not be one.
+    """
+    head, cols = p["base"]
+    d = contract.draw(GroundView(p["eps"], k=k), head, cols)
+    out = contract._jsonable(_figures_and_gaps(d))
+    out["caption"] = d.caption
+    return d, out
 
 
 def _trace_view(p, q, k):
-    return QueryTraceView(q, k, epsilon=p["epsilon"],
-                          simulated=p["simulated"], cost=p["cost"],
-                          action=p["action"])
+    # the same EpsilonSet the ground is drawn with: one source, not two
+    return QueryTraceView(q, k, eps=p["eps"])
 
 
 def draw_query(p, q, k=K_TRUE):
@@ -322,12 +334,13 @@ def main():
               f"query trace drawn from "
               f"{os.path.relpath(p['trace_path'], os.getcwd())}")
 
-    ground_d, ground = draw_ground(head, cols)
+    ground_d, ground = draw_ground(p)
     query_d, trace = draw_query(p, args.query)
     every = draw_every_query(p)
 
     print("\n-- the ground (view: ground) --")
-    print(f"  epsilon {ground['epsilon']}   cap {ground['max_assign']}")
+    print(f"  epsilon {ground['epsilon']}   cap {ground['max_assign']}   "
+          f"recounted from state {ground['recounted_from_state']}")
     print("  copies histogram " + "  ".join(
         f"{c}:{n:,} ({pct}%)" for c, (n, pct) in enumerate(
             zip(ground["copies_histogram"], ground["copies_histogram_pct"]),
@@ -336,7 +349,10 @@ def main():
     print(f"  storage           {ground['storage_amplification']:.6f}x")
     print(f"  p99 copies        {ground['p99_copies']}")
     print(f"  crispness         {ground['boundary_crispness']}")
+    print(f"  ceiling@{ground.get('k', K_TRUE)}         "
+          f"{ground.get('routing_ceiling_at_k')}")
     print(f"  moving epsilon    {ground_d.epsilon}")
+    print(f"  caption           {ground['caption']}")
 
     panel = trace["recall_panel"]
     print(f"\n-- query {args.query} (view: query_trace) --")

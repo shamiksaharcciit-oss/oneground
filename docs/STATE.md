@@ -240,26 +240,49 @@ other ε values, and the rebuild rows really do change.
 | a recount from state | copy count, copy set, vectors each shard holds; and from them the histogram, storage, p99 and routing ceiling@10 |
 | a rebuild: a new `simulate` run | every candidate column, `true_rank`, candidates contributed; and from them recall, index loss and the neighbours a route missed |
 
-**Measured** (task 021, `semantic_sharded` at the reference configuration, one
-laptop). Figures are median (p95). Every incremental move was checked against a
-full recount at the same ε.
+**Measured** on one laptop, `semantic_sharded` at the reference configuration,
+2,000 queries, median (p95) over 101 slider positions.
 
 | | 20,000 vectors | 150,000 vectors |
 |---|---|---|
-| full recount from state: ground figures + ceiling@10 over 2,000 queries | 1.5 ms (2.0) | **9.6 ms (11.8)** |
-| draw the ground view | 0.6 ms | 4.4 ms |
-| incremental update, slider step of 0.005 | 0.12 ms (0.54) | 0.70 ms (5.8) |
-| incremental update, random jump | 1.4 ms (10.2) | 29 ms (161) |
-| incremental index: memory / build | 2.2 MB / 13 ms | 14.2 MB / 93 ms |
+| `views.ground.recount`: closure, copy counts, shard sizes | 2.0 ms (2.6) | 22.9 ms (31.5) |
+| routing ceiling@10 over every query | 10.0 ms (18.6) | 10.1 ms (59.8) |
+| the rest of a ground draw: figures, marks, caption | 13.7 ms (138) | 12.5 ms (67) |
+| **a whole ground draw** | **27.5 ms (149)** | **44.7 ms (104)** |
 | rebuild one ε: `simulate` build + query | 3–21 s | 194–398 s |
 | state file, semantic / columns the recount reads | 11.1 MB / 2.3 MB | 18.0 MB / 6.4 MB |
 
-**The design: a full recount per move.** A recount plus a ground redraw is
-about 14 ms at 150,000 vectors, inside a 16 ms frame. So every geometric
-readout moves continuously with the slider: copy counts and colours, the
-histogram, storage, p99, shard sizes and the routing ceiling. An incremental
-index is not used. It wins only on small steps, loses to a full recount on
-jumps, and costs 14 MB.
+- **Task 021 measured the same recount at 1.5 ms and 9.6 ms**, and a ground
+  draw at 0.6 ms and 4.4 ms. The machine is what changed: task 021's own
+  unchanged benchmark, re-run on the day task 023 measured, reported 6.4 ms
+  and 36.4 ms for its recount — about 3.8× its own earlier figures. Against
+  that control the recount built in task 023 is not slower than the path 021
+  measured.
+- **So the headline depends on the machine**, between roughly 14 ms and 45 ms
+  at 150,000 vectors for recount plus redraw. The decision below is the same
+  at either end: it is two orders of magnitude away from a rebuild.
+- **A ground draw's only size-independent cost** is the contract's defensive
+  copy of the state header, about 1–2 ms. Everything else scales with the
+  corpus or the query count.
+- **An incremental index was measured in task 021 and rejected:** it wins only
+  on small slider steps, loses to a full recount on jumps (29 ms against
+  9.6 ms at 150,000 vectors), and costs 14.2 MB. Task 023 did not build one.
+
+**A full recount per move, and it is built.** `views/ground.py` recounts the
+closure at whatever ε the control is at, from the stored distances and nearest
+regions, written exactly as `semantic_sharded.build` writes it. Every
+geometric readout moves continuously with the slider: each vector's copy count
+and colour, the copies histogram, vectors copied, storage amplification, p99
+copies, the vectors each shard holds, and the routing ceiling at k=10.
+
+- **The ceiling is recountable** because it asks where copies are, not what an
+  index returned: a true neighbour is reachable when some region the query
+  probes holds a copy of it at this ε.
+- **The recount reproduces the runs.** At every ε a state was simulated at —
+  StackExchange 0.0, 0.1, 0.2, 0.3 and arXiv 0.1, 0.2, 0.3 — recounting from
+  the ε 0.2 state gives that run's own copy counts, shard sizes and figures
+  exactly, and storage and ceiling@10 equal its `simulate.json` row. Exact
+  equality, not tolerance: see `tasks/023-ground-live-recount.report.md`.
 
 **Recall is a declared set, rendered on request.** Recall, candidates and the
 neighbours a route missed need a rebuild, which takes seconds at 20,000 vectors
@@ -288,9 +311,21 @@ and the lab marks which those are.
   a declared set from the state directories it is given. ε values are compared
   at six decimals, the precision `simulate` writes.
 
-The ground's live recount is designed and measured, not yet a lab module. When
-it is built, it is a declared state transform outside `views/`, because a view
-may not do it.
+**One ε set, and an honest caption.**
+
+- **One source.** `EpsilonSet` — where the control stands, which ε values were
+  simulated, and the cost and action a panel offers between them — is built
+  once by whoever holds the runs and handed to every view. The ground and the
+  query trace cannot disagree about which ε values are simulated.
+- **The caption is part of the drawing.** A view that recounts must caption
+  what it is showing, and at an ε nobody simulated the caption must say
+  `not simulated at this epsilon` and that the geometry was recounted from
+  state. `contract.draw` refuses a recounting drawing whose caption omits
+  either. Someone who screenshots the ground between simulated ε values must
+  not be able to mistake it for a measured configuration.
+- **The ground still refuses vectors.** It recounts what the centroids decide
+  and is handed no centroid: `partition.centroids` is refused at run time,
+  declared or not.
 
 ---
 

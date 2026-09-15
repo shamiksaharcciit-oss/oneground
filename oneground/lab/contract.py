@@ -8,7 +8,7 @@ import importlib.util
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -29,6 +29,46 @@ MARK_KINDS = frozenset({"point", "region", "link", "bar"})
 # enforces both, for every view.
 SIMULATED = "simulated"
 NOT_SIMULATED = "not simulated at this epsilon"
+
+
+@dataclass(frozen=True)
+class EpsilonSet:
+    """Where the lab's epsilon control stands, and which epsilons were
+    simulated (task 023).
+
+    Built once by whoever holds the runs and handed to every view, so two
+    views cannot disagree about which epsilons are simulated -- one source,
+    not two. `cost` and `action` are what a panel offers between simulated
+    values; a view reads no files, so they are declared here too.
+
+    `epsilon` is None for "wherever this state is", and for a family that has
+    no epsilon at all.
+    """
+
+    epsilon: Optional[float] = None
+    simulated: tuple = ()
+    cost: Any = None
+    action: Any = None
+
+    @staticmethod
+    def make(epsilon=None, simulated=(), cost=None, action=None):
+        return EpsilonSet(None if epsilon is None else float(epsilon),
+                          tuple(sorted(float(e) for e in simulated)),
+                          cost, action)
+
+    def at(self, state_epsilon):
+        """(the epsilon asked for, the simulated epsilons) for a state
+        simulated at `state_epsilon`, whose own epsilon is always one of
+        them. (None, ()) for a family with no epsilon."""
+        if state_epsilon is None:
+            return None, ()
+        want = (float(state_epsilon) if self.epsilon is None
+                else float(self.epsilon))
+        return want, tuple(sorted(set(self.simulated) | {float(state_epsilon)}))
+
+    def is_simulated(self, epsilon, simulated=None):
+        values = self.simulated if simulated is None else simulated
+        return any(same_epsilon(epsilon, e) for e in values)
 
 # ---------------------------------------------------------------- epsilon
 # What moving epsilon does to each state column (task 021). Epsilon is the
@@ -211,6 +251,12 @@ class Drawing:
     `status`: `SIMULATED`, with its `figures`, or `NOT_SIMULATED`, with the
     simulated epsilons, the cost in minutes and the action to run one. `draw`
     checks every panel against the state it was drawn from.
+
+    `caption` is what the drawing says about itself, and it is part of the
+    drawing rather than fine print around it. A view that recounts must carry
+    one, and at an epsilon nobody simulated it must say so: someone who
+    screenshots the ground there must not be able to mistake it for a
+    measured configuration.
     """
 
     view: str
@@ -218,6 +264,7 @@ class Drawing:
     figures: Dict[str, Any]
     gaps: Dict[str, str] = field(default_factory=dict)
     panels: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    caption: str = ""
     notes: List[str] = field(default_factory=list)
     params: Dict[str, Any] = field(default_factory=dict)
     reads: List[str] = field(default_factory=list)
@@ -229,7 +276,7 @@ class Drawing:
             "view": self.view, "params": self.params, "source": self.source,
             "reads": self.reads, "on_epsilon": self.epsilon,
             "figures": self.figures, "gaps": self.gaps, "panels": self.panels,
-            "notes": self.notes,
+            "caption": self.caption, "notes": self.notes,
             "marks": [{"kind": m.kind, "encoding": m.encoding,
                        "data": m.data} for m in self.marks]})
 
@@ -251,10 +298,17 @@ def _jsonable(o):
 
 
 class View:
-    """Subclass, set `name` and `reads`, implement `render(state)`."""
+    """Subclass, set `name` and `reads`, implement `render(state)`.
+
+    `recounts` says the view recomputes what epsilon decides from stored
+    columns rather than reading what the run emitted (task 023). Such a view
+    must caption its drawing, and moving epsilon asks a recount of it whatever
+    columns it happens to read.
+    """
 
     name = ""
     reads = ()
+    recounts = False
 
     def params(self):
         return {}
@@ -296,8 +350,44 @@ def draw(view, header, columns):
                                            "state_version", "n_base",
                                            "n_queries")}
     d.epsilon = on_epsilon(d.reads)
+    if getattr(view, "recounts", False):
+        # it recomputes what epsilon decides, whichever columns it read to
+        d.epsilon = RECOUNT
     _check_panels(view, d, header)
+    _check_caption(view, d)
     return d
+
+
+def _check_caption(view, d):
+    """A recounting drawing says what it is, and says when it is not measured.
+
+    At an epsilon that was simulated, a recount reproduces that run's own
+    figures, and the caption may say so plainly. At any other epsilon the
+    geometry is recounted from state and no recall figure exists, and the
+    caption has to carry both -- in the drawing, where a screenshot carries
+    it too.
+    """
+    if not getattr(view, "recounts", False):
+        return
+    caption = d.caption
+    if not isinstance(caption, str) or len(caption.strip()) < 10:
+        raise ContractError(f"{view.name} recounts, so its drawing must "
+                            "caption what it is showing")
+    epsilon = d.figures.get("epsilon")
+    simulated = d.figures.get("simulated_epsilons")
+    if epsilon is None or simulated is None:
+        return
+    if any(same_epsilon(epsilon, e) for e in simulated):
+        return
+    if NOT_SIMULATED not in caption:
+        raise ContractError(
+            f"{view.name}: drawn at epsilon {epsilon}, which is not one of "
+            f"{list(simulated)}, and its caption does not say "
+            f"{NOT_SIMULATED!r}")
+    if "recount" not in caption.lower():
+        raise ContractError(
+            f"{view.name}: drawn at epsilon {epsilon}, and its caption does "
+            "not say the geometry was recounted from state")
 
 
 def _check_panels(view, d, header):

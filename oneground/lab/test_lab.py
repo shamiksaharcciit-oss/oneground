@@ -1,4 +1,4 @@
-"""The lab's rendering contract, tested (tasks 021 and 021b).
+"""The lab's rendering contract, tested (tasks 021, 021b, 021c and 023).
 
 **Synthetic throughout**, except the two tests that read the shipped view
 modules and the subprocess test. The published figures are checked from real
@@ -11,9 +11,12 @@ The properties:
                writable array; a malformed drawing is refused
     views      the ground and query trace draw the right figures from a state
                small enough to count by hand, and a missing column is a gap
-    epsilon    every state column says what moving epsilon does to it; recall
-               is drawn only at an epsilon that was simulated, and between
-               them the panel says so -- never interpolated, never blank
+    epsilon    every state column says what moving epsilon does to it; the
+               ground recounts continuously; recall is drawn only at an
+               epsilon that was simulated, and between them the panel says so
+               -- never interpolated, never blank -- while the ground's
+               caption says it too
+    ties       tied scores merge one way in simulate and in the view
     hygiene    drawing loads no model family, faiss or measuring code
 
     python oneground/lab/test_lab.py
@@ -39,6 +42,7 @@ from oneground.lab.views import (VIEWS, GroundView,      # noqa: E402
 
 S = contract.state_format()
 SIMULATED, NOT_SIMULATED = contract.SIMULATED, contract.NOT_SIMULATED
+EpsilonSet = contract.EpsilonSet
 
 
 def _label(eps):
@@ -201,6 +205,29 @@ def test_a_view_is_never_handed_a_vector_column_synthetic():
         raise AssertionError(f"a vector column was handed over ({reads})")
 
 
+def test_the_ground_is_refused_a_vector_column_at_run_time_synthetic():
+    """Task 023: the ground recounts the closure, which is what centroids
+    decide -- so the one view with a reason to want them must still be
+    refused them, declared or not."""
+    head, cols = _state()
+    assert "partition.centroids" not in GroundView.reads
+
+    class Declares(GroundView):
+        reads = GroundView.reads + ("partition.centroids",)
+
+    class Reaches(GroundView):
+        def render(self, state):
+            state["partition.centroids"]
+            return super().render(state)
+
+    for view in (Declares(), Reaches()):
+        try:
+            contract.draw(view, head, cols)
+        except contract.VectorColumn:
+            continue
+        raise AssertionError(f"{type(view).__name__} got a vector column")
+
+
 def test_a_view_cannot_read_what_it_did_not_declare_synthetic():
     head, cols = _state()
     try:
@@ -230,7 +257,7 @@ def test_the_state_a_view_is_handed_is_read_only_synthetic():
     raise AssertionError("a view wrote into the state")
 
 
-def _refused(drawing, reads=(), head_cols=None):
+def _refused(drawing, reads=(), head_cols=None, recounts=False):
     """Whether `draw` refuses `drawing`, returned by a view that declares and
     reads `reads`."""
     head, cols = head_cols or _state()
@@ -243,6 +270,7 @@ def _refused(drawing, reads=(), head_cols=None):
                 state[c]
             return drawing
     V.reads = tuple(reads)
+    V.recounts = recounts
     try:
         contract.draw(V(), head, cols)
     except contract.ContractError:
@@ -278,13 +306,86 @@ def test_the_ground_view_tallies_the_state_synthetic():
     assert f["storage_amplification"] == 1.5
     assert f["p99_copies"] == 2
     assert f["boundary_crispness"] == 0.5
+    assert f["recounted_from_state"] is True
+    assert f["vectors_held_total"] == 18
     assert "positions" in d.gaps
-    (points,) = d.marks
+    points, bars = d.marks
     assert len(points.data["vector_id"]) == 12
     assert list(points.data["copy_count"]) == [2, 1] * 6
-    assert d.reads == sorted(GroundView.reads)
+    # each region homes three vectors; the six even ones copy into region 1
+    # or 3, so those two hold six each
+    assert list(bars.data["vectors_held"]) == [3, 6, 3, 6], bars.data
+    assert set(d.reads) <= set(GroundView.reads)
     assert d.epsilon == contract.RECOUNT
     assert d.source["config_label"] == _label(0.2)
+
+
+def test_the_ground_recount_equals_the_state_it_was_emitted_from_synthetic():
+    """Task 023: recounted at the state's own epsilon, the ground reproduces
+    the copy counts and shard sizes that run emitted -- exactly."""
+    for eps in (0.0, 0.1, 0.2, 0.5):
+        head, cols = _state(eps)
+        d = contract.draw(GroundView(), head, cols)
+        points, bars = d.marks
+        assert np.array_equal(points.data["copy_count"],
+                              cols["assignment.copy_count"].astype(np.int64))
+        assert np.array_equal(bars.data["vectors_held"],
+                              cols["load.vectors_held"])
+
+
+def test_the_ground_recounts_to_another_epsilon_synthetic():
+    """Drawn from the 0.2 state at 0.1, the ground shows what the run at 0.1
+    emitted: the closure follows from stored distances, not from the run."""
+    at_02 = _state(0.2)
+    at_01 = _state(0.1)
+    eps = EpsilonSet.make(epsilon=0.1, simulated=[0.1, 0.2])
+    recounted = contract.draw(GroundView(eps), *at_02)
+    emitted = contract.draw(GroundView(), *at_01)
+    for key in ("copies_histogram", "vectors_copied", "storage_amplification",
+                "p99_copies", "vectors_held_total", "routing_ceiling_at_k"):
+        assert recounted.figures[key] == emitted.figures[key], key
+    assert np.array_equal(recounted.marks[0].data["copy_count"],
+                          at_01[1]["assignment.copy_count"].astype(np.int64))
+    assert recounted.figures["copies_histogram"] == [12, 0]
+    # and the ground at 0.2 is the other closure, so the test is not vacuous
+    assert contract.draw(GroundView(), *at_02) \
+        .figures["copies_histogram"] == [6, 6]
+
+
+def test_the_ground_states_in_its_caption_when_epsilon_was_not_simulated_synthetic():
+    head, cols = _state()
+    at = contract.draw(GroundView(EpsilonSet.make(
+        epsilon=0.2, simulated=[0.1, 0.2])), head, cols)
+    assert NOT_SIMULATED not in at.caption
+    assert "recounted from state" in at.caption
+
+    between = contract.draw(GroundView(EpsilonSet.make(
+        epsilon=0.15, simulated=[0.1, 0.2])), head, cols)
+    assert NOT_SIMULATED in between.caption
+    assert "recount" in between.caption.lower()
+    assert "recall" in between.caption.lower()
+    assert between.figures["epsilon"] == 0.15
+
+
+def test_the_contract_refuses_a_recount_that_hides_it_synthetic():
+    """A recounting view must caption what it is showing, and at an epsilon
+    nobody simulated the caption must say so."""
+    D = contract.Drawing
+    figures = {"epsilon": 0.15, "simulated_epsilons": [0.1, 0.2]}
+    assert _refused(D(view="v", marks=[], figures=figures), recounts=True)
+    assert _refused(D(view="v", marks=[], figures=figures,
+                      caption="The ground at epsilon 0.15."), recounts=True)
+    assert _refused(D(view="v", marks=[], figures=figures,
+                      caption=f"The ground at 0.15, {NOT_SIMULATED}."),
+                    recounts=True)
+    assert not _refused(
+        D(view="v", marks=[], figures=figures,
+          caption=f"Recounted from state; {NOT_SIMULATED}."), recounts=True)
+    assert not _refused(
+        D(view="v", marks=[], figures={"epsilon": 0.2,
+                                       "simulated_epsilons": [0.1, 0.2]},
+          caption="Recounted from state at a simulated epsilon."),
+        recounts=True)
 
 
 def test_the_query_trace_view_draws_each_query_synthetic():
@@ -319,9 +420,15 @@ def test_a_state_without_true_ids_is_a_gap_not_a_guess_synthetic():
     d2 = contract.draw(QueryTraceView(2, k=3), head, cols)
     assert d2.figures["outside_routed_region"] == 0, "all three were returned"
     # between simulated epsilons the candidates cannot stand in for them
-    d3 = contract.draw(QueryTraceView(0, k=3, epsilon=0.15), head, cols)
+    d3 = contract.draw(QueryTraceView(
+        0, k=3, eps=EpsilonSet.make(epsilon=0.15)), head, cols)
     assert d3.gaps["true_neighbours"].startswith(contract.COULDNT_CHECK)
     assert d3.panels["recall"]["status"] == NOT_SIMULATED
+    # the ground still recounts the geometry there, and reports the ceiling
+    # as a gap rather than inventing one without true neighbours
+    g = contract.draw(GroundView(EpsilonSet.make(epsilon=0.15)), head, cols)
+    assert g.figures["copies_histogram"] == [6, 6]
+    assert g.gaps["routing_ceiling_at_k"].startswith(contract.COULDNT_CHECK)
 
 
 def test_every_view_declares_only_state_columns_and_no_vectors():
@@ -342,6 +449,22 @@ def test_every_state_column_says_what_moving_epsilon_does_to_it():
                                 "candidates.cand_id"]) == contract.REBUILD
 
 
+def test_one_epsilon_set_answers_for_both_views_synthetic():
+    """Task 023: the ground and the query trace take the same EpsilonSet, so
+    they cannot disagree about which epsilons were simulated."""
+    head, cols = _state()
+    eps = EpsilonSet.make(epsilon=0.15, simulated=[0.1, 0.2], cost=_COST,
+                          action=_ACTION)
+    g = contract.draw(GroundView(eps), head, cols)
+    t = contract.draw(QueryTraceView(0, k=3, eps=eps), head, cols)
+    assert g.figures["simulated_epsilons"] == t.figures["simulated_epsilons"]
+    assert g.figures["epsilon"] == t.figures["epsilon"] == 0.15
+    assert NOT_SIMULATED in g.caption
+    assert t.panels["recall"]["status"] == NOT_SIMULATED
+    assert t.panels["recall"]["simulated_epsilons"] == \
+        g.figures["simulated_epsilons"]
+
+
 _COST = {"low": 3.2, "high": 6.6, "basis": "measured"}
 _ACTION = {"kind": "simulate", "epsilon": 0.15,
            "command": "oneground simulate requirements.yaml --emit-state"}
@@ -353,9 +476,9 @@ def test_between_simulated_epsilons_recall_is_not_drawn_synthetic():
     so, with the cost and the action, rather than a blank."""
     head, cols = _state()
     at = contract.draw(QueryTraceView(0, k=3), head, cols)
-    d = contract.draw(QueryTraceView(0, k=3, epsilon=0.15,
-                                     simulated=[0.1, 0.2], cost=_COST,
-                                     action=_ACTION), head, cols)
+    d = contract.draw(QueryTraceView(0, k=3, eps=EpsilonSet.make(
+        epsilon=0.15, simulated=[0.1, 0.2], cost=_COST, action=_ACTION)),
+        head, cols)
     panel = d.panels["recall"]
     assert panel["status"] == NOT_SIMULATED
     assert panel["epsilon"] == 0.15
@@ -378,7 +501,8 @@ def test_the_recall_panel_is_never_blank_synthetic():
     """With no declared cost or action, the panel still carries both: a
     `couldnt_check` cost and a runnable action."""
     head, cols = _state()
-    d = contract.draw(QueryTraceView(1, k=3, epsilon=0.05), head, cols)
+    d = contract.draw(QueryTraceView(
+        1, k=3, eps=EpsilonSet.make(epsilon=0.05)), head, cols)
     panel = d.panels["recall"]
     assert panel["status"] == NOT_SIMULATED
     assert panel["cost_minutes"].startswith(contract.COULDNT_CHECK)
@@ -392,8 +516,8 @@ def test_a_simulated_epsilon_is_drawn_from_its_own_state_synthetic():
     the 0.2 state, the view refuses rather than drawing anything for 0.1."""
     head, cols = _state()
     try:
-        contract.draw(QueryTraceView(0, k=3, epsilon=0.1,
-                                     simulated=[0.1, 0.2]), head, cols)
+        contract.draw(QueryTraceView(0, k=3, eps=EpsilonSet.make(
+            epsilon=0.1, simulated=[0.1, 0.2])), head, cols)
     except ValueError as e:
         assert "0.1" in str(e)
         return
@@ -454,16 +578,21 @@ def _run(root, name, eps, build_query_seconds, requirements):
     return state_dir, os.path.join(state_dir, "synthetic.state.npz")
 
 
+def _renderer():
+    spec = importlib.util.spec_from_file_location(
+        "render_from_state_under_test",
+        os.path.join(REPO, "corpora", "render_from_state.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_the_renderer_draws_recall_only_from_the_state_simulated_at_it_synthetic():
     """`corpora/render_from_state.py` over a declared set of two runs:
     epsilon 0.1 is drawn from the 0.1 run; 0.15, simulated by neither, gets
     the base state's geometry and a panel with the measured cost and the
     command -- and the same routed regions and outside counts."""
-    spec = importlib.util.spec_from_file_location(
-        "render_from_state_under_test",
-        os.path.join(REPO, "corpora", "render_from_state.py"))
-    R = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(R)
+    R = _renderer()
     with tempfile.TemporaryDirectory() as tmp:
         _, base = _run(tmp, "a", 0.2, (240.0, 60.0), "requirements.a.yaml")
         b_dir, b_path = _run(tmp, "b", 0.1, (90.0, 30.0),
@@ -503,6 +632,41 @@ def test_the_renderer_draws_recall_only_from_the_state_simulated_at_it_synthetic
         assert abs(every_base["recall_at_k_mean"] - 6 / 9) < 1e-12
         for key in ("routed_region", "outside_routed_region"):
             assert every_between[key] == every_base[key], key
+
+
+def test_the_renderer_recounts_the_ground_as_epsilon_moves_synthetic():
+    """Task 023: the ground follows the control continuously, from the base
+    state, and captions an unsimulated epsilon. Both views are drawn with the
+    one EpsilonSet the plan built."""
+    R = _renderer()
+    with tempfile.TemporaryDirectory() as tmp:
+        _, base = _run(tmp, "a", 0.2, (240.0, 60.0), "requirements.a.yaml")
+        b_dir, _ = _run(tmp, "b", 0.1, (90.0, 30.0), "requirements.b.yaml")
+
+        at_02 = R.plan(base, [b_dir], "semantic_sharded")
+        at_01 = R.plan(base, [b_dir], "semantic_sharded", 0.1)
+        between = R.plan(base, [b_dir], "semantic_sharded", 0.15)
+        below = R.plan(base, [b_dir], "semantic_sharded", 0.05)
+
+        g02 = R.draw_ground(at_02)[1]
+        g01 = R.draw_ground(at_01)[1]
+        g015 = R.draw_ground(between)[1]
+        g005 = R.draw_ground(below)[1]
+        # the even six sit 1.15x out: copied at 0.15 and 0.2, not at 0.1 or
+        # 0.05, so the ground moves with the control rather than with a run
+        assert g02["copies_histogram"] == [6, 6]
+        assert g015["copies_histogram"] == [6, 6], "recounted at 0.15"
+        assert g01["copies_histogram"] == [12, 0], "recounted at 0.1"
+        assert g005["copies_histogram"] == [12, 0], "recounted at 0.05"
+        assert g01["epsilon"] == 0.1 and g015["epsilon"] == 0.15
+        assert NOT_SIMULATED not in g01["caption"]
+        assert NOT_SIMULATED in g015["caption"]
+        assert NOT_SIMULATED in g005["caption"]
+        # one source: the ground and the trace report the same set
+        _, trace = R.draw_query(between, 0, k=3)
+        assert g015["simulated_epsilons"] == \
+            trace["recall_panel"]["simulated_epsilons"]
+        assert between["eps"].simulated == (0.1, 0.2)
 
 
 # ------------------------------------------------------------------- ties
@@ -633,9 +797,11 @@ def test_drawing_loads_no_model_family_or_measuring_code():
         "from oneground.lab.views import GroundView, QueryTraceView\n"
         "with tempfile.TemporaryDirectory() as tmp:\n"
         "    head, cols = T._synthetic(tmp)\n"
+        "eps = contract.EpsilonSet.make(epsilon=0.15, simulated=[0.2])\n"
         "contract.draw(GroundView(), head, cols)\n"
+        "contract.draw(GroundView(eps), head, cols)\n"
         "contract.draw(QueryTraceView(1, k=3), head, cols)\n"
-        "contract.draw(QueryTraceView(1, k=3, epsilon=0.15), head, cols)\n"
+        "contract.draw(QueryTraceView(1, k=3, eps=eps), head, cols)\n"
         "bad = ('faiss', 'sklearn', 'scipy', 'torch', 'umap', "
         "'oneground.models', 'oneground.measures', 'oneground.truth', "
         "'oneground.simulate', 'oneground.characterize')\n"
