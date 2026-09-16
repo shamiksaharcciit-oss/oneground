@@ -85,6 +85,18 @@ before the report is written. It exists because the same defect shipped once:
 a report that said "both carry meets" about an engine that had failed. See
 [docs/CLAIMS.md](docs/CLAIMS.md).
 
+**Configurations are validated against each family's declared parameters.**
+Every architecture family now declares the parameters it reads, with their
+types and valid ranges. A requirements file that names a key the family does
+not declare is refused, with the declared list; so is a key the family would
+ignore — a constant it fixes, or a grid entry for a parameter it does not
+sweep. Before this, such a key was accepted, written into the configuration's
+label and silently ignored, while the run reported numbers as if it had been
+applied. **A file that used to run with a misspelled key will now stop, and
+that is deliberate.** No working configuration changes: a key that was
+silently ignored was never applied, so every number measured without it is
+the number measured with it.
+
 ## The release assets
 
 Two, one per full fixture. Neither is in the repository: 480 MB does not

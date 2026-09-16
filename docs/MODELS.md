@@ -108,14 +108,27 @@ loss is zero **by definition**, not by measurement.
 
 1. `oneground/models/<name>/model.py` — implement the five methods, export
    `MODEL` and `NAME`.
-2. `oneground/models/<name>/__init__.py` — `from .model import MODEL, NAME`.
-3. Register it in `oneground/models/__init__.py`'s `REGISTRY`.
-4. `oneground/models/<name>/MODEL.md` — the four sections every family has:
+2. **Declare the family's parameters** in the same file, with
+   `declare_parameters(NAME, (Param(...), ...))` from `models/base.py`. Every
+   key the family reads needs an entry: its type, its validity bounds, whether
+   `configs()` sweeps it from a grid, and its role — `parameter` (the
+   architecture), `run` (set per run by the simulator), `build` (how the
+   index is built) or `constant` (fixed inside the family, and refused in any
+   configuration). A configuration naming an undeclared key is refused, and
+   `Config.get` refuses to read one, so a family without a table cannot be
+   built. The rule the table enforces: a key is either read, or refused —
+   never accepted and ignored.
+3. `oneground/models/<name>/__init__.py` — `from .model import MODEL, NAME`.
+4. Register it in `oneground/models/__init__.py`'s `REGISTRY`.
+5. `oneground/models/<name>/MODEL.md` — the four sections every family has:
    **what the family represents**, **definition** (precise enough to
    reimplement), **parameters** (with what is swept and what is fixed), and
    **known limits**.
-5. Tests. The conformance suite picks the family up automatically from the
+6. Tests. The conformance suite picks the family up automatically from the
    registry; add per-family tests for anything the interface cannot check.
+   `models/test_parameters.py` records every key the family reads while it
+   builds, searches, ceilings and footprints, and fails unless that set is
+   exactly the declared non-constant keys.
 
 ### On `MODEL.md`'s "known limits"
 

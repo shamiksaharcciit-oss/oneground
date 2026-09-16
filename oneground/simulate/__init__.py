@@ -419,11 +419,16 @@ def run(requirements_path, log_fn=log):
         "cuda_device_name": torch_info["cuda_device_name"],
         "elapsed_seconds": time.time() - t0,
         "shard_depth": shard_depth_for((1, 10, 100)),
-        "shard_depth_note": ("per-shard candidate depth used by every "
-                             "sharded family in this run; max(30, largest k "
-                             "reported). The family default is 30, which is "
-                             "what published fixture values were measured "
-                             "with."),
+        # Task 026b: this used to say "used by every sharded family", which
+        # was never true of hash_sharded -- it does not read the setting.
+        "shard_depth_note": ("per-shard candidate depth given to "
+                             "semantic_sharded in this run: max(30, largest "
+                             "k reported). hash_sharded does not read this "
+                             "setting; it computes max(30, k) itself on "
+                             "every search, the same rule. single_node_hnsw "
+                             "has no shards. The semantic_sharded default is "
+                             "30, which is what published fixture values "
+                             "were measured with."),
         "configs_planned": len(kept) + len(dropped),
         "configs_measured": len(rows),
         "dropped": dropped,
