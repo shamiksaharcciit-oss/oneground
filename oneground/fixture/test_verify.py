@@ -1308,3 +1308,170 @@ def test_no_summary_sentence_asserts_more_than_its_rows():
                     key = r.cause if r[1] == fv.COULDNT_CHECK else r[1]
                     assert marker[key] in s, (r[0], key, s)
     assert checked == 6 ** 3 * 3 ** 2
+
+
+# ----------------------------------------------------- task 022, additions
+# From runs on the published 0.1.0rc1: `--asset ./arxiv-150k` (the README's
+# path, one level short of what the tarball creates) reported every value
+# couldn't-check and exited 0 -- the tool saying it checked when it did not.
+# And extracting the tarball where the fixture is looked for produced
+# `error: no MANIFEST.sha256 in fixtures\arxiv-150k`, naming nothing useful.
+
+def _fixture_and_separate_asset(tmp):
+    """A tiny fixture whose asset lives in its own folder, as a tarball's does."""
+    import shutil as _shutil
+    fdir, spec, fixtures = _tiny_fixture(tmp, with_asset=True)
+    asset = os.path.join(tmp, "extracted", "fixtures", "tiny")
+    os.makedirs(asset)
+    for name in ("vectors.npy", "queries.npy"):
+        _shutil.move(os.path.join(fdir, name), os.path.join(asset, name))
+    _manifest(fdir)
+    return fdir, spec, fixtures, asset
+
+
+def test_a_correct_asset_folder_verifies():
+    with tempfile.TemporaryDirectory() as tmp:
+        _fdir, spec, fixtures, asset = _fixture_and_separate_asset(tmp)
+        code, out = _run(id="tiny", fixtures_dir=fixtures, asset=asset,
+                         requirements=_pinned_requirements(tmp),
+                         assets_dir=os.path.join(tmp, "assets"))
+        assert code == 0, (code, out)
+        assert "asset        present" in out, out
+        for field in fv.REPRODUCIBLE:
+            if field in spec["characterization"]:
+                assert f"verified      {field}" in out, (field, out)
+
+
+def test_a_wrong_asset_folder_exits_2_naming_what_it_looked_for_and_found():
+    with tempfile.TemporaryDirectory() as tmp:
+        _fdir, _spec, fixtures, _asset = _fixture_and_separate_asset(tmp)
+        wrong = os.path.join(tmp, "somewhere")
+        os.makedirs(wrong)
+        with open(os.path.join(wrong, "notes.txt"), "w") as f:
+            f.write("not an asset")
+        code, out = _run(id="tiny", fixtures_dir=fixtures, asset=wrong,
+                         requirements=_pinned_requirements(tmp),
+                         assets_dir=os.path.join(tmp, "assets"))
+        assert code == 2, (code, out)
+        flat = " ".join(out.split())
+        assert ("holds none of vectors.npy, queries.npy and sample.jsonl.zst; "
+                "it holds notes.txt") in flat, out
+        assert "verified      intrinsic" not in out, out
+
+
+def test_an_asset_folder_that_does_not_exist_says_so():
+    with tempfile.TemporaryDirectory() as tmp:
+        _fdir, _spec, fixtures, _asset = _fixture_and_separate_asset(tmp)
+        code, out = _run(id="tiny", fixtures_dir=fixtures,
+                         asset=os.path.join(tmp, "tiny"),
+                         requirements=_pinned_requirements(tmp),
+                         assets_dir=os.path.join(tmp, "assets"))
+        assert code == 2, (code, out)
+        assert "it does not exist" in out, out
+
+
+def test_an_asset_path_one_level_short_names_the_folder_that_holds_it():
+    """The tarball extracts to fixtures/<id>/; pointing at the extraction
+    directory is the commonest wrong path."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _fdir, _spec, fixtures, asset = _fixture_and_separate_asset(tmp)
+        up = os.path.join(tmp, "extracted")
+        code, out = _run(id="tiny", fixtures_dir=fixtures, asset=up,
+                         requirements=_pinned_requirements(tmp),
+                         assets_dir=os.path.join(tmp, "assets"))
+        assert code == 2, (code, out)
+        assert "it holds fixtures/" in out, out
+        assert f"pass --asset {os.path.normpath(asset)}" in out, out
+
+
+def test_a_wrong_asset_on_a_spec_with_nothing_published_still_exits_2():
+    """Passing --asset asserts the asset is there, whether or not it is
+    needed -- but the rows still say the values are unpublished, not that the
+    flag stopped them."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fdir, spec, fixtures = _placeholder_spec(tmp)
+        import yaml as _yaml
+        with open(os.path.join(fixtures, "tiny.fixture.yaml"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            _yaml.safe_dump(spec, f)
+        _manifest(fdir)
+        empty = os.path.join(tmp, "empty")
+        os.makedirs(empty)
+        code, out = _run(id="tiny", fixtures_dir=fixtures, asset=empty,
+                         requirements=_pinned_requirements(tmp),
+                         assets_dir=os.path.join(tmp, "assets"))
+        flat = " ".join(out.split())
+        assert code == 2, (code, out)
+        assert "it is empty" in out, out
+        assert "No value is published in the spec yet" in flat, out
+        assert "No value was recomputed" not in flat, out
+        # and the same spec with an asset folder that does hold it: exit 0
+        code, out = _run(id="tiny", fixtures_dir=fixtures, asset=fdir,
+                         requirements=_pinned_requirements(tmp),
+                         assets_dir=os.path.join(tmp, "assets"))
+        assert code == 0, (code, out)
+
+
+def _extracted_in_cwd(tmp):
+    """The package holds the fixture; the tarball was extracted in the cwd."""
+    import shutil as _shutil
+    fdir, _spec, fixtures = _tiny_fixture(tmp, with_asset=True)
+    work = os.path.join(tmp, "work")
+    extracted = os.path.join(work, "fixtures", "tiny")
+    os.makedirs(extracted)
+    for name in ("vectors.npy", "queries.npy"):
+        _shutil.move(os.path.join(fdir, name), os.path.join(extracted, name))
+    _manifest(fdir)
+    return fixtures, work, extracted
+
+
+def test_an_asset_extracted_where_the_fixture_is_looked_for_is_named():
+    with tempfile.TemporaryDirectory() as tmp:
+        pkg, work, extracted = _extracted_in_cwd(tmp)
+        reqs = _pinned_requirements(tmp)
+        with _patched(fv, "PACKAGE_FIXTURES", pkg), _cwd(work):
+            code, out = _run(id="tiny", requirements=reqs,
+                             assets_dir=os.path.join(tmp, "assets"))
+        flat = " ".join(out.split())
+        assert code == 2, (code, out)
+        assert "(the installed package)" in out, out
+        assert ("that is the release asset extracted there, not the "
+                "fixture") in flat, out
+        assert f"an extracted asset is at {os.path.normpath(extracted)}" \
+            in flat, out
+
+
+def test_without_a_package_copy_the_extracted_asset_is_still_named():
+    """0.1.0rc1's `error: no MANIFEST.sha256 in fixtures\\arxiv-150k`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _pkg, work, _extracted = _extracted_in_cwd(tmp)
+        nothing = os.path.join(tmp, "no-package-copy")
+        os.makedirs(nothing)
+        reqs = _pinned_requirements(tmp)
+        with _patched(fv, "PACKAGE_FIXTURES", nothing), _cwd(work):
+            code, out = _run(id="tiny", requirements=reqs,
+                             assets_dir=os.path.join(tmp, "assets"))
+        flat = " ".join(out.split())
+        assert code == 2, (code, out)
+        assert "fixture      MISSING" in out, out
+        assert ("that is the release asset extracted there, not the "
+                "fixture") in flat, out
+        assert "error:" not in out, out
+
+
+def test_the_environment_line_states_the_virtual_environment_requirement():
+    """It says so; it does not refuse. Whether a system interpreter should be
+    refused outright is an open question for after the release."""
+    kw = dict(fixture_id="fx", found=None, looked=[], spec={},
+              pins={"numpy": "1"}, pin_source="x", pin_looked=[],
+              unpinned=[], allow_unpinned=False, assets_dir="nowhere",
+              versions={"numpy": "1"})
+    env = {p["key"]: p for p in
+           fv.check_preconditions(in_venv=False, **kw)}["environment"]
+    text = " ".join(env["lines"])
+    assert "SYSTEM INTERPRETER: a virtual environment is required." in text
+    assert "replaces the versions" in text
+    assert env["met"] is True and env["state"] == "pinned", env
+    env = {p["key"]: p for p in
+           fv.check_preconditions(in_venv=True, **kw)}["environment"]
+    assert "in a virtual environment" in env["lines"], env

@@ -478,6 +478,11 @@ to completion.
 - **A `git clone` is not needed.** GitHub's archive download of `main`
   (`main.zip`, not a git repository) plus that bare install plus the extracted
   asset verified all eight values (run 13, 7 m 50 s).
+- **A reader of the archive zip also meets a test defect.** Both identifier-scan
+  tests in `oneground/test_environment.py` call `pytest.skip` on their
+  not-a-checkout branch without importing `pytest`, so from the zip, or any tree
+  without `.git`, both fail with `NameError`. A checkout never reaches that
+  branch, which is why it went unseen. Fixed in the additions below.
 - **The repository's contents are needed, by clone or by archive.** `--asset`
   supplies the vectors, queries and sample, and nothing else. The spec, the
   manifest and the ground truth come from `fixtures/` under the current
@@ -947,3 +952,422 @@ Not committed: `tasks/020-simulator-state.md` (your brief);
    should be within a few hundred bytes.
 3. **Publish the `v0.1.0` release** so the URL the command prints resolves.
 4. **Revise the teaser panel (022a)** once a release carrying this is out.
+
+
+---
+
+## Additions after `c3615e1`
+
+Four additions and one defect fix, from the developer, each from an execution
+rather than a reading. Same commit prefix; `v0.1.0` still not moved.
+
+### Repo state expected vs found
+
+`main` at `c3615e1`, clean apart from `tasks/020-simulator-state.md`: found.
+
+### What was done
+
+**1. A wrong `--asset` is an error, not a quiet couldn't-check.** On 0.1.0rc1,
+`--asset ./arxiv-150k` reported every value couldn't-check and exited 0: the
+tool saying it checked when it did not. Passing the flag asserts the asset is
+there, so `check_preconditions` now checks an explicit `--asset` first, whether
+or not the fixture has values to recompute. When the folder holds none of
+`vectors.npy`, `queries.npy` and `sample.jsonl.zst`, the asset precondition
+is MISSING and the run exits 2, saying what it looked for and what it found
+(`it does not exist`, `it is empty`, or `it holds <the first eight names>`).
+When the members are one level down (`<given>/fixtures/<id>` or
+`<given>/<id>`, the commonest wrong path, since the tarball extracts to
+`fixtures/<id>/`), it names that folder and the flag to pass. For a spec with
+nothing published (arxiv-smoke), a wrong `--asset` still exits 2, but its
+rows still say the values are unpublished rather than "not recomputed because
+of --asset". My first trial said the latter, which over-read the rows, and it
+was fixed before the proof.
+
+**2. `&&` in printed commands.** Windows PowerShell 5.1 rejects it
+(observed below). Grepped every `*.md` and `*.html` in the repository, the
+teaser included, `tasks/` excepted as the historical record:
+
+| where | what | done |
+|---|---|---|
+| `README.md` contributor block | `git clone … && cd oneground`, `python -m venv .venv && . .venv/bin/activate`, `pip install -r requirements.txt && pip install -e .` | split, one command per line, with a macOS/Linux block and a Windows PowerShell block |
+| `RELEASE_NOTES.md`, `docs/EXTERNAL_RUN.md` | none left: `c3615e1` had already removed their `git clone … && cd oneground` along with the clone | nothing to split |
+| `docs/VERIFY.md:347`, `:411` | the two commands whose `&`/`&&` precedence *was* the pod bug that section diagnoses, quoted as they ran | **left as written**: splitting them would falsify the record the section explains |
+| `site/teaser/app.js` | eleven hits, all JavaScript operators; no printed shell line | nothing to split |
+| `oneground/pod/*.py` | `&&` in commands sent to the pod's bash over SSH, never printed for a reader | not a doc; untouched |
+
+**3. The virtual environment is a stated requirement.** `README.md`'s Install
+section and `docs/EXTERNAL_RUN.md` now say it is required and why: the
+package pins numpy, faiss-cpu and scikit-learn exactly, so installing into the
+system Python replaces the versions of whichever of those, and of their
+dependencies, it already has. Each gives the commands for macOS/Linux and for
+Windows PowerShell. The PowerShell commands call `.venv\Scripts\python.exe`
+and `.venv\Scripts\oneground.exe` directly, so nothing depends on
+`Activate.ps1` being allowed by the execution policy. The environment
+precondition always says which interpreter it is. In a venv it prints `in a
+virtual environment`. On a system interpreter it prints `SYSTEM INTERPRETER: a
+virtual environment is required`, with the reason and the command. **The
+guard's behaviour is unchanged:** the line is information; `met` and the exit
+code are exactly what they were.
+
+**Open question, for after the release: should the guard refuse a system
+interpreter outright?** Today it warns and proceeds, and refuses only on a
+version mismatch. A reader who installs the pins into their system Python has
+already had their packages replaced by the time any guard runs.
+
+**4. A tarball extracted where the fixture is looked for is named.** On
+0.1.0rc1 that produced `error: no MANIFEST.sha256 in fixtures\arxiv-150k`:
+the tarball's own `fixtures/arxiv-150k/` taken for the fixture. Now any
+looked-in location whose `<id>/` holds asset members and no manifest is named
+in the fixture line (`… holds vectors.npy, queries.npy and sample.jsonl.zst
+and no MANIFEST.sha256: that is the release asset extracted there, not the
+fixture. Pass --asset …`), whether or not the fixture was then found
+elsewhere. Without `--asset`, the asset line names it too.
+
+**5. `oneground/test_environment.py` imports `pytest`.** Both identifier-scan
+tests call `pytest.skip` on their not-a-checkout branch, and the file never
+imported `pytest`. Inside a git checkout that branch never runs. From a GitHub
+archive zip, or any tree without `.git`, both tests failed with `NameError`.
+Found by the lab stream; reproduced and fixed here:
+
+```
+cwd: GitHub's archive of main (7dc1303), unzipped; no .git
+$ python -m pytest -q -p no:cacheprovider oneground/test_environment.py
+E           NameError: name 'pytest' is not defined
+oneground\test_environment.py:449: NameError
+E           NameError: name 'pytest' is not defined
+oneground\test_environment.py:462: NameError
+FAILED oneground/test_environment.py::test_no_tracked_file_carries_a_machine_identifier
+FAILED oneground/test_environment.py::test_the_scan_actually_reads_the_tree
+2 failed, 30 passed in 26.50s
+
+cwd: an exported copy of the working tree with the import added; no .git
+$ python -m pytest -q -p no:cacheprovider oneground/test_environment.py -rs
+SKIPPED [1] oneground\test_environment.py:454: not a git checkout; nothing to scan
+SKIPPED [1] oneground\test_environment.py:467: not a git checkout; nothing to scan
+30 passed, 2 skipped in 35.70s
+```
+
+### Measurements
+
+**Wheel**, built as before from a clean copy of the tree, before the
+`test_environment.py` import was added (the import changes only a test module):
+1,815,318 bytes, 121 files, 5,093,607 uncompressed; +2,981 bytes over the
+`c3615e1` proof build.
+
+**Tests:** 8 new in `oneground/fixture/test_verify.py`:
+- a correct `--asset` verifies;
+- a wrong one exits 2 naming what it looked for and found;
+- a folder that does not exist says so;
+- a path one level short names the folder that holds the asset;
+- a wrong `--asset` on a spec with nothing published exits 2, and its rows stay "unpublished";
+- an asset extracted where the fixture is looked for is named, with the package's copy found;
+- the same without a package copy;
+- the environment line states the venv requirement without changing `met`.
+
+The affected files: 124 passed.
+
+**Full suite, in the checkout:** **812 passed, 0 failed** (3 m 59 s). The live RunPod plan test passed this time: EU-RO-1 had stock.
+
+**Full suite, from an exported copy of the tree with no `.git`** (what a reader
+of the archive zip runs): **3 failed, 804 passed, 5 skipped** (3 m 38 s). Skips include the two identifier-scan tests, which now skip rather than raise `NameError`. The failures: the live RunPod plan test, on GPU stock in EU-RO-1 four minutes after it passed in the checkout; and two tests in `oneground/verify/test_matched.py` that assume a git checkout (see Observed, not done).
+
+**`&&` in Windows PowerShell 5.1**, observed:
+
+```
+PS> $PSVersionTable.PSVersion.ToString()
+5.1.26100.9444
+PS> powershell.exe -NoProfile -Command "git --version && echo second"
+At line:1 char:15
++ git --version && echo second
++               ~~
+The token '&&' is not a valid statement separator in this version.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : InvalidEndOfLine
+[exit 1]
+```
+
+**Both directions of `--asset`, in Windows PowerShell 5.1.** The
+`docs/EXTERNAL_RUN.md` PowerShell block, run line by line in a fresh
+directory. One substitution: the built wheel in place of `oneground` on the pip
+line, because the fix is not on PyPI; the tarball is named by full path because
+it is not in that directory. `USERPROFILE` points at an empty directory, so
+the default asset location holds nothing.
+
+```
+PS> tar -xzf ~\oneground-assets\arxiv-150k-v1.tgz    # the doc: tar -xzf arxiv-150k-v1.tgz, in this directory
+     6144128  fixtures\arxiv-150k\queries.npy
+    49920799  fixtures\arxiv-150k\sample.jsonl.zst
+   460800128  fixtures\arxiv-150k\vectors.npy
+[exit 0]
+```
+
+A wrong `--asset`: exit 2, naming what it looked for and what is there. The
+fixture line also names the tarball extracted in the current directory.
+
+```
+PS> .venv\Scripts\oneground.exe fixture verify arxiv-150k --asset .\arxiv-150k
+python  <scratch>\022b\ps\.venv\Scripts\python.exe  (venv)
+fixture: arxiv-150k
+directory: <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k
+manifest: MANIFEST.sha256 (17 files listed)
+
+preconditions
+  fixture      found      <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k  (the installed package)
+                          not in <scratch>\022b\ps\fixtures (the current directory)
+                          <scratch>\022b\ps\fixtures\arxiv-150k holds vectors.npy, queries.npy and sample.jsonl.zst and no MANIFEST.sha256: that is the release asset extracted there, not the fixture. Pass --asset <scratch>\022b\ps\fixtures\arxiv-150k
+  environment  pinned     numpy 2.5.3, faiss-cpu 1.15.0, scikit-learn 1.9.0
+                          (pins from the installed oneground 0.1.0)
+                          in a virtual environment
+  asset        MISSING    --asset .\arxiv-150k holds none of vectors.npy, queries.npy and sample.jsonl.zst; it does not exist
+                          release asset arxiv-150k-v1.tgz, 483,468,013 bytes, at
+                          https://github.com/shamiksaharcciit-oss/oneground/releases/tag/v0.1.0
+                          it extracts to fixtures/arxiv-150k/ wherever you extract it: pass --asset <that folder>
+
+digests
+  couldnt_check receipt  sample.jsonl.zst               release asset member, not present; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check receipt  vectors.npy                    release asset member, not present; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check receipt  queries.npy                    release asset member, not present; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  verified      receipt  query_ids.json                 a0f3236cd5a91a6c373eea206a4619a3291b226e36995697422622bf62bc4a8d
+  verified      receipt  ground_truth.npy               ee0ad1349b22db3c5dca1df0ab870e648c59234c49d1fd1e0e36df3f13d86b8e
+  verified      receipt  characterization.json          7c6d4d8a3c0e23f6b409997cd7ab856f048241c51878c15a827f913786d2d580
+  verified      declared build_info.json                bf5e8e1b49366f8eb11e31bf3e989c377830cab04f3cdd0a5e89a536de792afc
+  couldnt_check declared projection.npy                 not shipped with the installed package; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check declared ground_view_base.parquet       not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check declared ground_view_queries.parquet    not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check declared ground_view_centroids.parquet  not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check declared report/report.json             not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check declared report/report.html             not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check declared report/simulate.json           not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check declared report/verify.json             not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check declared report/verify_info.json        not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+  couldnt_check declared report/characterization.json   not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and .\arxiv-150k
+
+values
+  couldnt_check intrinsic_dimensionality                not recomputed, because --asset names a folder that holds none of the release asset
+  couldnt_check boundary_crispness                      not recomputed, because --asset names a folder that holds none of the release asset
+  couldnt_check skew_top10_share                        not recomputed, because --asset names a folder that holds none of the release asset
+  couldnt_check ambiguous_query_rate                    not recomputed, because --asset names a folder that holds none of the release asset
+  couldnt_check single_node_hnsw.recall_at_10           not recomputed, because --asset names a folder that holds none of the release asset
+  couldnt_check semantic_sharded.recall_at_10           not recomputed, because --asset names a folder that holds none of the release asset
+  couldnt_check semantic_sharded.storage_amplification  not recomputed, because --asset names a folder that holds none of the release asset
+  couldnt_check drift                                   not recomputed, because --asset names a folder that holds none of the release asset
+
+summary: digests 4 verified, 0 contradicted, 13 couldnt_check (6 receipt, 11 declared)
+         values  0 verified, 0 contradicted, 8 couldnt_check
+
+         13 listed files are not present here, so their bytes were not checked:
+         sample.jsonl.zst, vectors.npy, queries.npy, projection.npy,
+         ground_view_base.parquet, ground_view_queries.parquet,
+         ground_view_centroids.parquet, report/report.json, report/report.html,
+         report/simulate.json, report/verify.json, report/verify_info.json and
+         report/characterization.json.
+         No value was recomputed, because --asset names a folder that holds
+         none of the release asset.
+         4 published values are not recomputed by this command:
+         semantic_sharded.routing_ceiling, semantic_sharded.p50_copies,
+         semantic_sharded.p95_copies and
+         semantic_sharded.p99_copies_per_vector.
+         The digests were checked before any value, so the 4 files that
+         verified are the published bytes whatever happened to the values.
+[exit 2]
+```
+
+No `--asset`, with the tarball extracted in the current directory: exit 2,
+naming the extracted asset and the flag to pass.
+
+```
+PS> .venv\Scripts\oneground.exe fixture verify arxiv-150k
+python  <scratch>\022b\ps\.venv\Scripts\python.exe  (venv)
+fixture: arxiv-150k
+directory: <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k
+manifest: MANIFEST.sha256 (17 files listed)
+
+preconditions
+  fixture      found      <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k  (the installed package)
+                          not in <scratch>\022b\ps\fixtures (the current directory)
+                          <scratch>\022b\ps\fixtures\arxiv-150k holds vectors.npy, queries.npy and sample.jsonl.zst and no MANIFEST.sha256: that is the release asset extracted there, not the fixture. Pass --asset <scratch>\022b\ps\fixtures\arxiv-150k
+  environment  pinned     numpy 2.5.3, faiss-cpu 1.15.0, scikit-learn 1.9.0
+                          (pins from the installed oneground 0.1.0)
+                          in a virtual environment
+  asset        MISSING    vectors.npy, queries.npy and sample.jsonl.zst not found in <scratch>\022b\ps\home\oneground-assets\arxiv-150k or <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k
+                          an extracted asset is at <scratch>\022b\ps\fixtures\arxiv-150k: pass --asset <scratch>\022b\ps\fixtures\arxiv-150k
+                          release asset arxiv-150k-v1.tgz, 483,468,013 bytes, at
+                          https://github.com/shamiksaharcciit-oss/oneground/releases/tag/v0.1.0
+                          it extracts to fixtures/arxiv-150k/ wherever you extract it: pass --asset <that folder>
+
+digests
+  couldnt_check receipt  sample.jsonl.zst               release asset member, not present; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check receipt  vectors.npy                    release asset member, not present; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check receipt  queries.npy                    release asset member, not present; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  verified      receipt  query_ids.json                 a0f3236cd5a91a6c373eea206a4619a3291b226e36995697422622bf62bc4a8d
+  verified      receipt  ground_truth.npy               ee0ad1349b22db3c5dca1df0ab870e648c59234c49d1fd1e0e36df3f13d86b8e
+  verified      receipt  characterization.json          7c6d4d8a3c0e23f6b409997cd7ab856f048241c51878c15a827f913786d2d580
+  verified      declared build_info.json                bf5e8e1b49366f8eb11e31bf3e989c377830cab04f3cdd0a5e89a536de792afc
+  couldnt_check declared projection.npy                 not shipped with the installed package; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check declared ground_view_base.parquet       not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check declared ground_view_queries.parquet    not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check declared ground_view_centroids.parquet  not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check declared report/report.json             not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check declared report/report.html             not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check declared report/simulate.json           not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check declared report/verify.json             not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check declared report/verify_info.json        not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+  couldnt_check declared report/characterization.json   not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and <scratch>\022b\ps\home\oneground-assets\arxiv-150k
+
+values
+  couldnt_check intrinsic_dimensionality                not recomputed, because the release asset is not present
+  couldnt_check boundary_crispness                      not recomputed, because the release asset is not present
+  couldnt_check skew_top10_share                        not recomputed, because the release asset is not present
+  couldnt_check ambiguous_query_rate                    not recomputed, because the release asset is not present
+  couldnt_check single_node_hnsw.recall_at_10           not recomputed, because the release asset is not present
+  couldnt_check semantic_sharded.recall_at_10           not recomputed, because the release asset is not present
+  couldnt_check semantic_sharded.storage_amplification  not recomputed, because the release asset is not present
+  couldnt_check drift                                   not recomputed, because the release asset is not present
+
+summary: digests 4 verified, 0 contradicted, 13 couldnt_check (6 receipt, 11 declared)
+         values  0 verified, 0 contradicted, 8 couldnt_check
+
+         13 listed files are not present here, so their bytes were not checked:
+         sample.jsonl.zst, vectors.npy, queries.npy, projection.npy,
+         ground_view_base.parquet, ground_view_queries.parquet,
+         ground_view_centroids.parquet, report/report.json, report/report.html,
+         report/simulate.json, report/verify.json, report/verify_info.json and
+         report/characterization.json.
+         No value was recomputed, because the release asset is not present.
+         4 published values are not recomputed by this command:
+         semantic_sharded.routing_ceiling, semantic_sharded.p50_copies,
+         semantic_sharded.p95_copies and
+         semantic_sharded.p99_copies_per_vector.
+         The digests were checked before any value, so the 4 files that
+         verified are the published bytes whatever happened to the values.
+[exit 2]
+```
+
+The documented relative path: all eight values verified, exit 0, 35 m 26 s.
+
+```
+PS> .venv\Scripts\oneground.exe fixture verify arxiv-150k --asset fixtures\arxiv-150k
+python  <scratch>\022b\ps\.venv\Scripts\python.exe  (venv)
+fixture: arxiv-150k
+directory: <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k
+manifest: MANIFEST.sha256 (17 files listed)
+
+preconditions
+  fixture      found      <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k  (the installed package)
+                          not in <scratch>\022b\ps\fixtures (the current directory)
+                          <scratch>\022b\ps\fixtures\arxiv-150k holds vectors.npy, queries.npy and sample.jsonl.zst and no MANIFEST.sha256: that is the release asset extracted there, not the fixture. Pass --asset <scratch>\022b\ps\fixtures\arxiv-150k
+  environment  pinned     numpy 2.5.3, faiss-cpu 1.15.0, scikit-learn 1.9.0
+                          (pins from the installed oneground 0.1.0)
+                          in a virtual environment
+  asset        present    fixtures\arxiv-150k
+
+digests
+  verified      receipt  sample.jsonl.zst               404cb92e6d7dd42bde81798d86926b3b64e3cd069547a8ebef5c06120ae73655  (from fixtures\arxiv-150k)
+  verified      receipt  vectors.npy                    141a9220703a03afa2451e4be3e0f034a787bc46a01a61ecd83c03f61529b8fa  (from fixtures\arxiv-150k)
+  verified      receipt  queries.npy                    dbed194a42c1e5273e9a5d5a7224074950ab38c54030739423b6c5714c625b9b  (from fixtures\arxiv-150k)
+  verified      receipt  query_ids.json                 a0f3236cd5a91a6c373eea206a4619a3291b226e36995697422622bf62bc4a8d
+  verified      receipt  ground_truth.npy               ee0ad1349b22db3c5dca1df0ab870e648c59234c49d1fd1e0e36df3f13d86b8e
+  verified      receipt  characterization.json          7c6d4d8a3c0e23f6b409997cd7ab856f048241c51878c15a827f913786d2d580
+  verified      declared build_info.json                bf5e8e1b49366f8eb11e31bf3e989c377830cab04f3cdd0a5e89a536de792afc
+  couldnt_check declared projection.npy                 not shipped with the installed package; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+  couldnt_check declared ground_view_base.parquet       not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+  couldnt_check declared ground_view_queries.parquet    not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+  couldnt_check declared ground_view_centroids.parquet  not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+  couldnt_check declared report/report.json             not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+  couldnt_check declared report/report.html             not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+  couldnt_check declared report/simulate.json           not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+  couldnt_check declared report/verify.json             not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+  couldnt_check declared report/verify_info.json        not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+  couldnt_check declared report/characterization.json   not shipped with the installed package; the repository carries it; looked in <scratch>\022b\ps\.venv\Lib\site-packages\oneground\_fixtures\arxiv-150k and fixtures\arxiv-150k
+
+values
+  verified      intrinsic_dimensionality                recomputed 32.5533, published 32.55, delta 0.00325699, tolerance 0.5
+  verified      boundary_crispness                      recomputed 0.0362467, published 0.036, delta 0.000246667, tolerance 0.02
+  verified      skew_top10_share                        recomputed 0.0754, published 0.075, delta 0.0004, tolerance 0.02
+  verified      ambiguous_query_rate                    recomputed 0.8915, published 0.891, delta 0.0005, tolerance 0.02
+  verified      drift                                   before recomputed 0.523212, published 0.522, delta 0.00121244; after recomputed 0.551401, published 0.549, delta 0.00240097; tolerance 0.02
+  verified      single_node_hnsw.recall_at_10           recomputed 0.9968, published 0.997, delta 0.0002, tolerance 0.01
+  verified      semantic_sharded.recall_at_10           recomputed 0.9318, published 0.932, delta 0.0002, tolerance 0.01
+  verified      semantic_sharded.storage_amplification  recomputed 3.71516, published 3.715, delta 0.00016, tolerance 0.01
+
+summary: digests 7 verified, 0 contradicted, 10 couldnt_check (6 receipt, 11 declared)
+         values  8 verified, 0 contradicted, 0 couldnt_check
+
+         10 listed files are not present here, so their bytes were not checked:
+         projection.npy, ground_view_base.parquet, ground_view_queries.parquet,
+         ground_view_centroids.parquet, report/report.json, report/report.html,
+         report/simulate.json, report/verify.json, report/verify_info.json and
+         report/characterization.json.
+         Every value this command recomputes reproduced (8 of 8).
+         4 published values are not recomputed by this command:
+         semantic_sharded.routing_ceiling, semantic_sharded.p50_copies,
+         semantic_sharded.p95_copies and
+         semantic_sharded.p99_copies_per_vector.
+[exit 0]
+```
+
+### Verification
+
+- A correct `--asset` verifies; a wrong one exits 2: passed, by test and by
+  execution.
+- Every `&&` in a printed doc command split, or left with its reason: done.
+- The venv requirement is stated in the README and `docs/EXTERNAL_RUN.md`, and
+  named by the precondition, with the guard unchanged: done.
+- The extracted-in-the-wrong-place case is named: passed, by test and by
+  execution (runs 4 and 5 above).
+- The `pytest` import: the `NameError` reproduced from the archive, and gone
+  from an exported copy.
+
+**Couldn't-check:**
+- The macOS/Linux command blocks. This host is Windows; only the PowerShell
+  blocks were run.
+- The `SYSTEM INTERPRETER` wording outside the unit test. Producing it for real
+  means installing the pins into this machine's system Python, which is the
+  replacement the message warns about.
+- The developer's figure of five replaced packages: not reproduced, and not
+  quoted in the docs.
+
+### Observed, not done
+
+- **Two more tests fail only outside a git checkout,** the same class as the
+  `pytest` import. Found by the exported-copy suite run above; not fixed,
+  because the brief named the one import:
+  - `oneground/verify/test_matched.py::test_the_real_smoke_requirements_upload_exactly_the_vectors`
+    expects `queries.npy` to be excluded from the upload because git tracks
+    it. Without `.git`, nothing is tracked, so both files are listed.
+  - `…::test_the_arxiv_session_declares_a_tarball_and_a_manifest` asserts
+    `rp.git_carries("fixtures/arxiv-150k/MANIFEST.sha256")`, which answers
+    `untracked` without `.git`.
+
+  Both describe pod sessions, which run from a checkout, so the behaviour
+  under test is right. It is the tests that should skip, as the identifier
+  scans now do.
+- **The live RunPod plan test is at the mercy of stock minute to minute.** It
+  passed in the checkout run and failed in the exported-copy run started four
+  minutes later: EU-RO-1 then offered L4, RTX 2000 Ada, RTX 5090 and RTX PRO
+  4000, none of them the session's four types.
+- With a correct `--asset` that names the tarball extracted in the current
+  directory, the fixture line still suggests `Pass --asset <that folder>`.
+  Redundant, not false (run 6 above).
+- `RELEASE_NOTES.md`'s install block still says `. .venv/bin/activate   #
+  Windows: .venv\Scripts\activate`. In PowerShell that runs `Activate.ps1`,
+  which the default execution policy can block. It has no `&&`, so this task
+  left it.
+- The README's contributor block still clones
+  `https://github.com/oneproof/oneground`, which returns 404 (first observed
+  above). The lines were split, not re-pointed.
+
+### Repo now contains (additions)
+
+    oneground/fixture/verify.py        --asset checked explicitly; extracted asset named; venv line
+    oneground/fixture/test_verify.py   8 tests
+    oneground/test_environment.py      import pytest
+    README.md                          venv required; macOS/Linux and PowerShell blocks; no &&
+    docs/EXTERNAL_RUN.md               venv required; per-shell commands; wrong --asset stops the run
+    tasks/022-fixture-verify-from-anywhere.report.md   this section, and the archive-zip finding
+
+### Blocked on developer (additions)
+
+1. Push `main`; the retag moves to this commit, not `c3615e1`.
+2. The open question above: refuse a system interpreter outright, after the
+   release?

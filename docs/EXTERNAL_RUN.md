@@ -25,6 +25,35 @@ vectors and compares each against the tolerance the fixture itself publishes.
 Nothing is sent anywhere, no account is needed, and the command works offline
 once the two downloads are done.
 
+**The virtual environment is a requirement, not a suggestion.** The wheel pins
+numpy, faiss-cpu and scikit-learn exactly, so installing it into the system
+Python replaces the versions of whichever of those, and of their dependencies,
+that Python already has. The command's preconditions say which kind of
+interpreter it is running under. One command per line:
+
+```bash
+# macOS or Linux
+python3 -m venv .venv
+. .venv/bin/activate
+pip install oneground
+tar -xzf arxiv-150k-v1.tgz
+oneground fixture verify arxiv-150k --asset fixtures/arxiv-150k
+```
+
+```powershell
+# Windows PowerShell
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install oneground
+tar -xzf arxiv-150k-v1.tgz
+.venv\Scripts\oneground.exe fixture verify arxiv-150k --asset fixtures\arxiv-150k
+```
+
+**A wrong `--asset` stops the run.** The tarball extracts to
+`fixtures/arxiv-150k/`; a path that holds none of its three files exits 2,
+saying what it looked for, what the folder holds, and the right folder when it
+is one level down. A tarball extracted where the fixture is looked for is
+named as that, not mistaken for the fixture.
+
 **Run it without `--asset` first if you like.** It checks the digests it can,
 prints the asset's name, its size and the release page it is on, recomputes no
 value, and exits 2. One run tells you everything that is missing, not the

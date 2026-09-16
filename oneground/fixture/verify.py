@@ -964,6 +964,57 @@ def published_value_names(spec):
     return names
 
 
+def _asset_members_in(d):
+    """Which of the release asset's members are files directly in `d`."""
+    return [m for m in ASSET_MEMBERS if os.path.isfile(os.path.join(d, m))]
+
+
+def _describe_dir(d, limit=8):
+    """What is actually at `d`, for a reader told their path is wrong."""
+    if not os.path.exists(d):
+        return "it does not exist"
+    if not os.path.isdir(d):
+        return "it is not a directory"
+    names = sorted(os.listdir(d))
+    if not names:
+        return "it is empty"
+    shown = [n + ("/" if os.path.isdir(os.path.join(d, n)) else "")
+             for n in names[:limit]]
+    more = f" and {len(names) - limit} more" if len(names) > limit else ""
+    return "it holds " + ", ".join(shown) + more
+
+
+def _nested_asset(d, fixture_id):
+    """The folder under `d` that does hold the asset, one level down.
+
+    Task 022, from runs on 0.1.0rc1: the tarball's members are
+    `fixtures/<id>/...`, so the documented `--asset ./arxiv-150k` and a path to
+    the extraction directory itself both point one level short.
+    """
+    for cand in (os.path.join(d, "fixtures", fixture_id),
+                 os.path.join(d, fixture_id)):
+        if _asset_members_in(cand):
+            return cand
+    return None
+
+
+def _extracted_asset_at(fixture_id, looked):
+    """Where a release tarball was extracted in place of a fixture.
+
+    `tar -xzf arxiv-150k-v1.tgz` in the directory a fixture is looked for
+    creates `fixtures/arxiv-150k/` holding the vectors and no manifest. 0.1.0rc1
+    took that for the fixture and stopped with `error: no MANIFEST.sha256 in
+    fixtures\\arxiv-150k`: what a reader who extracted in the wrong place hits.
+    """
+    out = []
+    for _label, root, _missing in looked:
+        d = os.path.join(root, fixture_id)
+        if (os.path.isdir(d) and _asset_members_in(d)
+                and not os.path.isfile(os.path.join(d, MANIFEST_NAME))):
+            out.append(d)
+    return out
+
+
 def _needs_values(spec):
     published = spec.get("characterization") or {}
     refs = spec.get("reference_results") or {}
@@ -973,7 +1024,8 @@ def _needs_values(spec):
 
 def check_preconditions(fixture_id, found, looked, spec, pins, pin_source,
                         pin_looked, unpinned, allow_unpinned, assets_dir,
-                        asset=None, fixtures=None, versions=None):
+                        asset=None, fixtures=None, versions=None,
+                        in_venv=None):
     """The fixture, the pinned environment and the release asset, in order.
 
     Each is `{"key", "state", "met", "blocks_values", "because", "lines"}`.
@@ -984,6 +1036,13 @@ def check_preconditions(fixture_id, found, looked, spec, pins, pin_source,
     """
     needs = _needs_values(spec) if found else None
     pre = []
+    extracted = _extracted_asset_at(fixture_id, looked)
+
+    def extracted_lines():
+        return [f"{os.path.normpath(d)} holds {_and(_asset_members_in(d))} "
+                f"and no {MANIFEST_NAME}: that is the release asset extracted "
+                f"there, not the fixture. Pass --asset {os.path.normpath(d)}"
+                for d in extracted]
 
     # ---- the fixture
     if found:
@@ -992,6 +1051,7 @@ def check_preconditions(fixture_id, found, looked, spec, pins, pin_source,
         if looked:
             lines.append("not in " + _and(f"{root} ({label})"
                                           for label, root, _m in looked))
+        lines += extracted_lines()
         gt = os.path.join(found["dir"], "ground_truth.npy")
         if needs and not os.path.isfile(gt):
             lines.append(f"but ground_truth.npy is not in it, and the values "
@@ -1008,6 +1068,7 @@ def check_preconditions(fixture_id, found, looked, spec, pins, pin_source,
         lines = [f"no {fixture_id}{SPEC_SUFFIX} with a {fixture_id}/"
                  f"{MANIFEST_NAME} beside it, looked in:"]
         lines += [f"  {root}  ({label})" for label, root, _m in looked]
+        lines += extracted_lines()
         ids = known_fixtures(fixtures)
         lines.append("fixtures found there: " + _and(ids) if ids
                      else "no fixture was found in any of them")
@@ -1026,11 +1087,25 @@ def check_preconditions(fixture_id, found, looked, spec, pins, pin_source,
                f"oneground=={__version__}` installs the pinned set")
     not_needed = ("nothing is recomputed for this fixture, so this does not "
                   "stop the run")
+    # Task 022: a virtual environment is a stated requirement. Installing the
+    # pins into a system Python replaces the versions of whatever it already
+    # has. This says so; it does not refuse -- whether it should is an open
+    # question recorded for after the release.
+    if in_venv is None:
+        from .. import environment as envmod
+        in_venv = envmod.in_venv()
+    venv_lines = (["in a virtual environment"] if in_venv else
+                  ["SYSTEM INTERPRETER: a virtual environment is required.",
+                   "Installing the pins into the system Python replaces the "
+                   "versions of any of these packages it already has;",
+                   "create one with `python -m venv .venv` and install "
+                   "oneground into it"])
     if not names:
         lines = ["no pinned set to compare this environment against: "
                  "looked in " + _and(pin_looked),
                  "pass --requirements <file>; or " + install]
         met = True if needs is False else bool(allow_unpinned)
+        lines += venv_lines
         if allow_unpinned:
             lines.append("--allow-unpinned given: values are recomputed, and "
                          "one that agrees is reported couldn't-check, not "
@@ -1046,6 +1121,7 @@ def check_preconditions(fixture_id, found, looked, spec, pins, pin_source,
         lines = [f"{n:<14} running {g:<10} pinned {w}"
                  for n, g, w in unpinned]
         lines.append(f"(pins from {pin_source})")
+        lines += venv_lines
         lines.append(install)
         if allow_unpinned:
             lines.append("--allow-unpinned given: values are recomputed, and "
@@ -1069,9 +1145,44 @@ def check_preconditions(fixture_id, found, looked, spec, pins, pin_source,
                          for n in names)
         pre.append({"key": "environment", "state": "pinned", "met": True,
                     "blocks_values": False, "because": "",
-                    "lines": [have, f"(pins from {pin_source})"]})
+                    "lines": [have, f"(pins from {pin_source})"]
+                    + venv_lines})
 
     # ---- the release asset
+    def release_lines():
+        if fixture_id in RELEASE_ASSETS:
+            name, size = RELEASE_ASSETS[fixture_id]
+            return [f"release asset {name}, {size:,} bytes, at",
+                    release_url(),
+                    f"it extracts to fixtures/{fixture_id}/ wherever you "
+                    f"extract it: pass --asset <that folder>"]
+        return [f"no release asset is published for {fixture_id}; pass "
+                "--asset <a folder holding " + _and(ASSET_MEMBERS) + ">"]
+
+    # Task 022: passing --asset asserts the asset is there. A folder holding
+    # none of it used to report every value couldn't-check and exit 0 -- the
+    # tool saying it checked when it did not. It is a missing precondition
+    # whether or not this fixture has values to recompute.
+    if asset:
+        given = os.path.expanduser(str(asset))
+        if not _asset_members_in(given):
+            lines = [f"--asset {given} holds none of {_and(ASSET_MEMBERS)}; "
+                     f"{_describe_dir(given)}"]
+            nested = _nested_asset(given, fixture_id)
+            if nested:
+                nested = os.path.normpath(nested)
+                lines.append(f"they are in {nested}: pass --asset {nested}")
+            lines += release_lines()
+            # Exit 2 either way; but a spec with nothing published had no
+            # value to recompute, and its rows must still say so rather than
+            # "not recomputed because of --asset".
+            pre.append({"key": "asset", "state": "MISSING", "met": False,
+                        "blocks_values": needs is not False,
+                        "because": "--asset names a folder that holds none of "
+                                   "the release asset",
+                        "lines": lines})
+            return pre
+
     if needs is False:
         pre.append({"key": "asset", "state": "not needed", "met": True,
                     "blocks_values": False, "because": "",
@@ -1105,21 +1216,16 @@ def check_preconditions(fixture_id, found, looked, spec, pins, pin_source,
         return pre
 
     if asset:
-        places = [os.path.expanduser(str(asset)) + "  (--asset)"]
+        given = os.path.expanduser(str(asset))
+        lines = [f"{_and(missing)} not found in {given}  (--asset); "
+                 f"{_describe_dir(given)}"]
     else:
         places = [os.path.join(assets_dir, fixture_id)] + ([fdir] if fdir
                                                           else [])
-    lines = [f"{_and(missing)} not found in " + " or ".join(places)]
-    if fixture_id in RELEASE_ASSETS:
-        name, size = RELEASE_ASSETS[fixture_id]
-        lines.append(f"release asset {name}, {size:,} bytes, at")
-        lines.append(release_url())
-        lines.append("extract it anywhere and pass --asset <the extracted "
-                     "folder>")
-    else:
-        lines.append(f"no release asset is published for {fixture_id}; "
-                     "pass --asset <a folder holding "
-                     + _and(ASSET_MEMBERS) + ">")
+        lines = [f"{_and(missing)} not found in " + " or ".join(places)]
+        lines += [f"an extracted asset is at {os.path.normpath(d)}: pass "
+                  f"--asset {os.path.normpath(d)}" for d in extracted]
+    lines += release_lines()
     blocks = any(m in missing for m in ("vectors.npy", "queries.npy"))
     pre.append({"key": "asset", "state": "MISSING", "met": False,
                 "blocks_values": blocks,

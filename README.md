@@ -15,9 +15,25 @@ Part of the [oneproof](https://oneproof.dev) suite — the *Choose* door.
 
 ## Install
 
+**A virtual environment is required.** The package pins numpy, faiss-cpu and
+scikit-learn exactly, so installing it into the system Python replaces the
+versions of whichever of those, and of their dependencies, it already has.
+
+On macOS or Linux:
+
 ```bash
+python3 -m venv .venv
+. .venv/bin/activate
 pip install oneground
 oneground --help
+```
+
+In Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install oneground
+.venv\Scripts\oneground.exe --help
 ```
 
 Python 3.12 or newer. Extras, each named for the capability it unlocks:
@@ -43,13 +59,29 @@ pip install 'oneground[qdrant]'      # or 'oneground[qdrant,pgvector]'
 
 The quotes are for zsh, which treats brackets as a glob.
 
-To work on oneground rather than with it:
+To work on oneground rather than with it, on macOS or Linux:
 
 ```bash
-git clone https://github.com/oneproof/oneground && cd oneground
-python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -r requirements.txt && pip install -e .
+git clone https://github.com/oneproof/oneground
+cd oneground
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
 ```
+
+In Windows PowerShell:
+
+```powershell
+git clone https://github.com/oneproof/oneground
+cd oneground
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install -e .
+```
+
+One command per line, on purpose: `&&` is a parse error in Windows
+PowerShell 5.1.
 
 **Use that venv's interpreter explicitly.** Every command that writes a
 canonical artifact refuses to run when your numpy, faiss-cpu or scikit-learn

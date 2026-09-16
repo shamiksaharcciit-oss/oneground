@@ -17,6 +17,11 @@ import os
 import sys
 import tempfile
 
+# Only the not-a-checkout branch uses it, which a git checkout never reaches:
+# from a GitHub archive zip, or any tree without .git, both identifier-scan
+# tests raised NameError here instead of skipping (task 022).
+import pytest
+
 sys.path.insert(0, os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")))
 
