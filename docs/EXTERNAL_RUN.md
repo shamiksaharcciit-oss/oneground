@@ -9,22 +9,26 @@ who has never seen this project and has no reason to trust it.
 
 On any machine with Python 3.12 or newer and about 1 GB of free disk, make a
 fresh virtual environment and `pip install oneground` — the wheel pins the
-versions that decide the numbers, so nothing further is needed to make the
-check meaningful; download
+versions that decide the numbers, and it carries the fixture's spec, manifest
+and ground truth, so there is nothing to clone; download
 `arxiv-150k-v1.tgz` from the release page and extract it anywhere with
 `tar -xzf arxiv-150k-v1.tgz`, which creates `fixtures/arxiv-150k/` containing
-three files; clone the repository with
-`git clone https://github.com/oneproof/oneground`, which supplies the fixture's
-published values and its manifest but not the 483 MB of vectors; then from
-inside the clone run
+three files; then, from any directory, run
 `oneground fixture verify arxiv-150k --asset <path to the extracted fixtures/arxiv-150k>`.
-It prints one line per artifact and one line per published value, each
+It first prints three preconditions — the fixture, the pinned environment and
+the release asset — each found or missing, and for anything missing, how to
+supply it. Then one line per artifact and one line per value, each
 **verified**, **contradicted**, or **couldn't-check**. The digests finish in
 seconds; the values take about ten minutes, because it recomputes the
 characterization, the drift pair and both reference architectures over 150,000
 vectors and compares each against the tolerance the fixture itself publishes.
 Nothing is sent anywhere, no account is needed, and the command works offline
 once the two downloads are done.
+
+**Run it without `--asset` first if you like.** It checks the digests it can,
+prints the asset's name, its size and the release page it is on, recomputes no
+value, and exits 2. One run tells you everything that is missing, not the
+first thing.
 
 **That ten minutes assumes the machine is not paging.** The recomputation
 loads the fixture's 460 MB of vectors and builds indexes over them, so it wants
@@ -34,16 +38,21 @@ cut `0.1.0` took 2 h 06 m for 588 seconds of CPU, about 95% of it waiting on
 page faults, with 225 MB of physical memory free. The result is identical when
 it finishes; close some things or let it run.
 
-**With too little memory it does not finish at all.** On a later run on the
-same machine every digest verified and the first value then raised
+**With too little memory some values cannot be recomputed.** On a later run
+on the same machine every digest verified and a value then raised
 
     numpy ... Unable to allocate 211. MiB for an array with
     shape (71888, 768) and data type float32
 
-and the command exited non-zero. Slow and stopped are different outcomes: the
-first wants patience, the second wants memory. Note what survives either way --
-the eleven digests are checked first, so a run that dies in the values has
-already told you the bytes are the published ones.
+Up to `0.1.0` that stopped the command with no value reported at all. It no
+longer does: a value this machine cannot recompute is reported
+**couldn't-check**, with the allocation that failed as its reason, the other
+values carry on, and the command exits 0 if nothing is contradicted. The
+summary says how many values could not be recomputed on this host, and that the
+digests -- checked before any value -- still confirm the bytes. Slow and short
+of memory are different outcomes: the first wants patience, the second wants
+memory, and a re-run with more of it decides the rows that could not be
+checked.
 
 (The peak memory the command actually needs has not been measured. On the slow
 run the working set was being trimmed continuously, so what it reported was
@@ -54,10 +63,25 @@ above is one allocation that failed, not the total.)
 
 ## What a successful run prints
 
+From a bare install with the asset, on a machine with the memory for every
+value:
+
 ```
-summary: digests 17 verified, 0 contradicted, 0 couldnt_check
-         values   8 verified, 0 contradicted, 0 couldnt_check
+summary: digests 7 verified, 0 contradicted, 10 couldnt_check (6 receipt, 11 declared)
+         values  8 verified, 0 contradicted, 0 couldnt_check
 ```
+
+The ten digests that come back couldn't-check are files neither the package nor
+the asset carries: the three ground-view tables and the six files of the
+published report, which are in the repository, and `projection.npy`, which is
+not published anywhere. The output says which is which. From a clone of the
+repository the tables and the report verify too. The values need only what the
+package and the asset carry.
+
+Eight values verified is every value this command recomputes. The fixture
+publishes four more -- the semantic-sharded routing ceiling and its copy
+percentiles -- that it does not recompute, and the summary names them rather
+than calling eight "every published value".
 
 ## What the three outcomes mean
 
@@ -70,15 +94,21 @@ finding about this project and we want the report: the full command output,
 your platform, and `pip freeze`.
 
 **couldn't-check** — there was nothing to compare, or no way to compare it.
-Never rounded up to verified and never rounded down to contradicted. Two
-things cause it, and the output names which:
+Never rounded up to verified and never rounded down to contradicted. The
+output names the cause of each one, and the summary gives each cause its own
+sentence:
 
-- the asset is not where `--asset` points, so there are no bytes to read;
-- your `numpy`, `faiss-cpu` or `scikit-learn` differ from the versions the
-  fixture was built under. Every value then reports couldn't-check **with its
-  numbers still shown**, so you can see the agreement and see that it does not
-  count. A value recomputed under different libraries has not been reproduced
-  under the pins the fixture claims.
+- the asset is not where `--asset` points, so there are no bytes to read. No
+  value is recomputed, the preconditions say where the asset was looked for
+  and where to get it, and the command exits 2;
+- your `numpy`, `faiss-cpu` or `scikit-learn` differ from the pinned versions.
+  The preconditions name which, no value is recomputed, and the command exits
+  2. With `--allow-unpinned` the values are recomputed anyway and each reports
+  couldn't-check **with its numbers still shown**, so you can see the
+  agreement and see that it does not count. A value recomputed under different
+  libraries has not been reproduced under the pins the fixture claims;
+- this machine could not recompute a value -- out of memory, say. That value
+  alone is couldn't-check, with the reason, and the rest carry on.
 
 **On a clean `pip install oneground` you should get `verified`, not
 couldn't-check.** The wheel pins those three exactly, so a fresh virtual

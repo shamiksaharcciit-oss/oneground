@@ -127,10 +127,12 @@ oneground fixture verify arxiv-smoke
 ```
 
 The full ones need their vectors, which ship as release assets rather than in
-the repository. Extract one and point verify at the folder:
+the repository. A tarball extracts to `fixtures/<id>/`, wherever you extract
+it; point verify at that folder:
 
 ```bash
-oneground fixture verify arxiv-150k --asset ./arxiv-150k
+tar -xzf arxiv-150k-v1.tgz
+oneground fixture verify arxiv-150k --asset <where you extracted it>/fixtures/arxiv-150k
 ```
 
 Each digest and each published value comes back **verified**, **contradicted**

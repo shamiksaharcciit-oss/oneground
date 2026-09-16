@@ -130,10 +130,11 @@ CPU-pod session. It is not rounded up.
 
 The small artifacts are in the repository. The large ones — `vectors.npy`,
 `queries.npy`, `sample.jsonl.zst` — ship as release assets, so a fresh clone
-reports couldnt_check for the values that need them. Extract an asset and point
-verify at it:
+reports couldnt_check for the values that need them. An asset extracts to
+`fixtures/<id>/` wherever you extract it; point verify at that folder:
 
-    oneground fixture verify stackexchange-150k --asset ~/oneground-assets/stackexchange-150k
+    tar -xzf stackexchange-150k-v1.tgz
+    oneground fixture verify stackexchange-150k --asset <where you extracted it>/fixtures/stackexchange-150k
 
 Rebuilding a fixture from source is `corpora/run_fixture_build.sh`, which the
 pod sessions in `sessions/` drive. `stackexchange-150k` streams its 34 GB

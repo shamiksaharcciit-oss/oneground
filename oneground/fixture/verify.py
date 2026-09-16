@@ -68,30 +68,40 @@ about the fixture worth seeing. It is just not the evidence `verified`
 requires. A contradiction is never downgraded — disagreement is disagreement,
 and an unpinned environment explains it at most.
 
+Where the fixture comes from (task 022)
+    `--fixtures <dir>` if given, and only there; otherwise `fixtures/` in the
+    current directory; otherwise the copy the installed package carries (the
+    specs and small receipts -- see `shipped.py`). The directory used is
+    printed, and so is everywhere that was looked.
+
+Preconditions (task 022)
+    Three things decide whether the values can be checked: the fixture, the
+    pinned environment, and the release asset. A run prints all three
+    together, each with what it is and how to satisfy it -- a reader learns
+    the whole shape of what they need from one run, not from three. The
+    digests are checked whenever the fixture is found, whatever else is
+    missing, because they depend on nothing but the bytes.
+
 Exit codes (they describe both halves)
-    0   nothing contradicted. Every file that is present verified; any the
-        manifest lists but that are absent were reported couldnt_check, which
-        does not change the exit code. A contributor who cloned the repo
-        without the large release artifacts should not see a failure — their
-        fixture is not broken, it is incomplete, and the report says which.
-    1   at least one file contradicted
-    2   --strict only: nothing contradicted, but at least one file could not
-        be checked. For a caller that needs the whole fixture present — a
-        release gate, say — rather than the default clone-friendly reading.
+    0   nothing contradicted, and every precondition the values needed was
+        met. A file the manifest lists but that is absent is couldnt_check and
+        does not change the exit code, and neither is a value that could not
+        be recomputed on this host (out of memory, say): each is reported with
+        its reason, and the rest carry on.
+    1   at least one digest or value contradicted. Always wins.
+    2   nothing contradicted, but not everything could be checked: a
+        precondition was missing (the preconditions block names which), or
+        --strict was given and at least one digest or value is couldnt_check.
 
-couldnt_check never becomes verified in the report; it is only the default
-exit code that treats absence as non-fatal, and the summary line always states
-how many files could not be checked. --strict changes what the exit code
-means, never what the report says.
-
---strict counts both halves, so a caller that has the release asset and wants
-the whole fixture accounted for gets exit 2 when anything could not be checked.
-A fresh clone without the asset should not use it.
+couldnt_check never becomes verified in the report, and a contradiction is
+never downgraded to couldnt_check. --strict changes what the exit code means,
+never what the report says.
 
 Usage
 -----
     oneground fixture verify arxiv-smoke
-    oneground fixture verify arxiv-smoke --fixtures-dir fixtures
+    oneground fixture verify arxiv-150k --asset ~/oneground-assets/arxiv-150k
+    oneground fixture verify arxiv-smoke --fixtures fixtures
 
 The old entry point still works for one release:
 
@@ -110,15 +120,70 @@ from ..environment import (PINNED, read_requirements_pins,  # noqa: F401
                            running_pin_mismatches, running_versions)
 from ..receipts import MANIFEST_NAME, sha256_file
 from ..sample.fields import field_map
+from .shipped import PACKAGE_DIRNAME, SHIPPED_FILES, SPEC_SUFFIX
 
 # Where the release assets are extracted. Declared, and overridable: the large
 # artifacts ship separately from the repository, so a fresh clone has none of
 # them and reports couldnt_check rather than failing.
 DEFAULT_ASSETS = os.path.join(os.path.expanduser("~"), "oneground-assets")
 
+# The copy of the fixtures the installed package carries (task 022).
+PACKAGE_FIXTURES = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    PACKAGE_DIRNAME)
+
+# The release assets, by fixture id: the tarball's name and its size in bytes,
+# as published in RELEASE_NOTES.md (test_verify checks the two agree). The page
+# is the release of the installed version, so a preview install points at the
+# preview's release and 0.1.0 at 0.1.0's.
+REPOSITORY = "https://github.com/shamiksaharcciit-oss/oneground"
+RELEASE_ASSETS = {
+    "arxiv-150k": ("arxiv-150k-v1.tgz", 483_468_013),
+    "stackexchange-150k": ("stackexchange-150k-v1.tgz", 460_106_978),
+}
+# What the tarball extracts to, and what the values read from it.
+ASSET_MEMBERS = ("vectors.npy", "queries.npy", "sample.jsonl.zst")
+
 VERIFIED = "verified"
 CONTRADICTED = "contradicted"
 COULDNT_CHECK = "couldnt_check"
+
+# Why a value is couldnt_check (task 022). The summary speaks per cause:
+# "not published yet", "not attempted because a precondition is missing",
+# "this host could not" and "agreed, but outside the pins" are four different
+# sentences, and a summary that collapses them over-reads its rows.
+UNPUBLISHED = "unpublished"        # the spec carries no number for it yet
+NOT_ATTEMPTED = "not_attempted"    # a precondition is missing
+HOST = "host"                      # out of memory, a missing library, an
+                                   # unreadable file: this machine, not the
+                                   # fixture
+RECOMPUTE = "recompute"            # the recomputation failed another way,
+                                   # or produced nothing for this value
+UNPINNED = "unpinned"              # agreed, outside the pinned environment
+BUILD_PINS = "build_pins"          # the recorded build was not pinned
+SPEC = "spec"                      # the spec's entry cannot be compared
+INPUT = "input"                    # the asset's files do not belong together
+
+
+class Reason(str):
+    """A couldnt_check reason that also carries its cause."""
+
+    def __new__(cls, text, cause=None):
+        self = str.__new__(cls, text)
+        self.cause = cause
+        return self
+
+
+class ValueRow(tuple):
+    """`(name, outcome, detail)` -- still a 3-tuple to anything that unpacks
+    it -- plus `cause`, which is None unless the outcome is couldnt_check."""
+
+    def __new__(cls, name, outcome, detail, cause=None):
+        self = tuple.__new__(cls, (name, outcome, detail))
+        if cause is None and outcome == COULDNT_CHECK:
+            cause = getattr(detail, "cause", None)
+        self.cause = cause
+        return self
 
 RECEIPT = "receipt"
 DECLARED = "declared"
@@ -174,6 +239,7 @@ def verify_digests(fixture_dir, asset_dir=None):
     """
     manifest = os.path.join(fixture_dir, MANIFEST_NAME)
     entries = read_manifest(manifest)
+    packaged = _is_packaged(fixture_dir)
 
     results = []
     for expected, name in entries:
@@ -187,9 +253,25 @@ def verify_digests(fixture_dir, asset_dir=None):
         if not os.path.exists(fp):
             hint = (f"; looked in {fixture_dir}"
                     + (f" and {asset_dir}" if asset_dir else ""))
-            results.append((name, k, COULDNT_CHECK,
-                            "artifact not present (release asset, or not "
-                            "built)" + hint))
+            if name in ASSET_MEMBERS:
+                fid = os.path.basename(os.path.normpath(fixture_dir))
+                why = ("release asset member, not present"
+                       if fid in RELEASE_ASSETS else
+                       "not present, and no release asset is published for "
+                       "this fixture; building it produces this file")
+            elif packaged and name not in SHIPPED_FILES:
+                # Task 022. The wheel carries the specs and small receipts.
+                # Calling anything else a release asset would send a reader to
+                # download a tarball that does not contain it. The ground-view
+                # tables and the published report are tracked in the
+                # repository; projection.npy is gitignored and is in no
+                # published place, so it gets no such pointer.
+                why = "not shipped with the installed package"
+                if any(fnmatch.fnmatch(name, g) for g in DECLARED_GLOBS):
+                    why += "; the repository carries it"
+            else:
+                why = "artifact not present (release asset, or not built)"
+            results.append((name, k, COULDNT_CHECK, why + hint))
             continue
         actual = sha256_file(fp)
         if actual == expected:
@@ -218,9 +300,20 @@ REPRODUCIBLE = ("intrinsic_dimensionality", "boundary_crispness",
 # and never taken from the data.
 DRIFT_CUTOFF = "2019-01-01"
 
-def pin_mismatches(build_info, requirements_path="requirements.txt"):
-    """[(package, built_with, pinned)] for pins that decide the numbers."""
-    pinned = read_requirements_pins(requirements_path)
+def _is_packaged(path):
+    here = os.path.normcase(os.path.abspath(path))
+    root = os.path.normcase(os.path.abspath(PACKAGE_FIXTURES))
+    return here == root or here.startswith(root + os.sep)
+
+
+def pin_mismatches(build_info, requirements_path="requirements.txt",
+                   pins=None):
+    """[(package, built_with, pinned)] for pins that decide the numbers.
+
+    `pins` replaces reading `requirements_path` (task 022: outside a checkout
+    the installed distribution's own pins are the set)."""
+    pinned = (read_requirements_pins(requirements_path) if pins is None
+              else {_norm(k): v for k, v in pins.items()})
     built = {k.lower(): v for k, v in
              (build_info.get("library_versions") or {}).items()}
     out = []
@@ -292,39 +385,42 @@ def recompute_drift(sample_path, base, queries, gt10, seed,
     try:
         base_recs, q_recs = read_sample_records(sample_path)
     except ImportError:
-        return None, ("zstandard is not installed, so sample.jsonl.zst cannot "
-                      "be read")
+        return None, Reason("zstandard is not installed, so "
+                            "sample.jsonl.zst cannot be read", HOST)
     except (OSError, ValueError) as e:
-        return None, f"could not read {sample_path}: {type(e).__name__}: {e}"
+        return None, Reason(f"could not read {sample_path}: "
+                            f"{type(e).__name__}: {e}", HOST)
 
     # Asserted, not trusted. A file whose base rows do not match vectors.npy
     # is not the file that produced those vectors, and zipping two different
     # corpora together would give a number that looks like a reproduction.
     if len(base_recs) != len(base):
-        return None, (f"{sample_path} holds {len(base_recs):,} base records "
-                      f"but vectors.npy holds {len(base):,}; these are not "
-                      "the same corpus")
+        return None, Reason(f"{sample_path} holds {len(base_recs):,} base "
+                            f"records but vectors.npy holds {len(base):,}; "
+                            "these are not the same corpus", INPUT)
     if len(q_recs) != len(queries):
-        return None, (f"{sample_path} holds {len(q_recs):,} query records but "
-                      f"queries.npy holds {len(queries):,}; these are not the "
-                      "same query set")
+        return None, Reason(f"{sample_path} holds {len(q_recs):,} query "
+                            f"records but queries.npy holds "
+                            f"{len(queries):,}; these are not the same query "
+                            "set", INPUT)
     missing = [r for r in (base_recs[:1] + q_recs[:1])
                if date_field not in r]
     if missing:
         have = sorted((base_recs[:1] + q_recs[:1])[0]) if base_recs else []
-        return None, (f"the sample records carry no {date_field} field, so "
-                      f"there is no timeline to cut at (they have: "
-                      f"{', '.join(have)})")
+        return None, Reason(f"the sample records carry no {date_field} "
+                            f"field, so there is no timeline to cut at (they "
+                            f"have: {', '.join(have)})", INPUT)
 
     if log_fn:
         log_fn(f"  recomputing the drift pair (cutoff {cutoff}, seed {seed})")
     pre = np.array([r[date_field] < cutoff for r in base_recs])
     q_pre = np.array([r[date_field] < cutoff for r in q_recs])
     if pre.all() or (~pre).all():
-        return None, (f"the cutoff {cutoff} leaves one side of the corpus "
-                      "empty")
+        return None, Reason(f"the cutoff {cutoff} leaves one side of the "
+                            "corpus empty", INPUT)
     if q_pre.all() or (~q_pre).all():
-        return None, f"every query falls on one side of the cutoff {cutoff}"
+        return None, Reason(f"every query falls on one side of the cutoff "
+                            f"{cutoff}", INPUT)
     return drift_pair(base, queries, pre, q_pre, gt10, seed), None
 
 
@@ -332,27 +428,28 @@ def _compare_drift(published, got):
     """The pair, against its published pair and single tolerance."""
     tol_n, tol_why = _as_number(published.get("tolerance"))
     if tol_n is None:
-        return ("drift", COULDNT_CHECK,
-                f"no usable tolerance for drift ({tol_why})")
+        return ValueRow("drift", COULDNT_CHECK,
+                        f"no usable tolerance for drift ({tol_why})", SPEC)
     rows, unusable = [], None
     for side in ("before", "after"):
         want_n, why = _as_number(published.get(f"value_{side}"))
         have = got.get(f"drift_{side}")
         if want_n is None:
-            unusable = f"value_{side}: {why}"
+            unusable = Reason(f"value_{side}: {why}", UNPUBLISHED)
             break
         if have is None:
-            unusable = f"drift_{side} was not produced by the recomputation"
+            unusable = Reason(f"drift_{side} was not produced by the "
+                              "recomputation", RECOMPUTE)
             break
         rows.append((side, float(have), want_n, abs(float(have) - want_n)))
     if unusable:
-        return ("drift", COULDNT_CHECK, unusable)
+        return ValueRow("drift", COULDNT_CHECK, unusable)
     detail = "; ".join(
         f"{s} recomputed {h:.6g}, published {w:.6g}, delta {d:.6g}"
         for s, h, w, d in rows) + f"; tolerance {tol_n:.6g}"
     if all(d <= tol_n for _s, _h, _w, d in rows):
-        return ("drift", VERIFIED, detail)
-    return ("drift", CONTRADICTED, detail)
+        return ValueRow("drift", VERIFIED, detail)
+    return ValueRow("drift", CONTRADICTED, detail)
 
 
 def _asset_paths(fixture_id, assets_dir, fixture_dir=None, asset=None):
@@ -396,31 +493,44 @@ def _anything_published(published, refs, wanted, ref_rows):
     return any(_as_number(c)[0] is not None for c in candidates)
 
 
+REF_ROWS = (("single_node_hnsw.recall_at_10", "single_node_hnsw"),
+            ("semantic_sharded.recall_at_10", "semantic_sharded"),
+            ("semantic_sharded.storage_amplification", "semantic_sharded"))
+
+
+def value_names(spec):
+    """The rows `verify_values` produces for this spec, in the order its
+    all-couldnt_check path writes them."""
+    published = spec.get("characterization") or {}
+    refs = spec.get("reference_results") or {}
+    names = [f for f in REPRODUCIBLE if f in published]
+    names += [name for name, fam in REF_ROWS if fam in refs]
+    if "drift" in published:
+        names.append("drift")
+    return names
+
+
 def verify_values(fixture_id, fixture_dir, spec, assets_dir,
                   requirements_path="requirements.txt", log_fn=print,
-                  asset=None):
-    """[(name, outcome, detail)] -- one row per published value.
+                  asset=None, pins=None):
+    """[(name, outcome, detail)] -- one row per value this command recomputes.
 
     Recomputes with the same functions the product path uses, so a fixture
     number and a user's number are the same computation by construction rather
     than by two implementations agreeing.
+
+    Each row is a `ValueRow`: a 3-tuple, plus the `cause` of a couldnt_check.
+    `pins` replaces reading `requirements_path` (task 022).
     """
     rows = []
     published = spec.get("characterization") or {}
     refs = spec.get("reference_results") or {}
     wanted = [f for f in REPRODUCIBLE if f in published]
-    ref_rows = [("single_node_hnsw.recall_at_10", "single_node_hnsw"),
-                ("semantic_sharded.recall_at_10", "semantic_sharded"),
-                ("semantic_sharded.storage_amplification", "semantic_sharded")]
+    ref_rows = list(REF_ROWS)
 
-    def all_couldnt_check(reason):
-        for f in wanted:
-            rows.append((f, COULDNT_CHECK, reason))
-        for name, fam in ref_rows:
-            if fam in refs:
-                rows.append((name, COULDNT_CHECK, reason))
-        if "drift" in published:
-            rows.append(("drift", COULDNT_CHECK, reason))
+    def all_couldnt_check(reason, cause):
+        for name in value_names(spec):
+            rows.append(ValueRow(name, COULDNT_CHECK, reason, cause))
         return rows
 
     # Nothing published yet -> nothing to verify, and the recomputation is
@@ -440,7 +550,7 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
         return all_couldnt_check(
             "the spec publishes no value for this field yet, so there is "
             "nothing to reproduce. The recomputation was skipped rather "
-            "than run against placeholders.")
+            "than run against placeholders.", UNPUBLISHED)
 
     build_info = {}
     bi_path = os.path.join(fixture_dir, "build_info.json")
@@ -448,20 +558,20 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
         with open(bi_path, encoding="utf-8") as f:
             build_info = json.load(f)
 
-    bad_pins = pin_mismatches(build_info, requirements_path)
+    bad_pins = pin_mismatches(build_info, requirements_path, pins=pins)
     if bad_pins:
         detail = "; ".join(f"{n}: built with {g}, pinned {w}"
                            for n, g, w in bad_pins)
         return all_couldnt_check(
             f"the recorded build used a pin that differs from "
             f"requirements.txt ({detail}), so the published values are not "
-            "the pinned environment's values.")
+            "the pinned environment's values.", BUILD_PINS)
 
     # The comparison `verified` actually depends on: is *this* process running
     # the pins? Not a short circuit -- the values are still computed and
     # compared below, because the agreement is worth seeing even when it
     # cannot count. `unpinned` downgrades each outcome and says why.
-    unpinned = running_pin_mismatches(requirements_path)
+    unpinned = running_pin_mismatches(requirements_path, pinned=pins)
 
     vec_p, q_p, asset_dir = _asset_paths(fixture_id, assets_dir, fixture_dir,
                                         asset=asset)
@@ -469,12 +579,13 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
     if missing:
         return all_couldnt_check(
             f"the release asset is not present: {', '.join(missing)}. It "
-            "ships separately from the repository, so a fresh clone cannot "
-            "check values.")
+            "ships separately from the repository and the package, so no "
+            "value was recomputed.", NOT_ATTEMPTED)
 
     gt_p = os.path.join(fixture_dir, "ground_truth.npy")
     if not os.path.exists(gt_p):
-        return all_couldnt_check(f"no ground_truth.npy in {fixture_dir}")
+        return all_couldnt_check(f"no ground_truth.npy in {fixture_dir}",
+                                 NOT_ATTEMPTED)
 
     import numpy as np
 
@@ -484,19 +595,36 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
     seed = int(((spec.get("sampling") or {}).get("seed"))
                or ((spec.get("ground_truth") or {}).get("seed")) or 20260908)
     log_fn(f"  loading {vec_p}")
-    base = np.load(vec_p, mmap_mode=None).astype(np.float32)
-    queries = np.load(q_p).astype(np.float32)
-    gt10 = np.load(gt_p)[:, :10]
+    try:
+        base = np.load(vec_p, mmap_mode=None).astype(np.float32)
+        queries = np.load(q_p).astype(np.float32)
+        gt10 = np.load(gt_p)[:, :10]
+    except Exception as e:                            # reported, not raised
+        # Nothing below can run without the arrays, so this is the one failure
+        # that does take every value with it -- and it still reports them as
+        # couldnt_check with the reason rather than raising.
+        return all_couldnt_check(recompute_failed(e), None)
 
     log_fn(f"  recomputing the characterization over {len(base):,} vectors "
            f"(seed {seed})")
-    got = characterize_arrays(base, queries, seed, log_fn=lambda *_a: None)
+    try:
+        got = characterize_arrays(base, queries, seed,
+                                  log_fn=lambda *_a: None)
+    except Exception as e:                            # reported, not raised
+        # The five characterization values come from one call, so they fail
+        # together -- but drift and the reference results are separate
+        # computations over arrays that loaded fine, and they carry on below.
+        got = None
+        why = recompute_failed(e)
+        for field in wanted:
+            rows.append(ValueRow(field, COULDNT_CHECK, why))
 
-    for field in wanted:
-        entry = published[field]
-        want, tol = entry.get("value"), entry.get("tolerance")
-        have = got.get(field)
-        rows.append(_downgrade(_compare(field, have, want, tol), unpinned))
+    if got is not None:
+        for field in wanted:
+            entry = published[field]
+            want, tol = entry.get("value"), entry.get("tolerance")
+            have = got.get(field)
+            rows.append(_downgrade(_compare(field, have, want, tol), unpinned))
 
     if "drift" in published:
         sample_path = os.path.join(asset_dir, "sample.jsonl.zst")
@@ -504,16 +632,22 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
             alt = os.path.join(fixture_dir, "sample.jsonl.zst")
             sample_path = alt if os.path.exists(alt) else sample_path
         if not os.path.exists(sample_path):
-            rows.append(("drift", COULDNT_CHECK,
-                         f"sample.jsonl.zst is not present ({sample_path}); "
-                         "it carries the date column drift is cut on"))
+            rows.append(ValueRow(
+                "drift", COULDNT_CHECK,
+                f"sample.jsonl.zst is not present ({sample_path}); it "
+                "carries the date column drift is cut on", NOT_ATTEMPTED))
         else:
             cutoff = _published_cutoff(published["drift"])
-            drift, why = recompute_drift(
-                sample_path, base, queries, gt10, seed, cutoff,
-                log_fn=log_fn, date_field=field_map(spec)["date"])
+            try:
+                drift, why = recompute_drift(
+                    sample_path, base, queries, gt10, seed, cutoff,
+                    log_fn=log_fn, date_field=field_map(spec)["date"])
+            except Exception as e:                    # reported, not raised
+                # This is the one 018d hit: a k-means over the pre-cutoff
+                # half, which on a 150k fixture is a 211 MiB allocation.
+                drift, why = None, recompute_failed(e)
             if drift is None:
-                rows.append(("drift", COULDNT_CHECK, why))
+                rows.append(ValueRow("drift", COULDNT_CHECK, why))
             else:
                 rows.append(_downgrade(
                     _compare_drift(published["drift"], drift), unpinned))
@@ -533,8 +667,8 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
                 refs["single_node_hnsw"].get("recall_at_10"),
                 refs["single_node_hnsw"].get("tolerance")), unpinned))
         except Exception as e:                        # reported, not raised
-            rows.append(("single_node_hnsw.recall_at_10", COULDNT_CHECK,
-                         f"recompute failed: {type(e).__name__}: {e}"))
+            rows.append(ValueRow("single_node_hnsw.recall_at_10",
+                                 COULDNT_CHECK, recompute_failed(e)))
 
     if "semantic_sharded" in refs:
         p = dict(refs["semantic_sharded"].get("params") or {})
@@ -555,9 +689,35 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
         except Exception as e:                        # reported, not raised
             for name in ("semantic_sharded.recall_at_10",
                          "semantic_sharded.storage_amplification"):
-                rows.append((name, COULDNT_CHECK,
-                             f"recompute failed: {type(e).__name__}: {e}"))
+                rows.append(ValueRow(name, COULDNT_CHECK,
+                                     recompute_failed(e)))
     return rows
+
+
+def recompute_failed(e):
+    """Why a value is couldnt_check rather than why the command stopped.
+
+    Task 018e. `MemoryError` is named separately because it is the one failure
+    here a reader can act on, and because it says nothing about the fixture:
+    the bytes are already confirmed by the digests, which run first. Telling
+    someone "recompute failed: MemoryError" invites them to doubt the fixture;
+    telling them the machine ran out of room tells them what to do.
+
+    numpy raises `_ArrayMemoryError`, which subclasses `MemoryError`, so the
+    isinstance catches the shape 018d actually hit.
+    """
+    if isinstance(e, MemoryError):
+        first = (str(e).strip().splitlines() or [""])[0][:120]
+        return Reason(
+            "out of memory recomputing this value on this machine (%s). The "
+            "digests are checked before any value and are unaffected. Free "
+            "memory and re-run to decide this row."
+            % (first or "MemoryError"), HOST)
+    # Task 022 names the environmental causes: a library this value needs is
+    # not installed, or an input could not be read. Anything else is the
+    # recomputation failing, and is not blamed on the host.
+    cause = HOST if isinstance(e, (ImportError, OSError)) else RECOMPUTE
+    return Reason("recompute failed: %s: %s" % (type(e).__name__, e), cause)
 
 
 def _published_cutoff(drift_entry):
@@ -593,9 +753,10 @@ def _downgrade(row, unpinned):
         return row
     versions = "; ".join(f"{n}: running {g}, pinned {w}"
                          for n, g, w in unpinned)
-    return (name, COULDNT_CHECK,
-            f"{detail} -- WITHIN TOLERANCE, but not under the pinned "
-            f"environment ({versions}), so it is not a reproduction")
+    return ValueRow(name, COULDNT_CHECK,
+                    f"{detail} -- WITHIN TOLERANCE, but not under the pinned "
+                    f"environment ({versions}), so it is not a reproduction",
+                    UNPINNED)
 
 
 def _as_number(value):
@@ -623,103 +784,571 @@ def _compare(name, have, want, tol):
     """One value against its own published tolerance. Never a wider one."""
     want_n, why = _as_number(want)
     if want_n is None:
-        return (name, COULDNT_CHECK, why)
+        return ValueRow(name, COULDNT_CHECK, why, UNPUBLISHED)
     if have is None:
-        return (name, COULDNT_CHECK, "not produced by the recomputation")
+        return ValueRow(name, COULDNT_CHECK,
+                        "not produced by the recomputation", RECOMPUTE)
     if isinstance(have, str):
-        return (name, COULDNT_CHECK, have)
+        return ValueRow(name, COULDNT_CHECK, have, RECOMPUTE)
     tol_n, tol_why = _as_number(tol)
     if tol_n is None:
-        return (name, COULDNT_CHECK,
-                "the spec publishes no usable tolerance for this value, so "
-                f"'reproduces' has no defined meaning ({tol_why})")
+        return ValueRow(name, COULDNT_CHECK,
+                        "the spec publishes no usable tolerance for this "
+                        f"value, so 'reproduces' has no defined meaning "
+                        f"({tol_why})", SPEC)
     delta = abs(float(have) - want_n)
     detail = (f"recomputed {float(have):.6g}, published {want_n:.6g}, "
               f"delta {delta:.6g}, tolerance {tol_n:.6g}")
     if delta <= tol_n:
-        return (name, VERIFIED, detail)
-    return (name, CONTRADICTED, detail)
+        return ValueRow(name, VERIFIED, detail)
+    return ValueRow(name, CONTRADICTED, detail)
+
+
+# --------------------------------------------------------------------------
+# task 022: from anywhere
+# --------------------------------------------------------------------------
+# `oneground fixture verify arxiv-150k`, from a bare `pip install` outside any
+# checkout, answered `error: no such fixture directory: fixtures\arxiv-150k`.
+# The command was built for someone standing inside the repository. It now
+# finds the fixture wherever it is, names every precondition the run is
+# missing in one place, and summarises only what its rows support.
+
+def _norm(name):
+    """pip's normalisation: `scikit_learn` and `scikit-learn` are one name."""
+    return str(name).strip().lower().replace("_", "-")
+
+
+def _and(items):
+    items = [str(i) for i in items]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _count(n, one, many):
+    return f"{n} {one if n == 1 else many}"
+
+
+def release_url():
+    """The release page of the installed version, where its assets are."""
+    from .. import __display_version__
+    return f"{REPOSITORY}/releases/tag/v{__display_version__}"
+
+
+def fixture_search_path(fixtures=None):
+    """[(label, directory)] in the order a fixture is looked for.
+
+    An explicit `--fixtures` is the only place looked. A reader who pointed
+    at a directory and was quietly given the package's copy instead would be
+    reading a result about bytes they did not choose.
+    """
+    if fixtures:
+        return [("--fixtures",
+                 os.path.abspath(os.path.expanduser(str(fixtures))))]
+    return [("the current directory", os.path.abspath("fixtures")),
+            ("the installed package", PACKAGE_FIXTURES)]
+
+
+def find_fixture(fixture_id, fixtures=None):
+    """(found, looked).
+
+    `found` is `{"label", "root", "dir", "spec"}` for the first location that
+    holds both `<id>.fixture.yaml` and `<id>/MANIFEST.sha256`, or None.
+    `looked` is `[(label, root, [missing paths])]` for each location that did
+    not.
+    """
+    looked = []
+    for label, root in fixture_search_path(fixtures):
+        d = os.path.join(root, fixture_id)
+        spec = os.path.join(root, fixture_id + SPEC_SUFFIX)
+        missing = [p for p in (spec, os.path.join(d, MANIFEST_NAME))
+                   if not os.path.isfile(p)]
+        if not missing:
+            return ({"label": label, "root": root, "dir": d, "spec": spec},
+                    looked)
+        looked.append((label, root, missing))
+    return None, looked
+
+
+def known_fixtures(fixtures=None):
+    """The fixture ids that would be found, from every location looked."""
+    ids = set()
+    for _label, root in fixture_search_path(fixtures):
+        if not os.path.isdir(root):
+            continue
+        for name in os.listdir(root):
+            fid = name[:-len(SPEC_SUFFIX)]
+            if (name.endswith(SPEC_SUFFIX)
+                    and os.path.isfile(os.path.join(root, fid,
+                                                    MANIFEST_NAME))):
+                ids.add(fid)
+    return sorted(ids)
+
+
+def distribution_pins():
+    """{package: version} for the exact, unconditional pins the installed
+    `oneground` distribution declares -- what `pip install oneground==<v>`
+    installs. {} when there is no installed distribution to read."""
+    try:
+        from importlib import metadata
+        reqs = metadata.requires("oneground") or []
+    except Exception:                                     # not installed
+        return {}
+    out = {}
+    for r in reqs:
+        spec, _, marker = r.partition(";")
+        if "extra" in marker or "==" not in spec:
+            continue
+        name, _, version = spec.partition("==")
+        out[_norm(name)] = version.strip()
+    return out
+
+
+def resolve_pins(requirements=None):
+    """(pins, source, looked).
+
+    `--requirements <file>` if given, and only that; otherwise
+    `requirements.txt` in the current directory; otherwise the pins the
+    installed distribution declares.
+
+    Before task 022 a missing requirements.txt read as an empty pin set, and
+    an empty set has no mismatches: outside a checkout, an environment that
+    nothing had been compared against was treated as pinned.
+    """
+    if requirements:
+        path = os.path.abspath(os.path.expanduser(str(requirements)))
+        if os.path.isfile(path):
+            return read_requirements_pins(path), path, []
+        return {}, None, [path]
+    cwd = os.path.abspath("requirements.txt")
+    if os.path.isfile(cwd):
+        return read_requirements_pins(cwd), cwd, []
+    pins = distribution_pins()
+    if pins:
+        from .. import __version__
+        return pins, f"the installed oneground {__version__}", [cwd]
+    return {}, None, [cwd, "the installed oneground distribution"]
+
+
+_NOT_VALUES = {"params", "tolerance", "kind", "definition", "estimator",
+               "note", "notes"}
+
+
+def published_value_names(spec):
+    """Every value the spec publishes as a number.
+
+    `characterization.<field>` entries with a numeric value, the drift pair,
+    and every numeric field of a reference result. A placeholder
+    (`TO_BE_FILLED`) is not a published value. This is the set a sentence
+    about "every published value" quantifies over -- which is not the set this
+    command recomputes, and the summary says so when they differ.
+    """
+    names = []
+    for field, entry in (spec.get("characterization") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        if field == "drift":
+            if any(_as_number(entry.get(k))[0] is not None
+                   for k in ("value_before", "value_after")):
+                names.append("drift")
+        elif _as_number(entry.get("value"))[0] is not None:
+            names.append(field)
+    for fam, entry in (spec.get("reference_results") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for key, v in entry.items():
+            if key in _NOT_VALUES or isinstance(v, (dict, list, bool)):
+                continue
+            if _as_number(v)[0] is not None:
+                names.append(f"{fam}.{key}")
+    return names
+
+
+def _needs_values(spec):
+    published = spec.get("characterization") or {}
+    refs = spec.get("reference_results") or {}
+    wanted = [f for f in REPRODUCIBLE if f in published]
+    return _anything_published(published, refs, wanted, list(REF_ROWS))
+
+
+def check_preconditions(fixture_id, found, looked, spec, pins, pin_source,
+                        pin_looked, unpinned, allow_unpinned, assets_dir,
+                        asset=None, fixtures=None, versions=None):
+    """The fixture, the pinned environment and the release asset, in order.
+
+    Each is `{"key", "state", "met", "blocks_values", "because", "lines"}`.
+    `met` is False when the run could not check everything because of it, and
+    None when it cannot be known. `lines` say what it is and how to satisfy
+    it. All three are always worked out, so a run that is missing more than
+    one says so once.
+    """
+    needs = _needs_values(spec) if found else None
+    pre = []
+
+    # ---- the fixture
+    if found:
+        where = f"{found['dir']}  ({found['label']})"
+        lines = [where]
+        if looked:
+            lines.append("not in " + _and(f"{root} ({label})"
+                                          for label, root, _m in looked))
+        gt = os.path.join(found["dir"], "ground_truth.npy")
+        if needs and not os.path.isfile(gt):
+            lines.append(f"but ground_truth.npy is not in it, and the values "
+                         "are scored against it")
+            pre.append({"key": "fixture", "state": "MISSING", "met": False,
+                        "blocks_values": True, "lines": lines,
+                        "because": "the fixture's ground_truth.npy is "
+                                   "missing"})
+        else:
+            pre.append({"key": "fixture", "state": "found", "met": True,
+                        "blocks_values": False, "lines": lines,
+                        "because": ""})
+    else:
+        lines = [f"no {fixture_id}{SPEC_SUFFIX} with a {fixture_id}/"
+                 f"{MANIFEST_NAME} beside it, looked in:"]
+        lines += [f"  {root}  ({label})" for label, root, _m in looked]
+        ids = known_fixtures(fixtures)
+        lines.append("fixtures found there: " + _and(ids) if ids
+                     else "no fixture was found in any of them")
+        lines.append("pass one of those ids, or --fixtures <dir> for a "
+                     f"directory holding {fixture_id}{SPEC_SUFFIX} and "
+                     f"{fixture_id}/")
+        pre.append({"key": "fixture", "state": "MISSING", "met": False,
+                    "blocks_values": True, "lines": lines,
+                    "because": "the fixture was not found"})
+
+    # ---- the pinned environment
+    from .. import __version__
+    running = running_versions() if versions is None else versions
+    names = [n for n in PINNED if _norm(n) in pins]
+    install = (f"a fresh virtual environment with `pip install "
+               f"oneground=={__version__}` installs the pinned set")
+    not_needed = ("nothing is recomputed for this fixture, so this does not "
+                  "stop the run")
+    if not names:
+        lines = ["no pinned set to compare this environment against: "
+                 "looked in " + _and(pin_looked),
+                 "pass --requirements <file>; or " + install]
+        met = True if needs is False else bool(allow_unpinned)
+        if allow_unpinned:
+            lines.append("--allow-unpinned given: values are recomputed, and "
+                         "one that agrees is reported couldn't-check, not "
+                         "verified")
+        elif needs is False:
+            lines.append(not_needed)
+        pre.append({"key": "environment", "state": "MISSING", "met": met,
+                    "blocks_values": not met,
+                    "because": "no pinned set was found to compare this "
+                               "environment against",
+                    "lines": lines})
+    elif unpinned:
+        lines = [f"{n:<14} running {g:<10} pinned {w}"
+                 for n, g, w in unpinned]
+        lines.append(f"(pins from {pin_source})")
+        lines.append(install)
+        if allow_unpinned:
+            lines.append("--allow-unpinned given: values are recomputed, and "
+                         "one that agrees is reported couldn't-check, not "
+                         "verified")
+            met = True
+        else:
+            lines.append("or pass --allow-unpinned to recompute anyway; a "
+                         "value that agrees is then couldn't-check, not "
+                         "verified")
+            met = needs is False
+            if needs is False:
+                lines.append(not_needed)
+        pre.append({"key": "environment", "state": "UNPINNED", "met": met,
+                    "blocks_values": not met,
+                    "because": "this environment is not running the pinned "
+                               "versions",
+                    "lines": lines})
+    else:
+        have = ", ".join(f"{_norm(n)} {running.get(n, 'not installed')}"
+                         for n in names)
+        pre.append({"key": "environment", "state": "pinned", "met": True,
+                    "blocks_values": False, "because": "",
+                    "lines": [have, f"(pins from {pin_source})"]})
+
+    # ---- the release asset
+    if needs is False:
+        pre.append({"key": "asset", "state": "not needed", "met": True,
+                    "blocks_values": False, "because": "",
+                    "lines": ["the spec publishes no values yet, so no asset "
+                              "is read"]})
+        return pre
+    if found is None and fixture_id not in RELEASE_ASSETS:
+        pre.append({"key": "asset", "state": "unknown", "met": None,
+                    "blocks_values": False, "because": "",
+                    "lines": ["without the fixture's spec it is not known "
+                              "what its values need"]})
+        return pre
+
+    fdir = found["dir"] if found else None
+    vec_p, q_p, asset_dir = _asset_paths(fixture_id, assets_dir, fdir,
+                                        asset=asset)
+    drift = (spec.get("characterization") or {}).get("drift") or {}
+    wants_sample = (found is None) or any(
+        _as_number(drift.get(k))[0] is not None
+        for k in ("value_before", "value_after"))
+    missing = [os.path.basename(p) for p in (vec_p, q_p)
+               if not os.path.isfile(p)]
+    if wants_sample and not any(
+            os.path.isfile(os.path.join(d, "sample.jsonl.zst"))
+            for d in [asset_dir] + ([fdir] if fdir else [])):
+        missing.append("sample.jsonl.zst")
+    if not missing:
+        pre.append({"key": "asset", "state": "present", "met": True,
+                    "blocks_values": False, "because": "",
+                    "lines": [asset_dir]})
+        return pre
+
+    if asset:
+        places = [os.path.expanduser(str(asset)) + "  (--asset)"]
+    else:
+        places = [os.path.join(assets_dir, fixture_id)] + ([fdir] if fdir
+                                                          else [])
+    lines = [f"{_and(missing)} not found in " + " or ".join(places)]
+    if fixture_id in RELEASE_ASSETS:
+        name, size = RELEASE_ASSETS[fixture_id]
+        lines.append(f"release asset {name}, {size:,} bytes, at")
+        lines.append(release_url())
+        lines.append("extract it anywhere and pass --asset <the extracted "
+                     "folder>")
+    else:
+        lines.append(f"no release asset is published for {fixture_id}; "
+                     "pass --asset <a folder holding "
+                     + _and(ASSET_MEMBERS) + ">")
+    blocks = any(m in missing for m in ("vectors.npy", "queries.npy"))
+    pre.append({"key": "asset", "state": "MISSING", "met": False,
+                "blocks_values": blocks,
+                "because": ("the release asset is not present" if blocks
+                            else "sample.jsonl.zst is not present"),
+                "lines": lines})
+    return pre
+
+
+def precondition_lines(pre):
+    out = ["preconditions"]
+    for p in pre:
+        first, *rest = p["lines"] or [""]
+        out.append(f"  {p['key']:<12} {p['state']:<10} {first}")
+        out += [f"  {'':<12} {'':<10} {line}" for line in rest]
+    return out
+
+
+def _wrap(sentence, indent=9, width=79):
+    import textwrap
+    return textwrap.wrap(sentence, width=width,
+                         initial_indent=" " * indent,
+                         subsequent_indent=" " * indent)
+
+
+# The order the summary speaks about couldnt_check values in.
+CAUSE_ORDER = (NOT_ATTEMPTED, HOST, RECOMPUTE, INPUT, UNPINNED, BUILD_PINS,
+               SPEC, UNPUBLISHED, None)
+
+
+def summary_sentences(results, value_rows, published, pre):
+    """The closing sentences, each reconstructible from the rows it names.
+
+    Task 022, applying task 019's rule by hand: a sentence names the rows it
+    is about, and a universal ("All", "Every", "No value") is written only
+    when it holds for every row it quantifies over. "Every value reproduced",
+    "n values could not be recomputed on this host" and "the asset is not
+    present, so no value was recomputed" are different sentences, and are
+    never collapsed into one.
+    """
+    out = []
+
+    # ---- digests
+    d_ver = [r for r in results if r[2] == VERIFIED]
+    d_con = [r for r in results if r[2] == CONTRADICTED]
+    d_cc = [r for r in results if r[2] == COULDNT_CHECK]
+    if results and len(d_ver) == len(results):
+        out.append(f"All {len(results)} listed files are present and match "
+                   "the manifest.")
+    if d_con:
+        out.append(f"{_count(len(d_con), 'listed file', 'listed files')} "
+                   f"contradicted the manifest: "
+                   f"{_and(r[0] for r in d_con)}.")
+    if d_cc:
+        out.append(f"{_count(len(d_cc), 'listed file is', 'listed files are')}"
+                   f" not present here, so "
+                   f"{'its' if len(d_cc) == 1 else 'their'} bytes were not "
+                   f"checked: {_and(r[0] for r in d_cc)}.")
+
+    # ---- values
+    n = len(value_rows)
+    v_ver = [r for r in value_rows if r[1] == VERIFIED]
+    v_con = [r for r in value_rows if r[1] == CONTRADICTED]
+    recomputed = {r[0] for r in value_rows}
+    uncovered = [p for p in published if p not in recomputed]
+    if not value_rows:
+        out.append("The spec lists no value this command recomputes.")
+    if v_con:
+        out.append(f"{_count(len(v_con), 'value', 'values')} contradicted "
+                   f"{'its' if len(v_con) == 1 else 'their'} published "
+                   f"value: {_and(r[0] for r in v_con)}.")
+    if v_ver:
+        if len(v_ver) == n and not uncovered:
+            out.append(f"Every published value reproduced ({n} of {n}). "
+                       "This fixture's status may be set to `verified`.")
+        elif len(v_ver) == n:
+            out.append(f"Every value this command recomputes reproduced "
+                       f"({n} of {n}).")
+        else:
+            out.append(f"{_count(len(v_ver), 'value', 'values')} "
+                       f"reproduced: {_and(r[0] for r in v_ver)}.")
+
+    because = _and(p["because"] for p in pre if p["met"] is False
+                   and p["because"])
+    for cause in CAUSE_ORDER:
+        group = [r for r in value_rows if r[1] == COULDNT_CHECK
+                 and getattr(r, "cause", None) == cause]
+        if not group:
+            continue
+        k = len(group)
+        vals = _count(k, "value", "values")
+        names = _and(r[0] for r in group)
+        were = "was" if k == 1 else "were"
+        if cause == NOT_ATTEMPTED:
+            why = because or "a precondition is missing"
+            if k == n:
+                out.append(f"No value was recomputed, because {why}.")
+            else:
+                out.append(f"{vals} {were} not recomputed, because {why}: "
+                           f"{names}.")
+        elif cause == HOST:
+            out.append(f"{vals} could not be recomputed on this host; the "
+                       f"rows above give the reason: {names}.")
+        elif cause == RECOMPUTE:
+            out.append(f"{vals} {were} not produced by the recomputation; "
+                       f"the rows above give the reason: {names}.")
+        elif cause == INPUT:
+            out.append(f"{vals} could not be recomputed, because the asset's "
+                       f"files do not belong together: {names}.")
+        elif cause == UNPINNED:
+            out.append(f"{vals} landed within tolerance outside the pinned "
+                       f"environment, so {'it is' if k == 1 else 'they are'}"
+                       f" not counted as reproduced: {names}.")
+        elif cause == BUILD_PINS:
+            out.append(f"{vals} cannot be reproduced, because the recorded "
+                       f"build used pins that differ from the pinned set: "
+                       f"{names}.")
+        elif cause == SPEC:
+            out.append(f"{vals} {'has' if k == 1 else 'have'} no usable "
+                       f"tolerance in the spec: {names}.")
+        elif cause == UNPUBLISHED:
+            if k == n:
+                out.append("No value is published in the spec yet, so there "
+                           f"was nothing to reproduce ({k} placeholders).")
+            else:
+                out.append(f"{vals} {'is' if k == 1 else 'are'} not "
+                           f"published in the spec yet: {names}.")
+        else:
+            out.append(f"{vals} could not be checked: {names}.")
+
+    if uncovered:
+        out.append(f"{_count(len(uncovered), 'published value is', 'published values are')}"
+                   f" not recomputed by this command: {_and(uncovered)}.")
+
+    stopped = [r for r in value_rows if r[1] == COULDNT_CHECK
+               and getattr(r, "cause", None) in (NOT_ATTEMPTED, HOST,
+                                                 RECOMPUTE, INPUT)]
+    if d_ver and stopped:
+        out.append(f"The digests were checked before any value, so the "
+                   f"{_count(len(d_ver), 'file', 'files')} that verified "
+                   f"{'is' if len(d_ver) == 1 else 'are'} the published "
+                   "bytes whatever happened to the values.")
+    return out
 
 
 def cmd_verify(args):
     # `fixture verify` decides whether a fixture may be called verified, so it
-    # is guarded like anything else that writes a canonical claim -- and it
-    # already knew how to say couldnt_check per value. The guard stops it
-    # before it spends ten minutes recomputing under the wrong libraries.
+    # is guarded like anything else that writes a canonical claim. Task 022:
+    # the guard no longer stops the command before it starts. The digests
+    # depend on nothing but the bytes, so they are always checked; an unpinned
+    # environment stops the values, and is named beside everything else that
+    # is missing rather than instead of it.
     from .. import environment as envmod
     envmod.GUARDED_COMMANDS.add("oneground fixture verify")
-    _stamp, code = envmod.guard_or_exit(
-        "oneground fixture verify",
-        getattr(args, "requirements", "requirements.txt"),
-        allow_unpinned=getattr(args, "allow_unpinned", False))
-    if code:
-        return code
 
-    fixture_dir = os.path.join(args.fixtures_dir, args.id)
-    if not os.path.isdir(fixture_dir):
-        print(f"error: no such fixture directory: {fixture_dir}", file=sys.stderr)
-        return 1
-    if not os.path.exists(os.path.join(fixture_dir, MANIFEST_NAME)):
-        print(f"error: no {MANIFEST_NAME} in {fixture_dir}", file=sys.stderr)
-        return 1
-
-    assets_dir = getattr(args, "assets_dir", DEFAULT_ASSETS)
+    fid = args.id
+    fixtures = getattr(args, "fixtures_dir", None)
+    allow_unpinned = getattr(args, "allow_unpinned", False)
+    assets_dir = getattr(args, "assets_dir", None) or DEFAULT_ASSETS
     asset = getattr(args, "asset", None)
-    # `--asset` names the extracted folder outright; without it, the
-    # documented location under the assets directory.
-    digest_dir = (os.path.expanduser(str(asset)) if asset
-                  else os.path.join(assets_dir, args.id))
-    results, unlisted = verify_digests(fixture_dir, digest_dir)
+    log_fn = (print if getattr(args, "verbose", False)
+              else (lambda *_a: None))
 
-    print(f"fixture: {args.id}")
-    print(f"directory: {fixture_dir}")
-    print(f"manifest: {MANIFEST_NAME} ({len(results)} files listed)")
+    print(envmod.describe())
+    found, looked = find_fixture(fid, fixtures)
+    spec = {}
+    if found:
+        with open(found["spec"], encoding="utf-8") as f:
+            spec = yaml.safe_load(f) or {}
+    pins, pin_source, pin_looked = resolve_pins(
+        getattr(args, "requirements", None))
+    pins_known = any(_norm(n) in pins for n in PINNED)
+    unpinned = running_pin_mismatches(pinned=pins) if pins_known else []
+    pre = check_preconditions(fid, found, looked, spec, pins, pin_source,
+                              pin_looked, unpinned, allow_unpinned,
+                              assets_dir, asset=asset, fixtures=fixtures)
+
+    print(f"fixture: {fid}")
+    results, unlisted = [], []
+    if found:
+        digest_dir = (os.path.expanduser(str(asset)) if asset
+                      else os.path.join(assets_dir, fid))
+        results, unlisted = verify_digests(found["dir"], digest_dir)
+        print(f"directory: {found['dir']}")
+        print(f"manifest: {MANIFEST_NAME} ({len(results)} files listed)")
     print()
+    for line in precondition_lines(pre):
+        print(line)
+    print()
+
+    if not found:
+        print(f"summary: nothing was checked, because no fixture named {fid} "
+              "was found (see preconditions above).")
+        return 2
+
     print("digests")
     width = max(len(n) for n, _, _, _ in results) if results else 0
     for name, k, outcome, detail in results:
         print(f"  {outcome:<13} {k:<8} {name:<{width}}  {detail}")
-
-    counts = {o: sum(1 for _, _, r, _ in results if r == o)
-              for o in (VERIFIED, CONTRADICTED, COULDNT_CHECK)}
     print()
     if unlisted:
         print(f"present but not listed in the manifest: {', '.join(unlisted)}")
         print()
+
     print("values")
-    spec_path = os.path.join(args.fixtures_dir, f"{args.id}.fixture.yaml")
-    value_rows = []
-    if not os.path.exists(spec_path):
-        print(f"  {COULDNT_CHECK:<13} no spec at {spec_path}")
+    if any(p["blocks_values"] for p in pre):
+        because = _and(p["because"] for p in pre if p["blocks_values"])
+        value_rows = [ValueRow(name, COULDNT_CHECK,
+                               f"not recomputed, because {because}",
+                               NOT_ATTEMPTED)
+                      for name in value_names(spec)]
     else:
-        with open(spec_path, encoding="utf-8") as f:
-            spec = yaml.safe_load(f) or {}
-        value_rows = verify_values(
-            args.id, fixture_dir, spec, assets_dir,
-            getattr(args, "requirements", "requirements.txt"),
-            log_fn=(print if getattr(args, "verbose", False)
-                    else lambda *_a: None),
-            asset=asset)
-        vw = max((len(n) for n, _, _ in value_rows), default=0)
-        for name, outcome, detail in value_rows:
-            print(f"  {outcome:<13} {name:<{vw}}  {detail}")
-        if not value_rows:
-            print(f"  {COULDNT_CHECK:<13} the spec publishes no values")
+        value_rows = verify_values(fid, found["dir"], spec, assets_dir,
+                                   pin_source or "requirements.txt",
+                                   log_fn=log_fn, asset=asset, pins=pins)
+        if not pins_known:
+            # --allow-unpinned with no pinned set at all: nothing was compared,
+            # so nothing that agrees can be called a reproduction.
+            value_rows = [_downgrade(r, [("the pinned set", "unknown",
+                                          "not found")])
+                          for r in value_rows]
+    vw = max((len(r[0]) for r in value_rows), default=0)
+    for name, outcome, detail in value_rows:
+        print(f"  {outcome:<13} {name:<{vw}}  {detail}")
     print()
 
-    unpinned = running_pin_mismatches(
-        getattr(args, "requirements", "requirements.txt"))
-    if unpinned and value_rows:
-        print("  NOTE: this environment does not match requirements.txt:")
-        for n, g, w in unpinned:
-            print(f"    {n}: running {g}, pinned {w}")
-        print("  Values are reported couldnt_check for that reason alone; "
-              "each row's")
-        print("  detail says whether the number itself landed within "
-              "tolerance.")
-        print()
-
-    vcounts = {o: sum(1 for _, r, _ in value_rows if r == o)
+    counts = {o: sum(1 for r in results if r[2] == o)
+              for o in (VERIFIED, CONTRADICTED, COULDNT_CHECK)}
+    vcounts = {o: sum(1 for r in value_rows if r[1] == o)
                for o in (VERIFIED, CONTRADICTED, COULDNT_CHECK)}
     n_declared = sum(1 for _, k, _, _ in results if k == DECLARED)
     print(f"summary: digests {counts[VERIFIED]} verified, "
@@ -729,21 +1358,20 @@ def cmd_verify(args):
     print(f"         values  {vcounts[VERIFIED]} verified, "
           f"{vcounts[CONTRADICTED]} contradicted, "
           f"{vcounts[COULDNT_CHECK]} couldnt_check")
-    if value_rows and not vcounts[CONTRADICTED] and not vcounts[COULDNT_CHECK]:
+    sentences = summary_sentences(results, value_rows,
+                                  published_value_names(spec), pre)
+    if sentences:
         print()
-        print(f"         every published value reproduced. This fixture's "
-              f"status may be set to `verified`.")
-    counts[CONTRADICTED] += vcounts[CONTRADICTED]
-    counts[COULDNT_CHECK] += vcounts[COULDNT_CHECK]
+        for s in sentences:
+            for line in _wrap(s):
+                print(line)
 
-    # By default only a contradiction is a failure. An absent artifact is
-    # reported, not punished: the large artifacts ship as a separate release
-    # asset, so a fresh clone legitimately cannot check them. --strict is for
-    # the caller that does have them and wants the whole fixture accounted for.
-    # getattr keeps cmd_verify callable with a bare namespace.
-    if counts[CONTRADICTED]:
+    if counts[CONTRADICTED] or vcounts[CONTRADICTED]:
         return 1
-    if getattr(args, "strict", False) and counts[COULDNT_CHECK]:
+    if any(p["met"] is False for p in pre):
+        return 2
+    if getattr(args, "strict", False) and (counts[COULDNT_CHECK]
+                                           or vcounts[COULDNT_CHECK]):
         return 2
     return 0
 
@@ -762,7 +1390,12 @@ def add_verify_arguments(subparsers):
     v = subparsers.add_parser(
         "verify", help="check a built fixture against its MANIFEST.sha256")
     v.add_argument("id", help="fixture id, e.g. arxiv-smoke")
-    v.add_argument("--fixtures-dir", default="fixtures")
+    v.add_argument("--fixtures", "--fixtures-dir", dest="fixtures_dir",
+                   default=None, metavar="DIR",
+                   help="the directory holding <id>.fixture.yaml and <id>/, "
+                        "and the only place looked. Default: fixtures/ in "
+                        "the current directory, then the copy the installed "
+                        "package carries")
     v.add_argument("--assets-dir", default=DEFAULT_ASSETS,
                    help="where release assets are extracted, one folder per "
                         "fixture id (default: ~/oneground-assets)")
@@ -771,14 +1404,17 @@ def add_verify_arguments(subparsers):
                         "overriding --assets-dir. Use this rather than "
                         "adopting a directory layout: "
                         "--asset ./arxiv-150k")
-    v.add_argument("--requirements", default="requirements.txt",
-                   help="the pinned requirements the fixture claims")
+    v.add_argument("--requirements", default=None,
+                   help="the pinned requirements the values are judged "
+                        "under. Default: requirements.txt in the current "
+                        "directory, then the installed package's own pins")
     v.add_argument("--verbose", action="store_true",
                    help="print each recomputation as it runs")
     envmod.add_argument(v)
     v.add_argument("--strict", action="store_true",
-                   help="exit 2 if any listed file is absent (couldnt_check) "
-                        "instead of the default 0; the report is unchanged")
+                   help="exit 2 if any digest or value is couldnt_check, "
+                        "instead of only when a precondition is missing; the "
+                        "report is unchanged")
     v.set_defaults(func=cmd_verify)
     return v
 

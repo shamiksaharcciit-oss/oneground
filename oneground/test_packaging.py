@@ -439,6 +439,84 @@ def test_the_extras_the_readme_lists_are_exactly_the_extras_that_exist():
         % (sorted(listed - extras), sorted(extras - listed)))
 
 
+# ---------------------------------------------------------------- task 022
+# The wheel carries the fixture specs and their small receipts, so
+# `oneground fixture verify <id>` works from a bare install. It never carries
+# the release asset.
+
+def _shipped_module():
+    import runpy
+    return runpy.run_path(os.path.join(ROOT, "oneground", "fixture",
+                                       "shipped.py"))
+
+
+def test_the_wheel_ships_every_fixture_spec_and_its_small_receipts():
+    sh = _shipped_module()
+    rel = {r for _src, r in sh["shipped_files"](os.path.join(ROOT,
+                                                             "fixtures"))}
+    for fid in ("arxiv-150k", "stackexchange-150k", "arxiv-smoke"):
+        assert f"{fid}.fixture.yaml" in rel, fid
+        for name in ("MANIFEST.sha256", "characterization.json",
+                     "build_info.json", "query_ids.json", "ground_truth.npy"):
+            assert f"{fid}/{name}" in rel, (fid, name)
+
+
+def test_the_wheel_never_ships_the_release_asset():
+    sh = _shipped_module()
+    rel = [r for _src, r in sh["shipped_files"](os.path.join(ROOT,
+                                                            "fixtures"))]
+    for r in rel:
+        base = r.rsplit("/", 1)[-1]
+        assert base not in sh["NEVER_SHIPPED"], r
+        assert "/report/" not in r and "ground_view" not in r, r
+    assert not set(sh["SHIPPED_FILES"]) & set(sh["NEVER_SHIPPED"])
+
+
+def test_a_stray_asset_on_the_build_machine_does_not_reach_the_wheel_synthetic():
+    import tempfile
+    sh = _shipped_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "fx"))
+        for name in ("vectors.npy", "queries.npy", "sample.jsonl.zst",
+                     "projection.npy", "ground_truth.npy", "notes.txt"):
+            with open(os.path.join(tmp, "fx", name), "wb") as f:
+                f.write(b"x")
+        with open(os.path.join(tmp, "fx.fixture.yaml"), "w") as f:
+            f.write("fixture: {id: fx}\n")
+        rel = sorted(r for _s, r in sh["shipped_files"](tmp))
+    assert rel == ["fx.fixture.yaml", "fx/ground_truth.npy"], rel
+
+
+def test_the_sdist_carries_what_the_wheel_ships():
+    """A wheel built from the sdist must not silently ship no fixtures."""
+    import fnmatch
+    sh = _shipped_module()
+    with open(os.path.join(ROOT, "MANIFEST.in"), encoding="utf-8") as f:
+        patterns = [line.split(None, 1)[1].strip() for line in f
+                    if line.startswith("include ")]
+    for _src, r in sh["shipped_files"](os.path.join(ROOT, "fixtures")):
+        path = "fixtures/" + r
+        assert any(fnmatch.fnmatch(path, p) for p in patterns), path
+
+
+def test_the_build_hook_reads_the_rule_it_ships_by():
+    with open(os.path.join(ROOT, "setup.py"), encoding="utf-8") as f:
+        text = f.read()
+    assert "shipped.py" in text and "build_py" in text
+    import ast
+    with open(os.path.join(ROOT, "oneground", "fixture", "shipped.py"),
+              encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            imported.add((node.module or "").split(".")[0])
+    # read at build time, where none of the package's dependencies exist
+    assert imported <= set(sys.stdlib_module_names), imported
+
+
 def _main():
     fns = [(n, f) for n, f in sorted(globals().items())
            if n.startswith("test_") and callable(f)]

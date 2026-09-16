@@ -46,6 +46,12 @@ def _fixture(tmp, entries, extra_files=()):
         _write(os.path.join(d, name), data)
     with open(os.path.join(d, fv.MANIFEST_NAME), "w", encoding="utf-8", newline="\n") as m:
         m.write("\n".join(lines) + "\n")
+    # Task 022: a fixture is its spec and its directory together. This spec
+    # publishes no values, so these tests stay about the digest half: nothing
+    # is recomputed and no release asset is needed.
+    with open(os.path.join(tmp, "fx.fixture.yaml"), "w", encoding="utf-8",
+              newline="\n") as s:
+        s.write("fixture:\n  id: fx\n  status: built\n")
     return d
 
 
@@ -890,3 +896,415 @@ def test_the_shipped_arxiv_spec_is_not_in_the_skip_case():
                 ("semantic_sharded.recall_at_10", "semantic_sharded"),
                 ("semantic_sharded.storage_amplification", "semantic_sharded")]
     assert fv._anything_published(published, refs, wanted, ref_rows)
+
+
+# ---------------------------------------------------------------- task 022
+# `oneground fixture verify arxiv-150k`, from a bare `pip install` outside any
+# checkout, printed `error: no such fixture directory` and nothing else. These
+# pin the four things task 022 changed: where a fixture is found, that every
+# missing precondition is named in one run, that a value the host cannot
+# recompute is couldnt_check for that value alone, and that the summary says
+# no more than its rows.
+import contextlib                                              # noqa: E402
+import io                                                      # noqa: E402
+
+
+@contextlib.contextmanager
+def _cwd(path):
+    old = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(old)
+
+
+@contextlib.contextmanager
+def _patched(obj, name, value):
+    old = getattr(obj, name)
+    setattr(obj, name, value)
+    try:
+        yield
+    finally:
+        setattr(obj, name, old)
+
+
+def _run(**kw):
+    """cmd_verify with these attributes, returning (exit code, stdout)."""
+    class Args:
+        pass
+    for k, v in kw.items():
+        setattr(Args, k, v)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = fv.cmd_verify(Args)
+    return code, buf.getvalue()
+
+
+def _pinned_requirements(tmp, **override):
+    """A requirements file pinning exactly what this process runs, so a test
+    is decided by the fixture and not by the developer's venv."""
+    path = os.path.join(tmp, "requirements.txt")
+    running = fv.running_versions()
+    with open(path, "w", encoding="utf-8") as f:
+        for name in ("numpy", "faiss-cpu", "scikit-learn"):
+            version = override.get(name.replace("-", "_"), running.get(name))
+            if version:
+                f.write(f"{name}=={version}\n")
+    return path
+
+
+def _manifest(fdir):
+    lines = []
+    for name in sorted(os.listdir(fdir)):
+        p = os.path.join(fdir, name)
+        if os.path.isfile(p) and name != fv.MANIFEST_NAME:
+            with open(p, "rb") as f:
+                lines.append(f"{hashlib.sha256(f.read()).hexdigest()}  {name}")
+    with open(os.path.join(fdir, fv.MANIFEST_NAME), "w", encoding="utf-8",
+              newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def _spec_dir(root, fid="fx"):
+    os.makedirs(os.path.join(root, fid), exist_ok=True)
+    with open(os.path.join(root, fid, fv.MANIFEST_NAME), "w",
+              encoding="utf-8") as f:
+        f.write("")
+    with open(os.path.join(root, fid + ".fixture.yaml"), "w",
+              encoding="utf-8") as f:
+        f.write(f"fixture:\n  id: {fid}\n")
+
+
+def test_outside_a_checkout_the_installed_packages_copy_is_found():
+    with tempfile.TemporaryDirectory() as tmp:
+        pkg, elsewhere = os.path.join(tmp, "pkg"), os.path.join(tmp, "else")
+        _spec_dir(pkg)
+        os.makedirs(elsewhere)
+        with _patched(fv, "PACKAGE_FIXTURES", pkg), _cwd(elsewhere):
+            found, looked = fv.find_fixture("fx")
+        assert found and found["label"] == "the installed package", found
+        assert found["dir"] == os.path.join(pkg, "fx")
+        # and it says where it looked first
+        assert [label for label, _r, _m in looked] == ["the current directory"]
+
+
+def test_the_current_directory_wins_over_the_package():
+    with tempfile.TemporaryDirectory() as tmp:
+        pkg, work = os.path.join(tmp, "pkg"), os.path.join(tmp, "work")
+        _spec_dir(pkg)
+        _spec_dir(os.path.join(work, "fixtures"))
+        with _patched(fv, "PACKAGE_FIXTURES", pkg), _cwd(work):
+            found, _looked = fv.find_fixture("fx")
+        assert found["label"] == "the current directory", found
+
+
+def test_an_explicit_fixtures_directory_is_the_only_place_looked():
+    """Pointing at a directory and being given the package's copy instead
+    would be a result about bytes the reader did not choose."""
+    with tempfile.TemporaryDirectory() as tmp:
+        pkg, mine = os.path.join(tmp, "pkg"), os.path.join(tmp, "mine")
+        _spec_dir(pkg)
+        os.makedirs(mine)
+        with _patched(fv, "PACKAGE_FIXTURES", pkg):
+            found, looked = fv.find_fixture("fx", fixtures=mine)
+        assert found is None
+        assert [label for label, _r, _m in looked] == ["--fixtures"]
+
+
+def test_a_directory_without_its_spec_is_not_a_fixture():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = os.path.join(tmp, "fixtures")
+        _spec_dir(root)
+        os.remove(os.path.join(root, "fx.fixture.yaml"))
+        found, looked = fv.find_fixture("fx", fixtures=root)
+        assert found is None
+        assert looked[0][2] == [os.path.join(root, "fx.fixture.yaml")]
+
+
+def test_a_missing_fixture_names_all_three_preconditions_not_a_bare_error():
+    with tempfile.TemporaryDirectory() as tmp:
+        empty = os.path.join(tmp, "empty")
+        os.makedirs(empty)
+        code, out = _run(id="arxiv-150k", fixtures_dir=empty,
+                         requirements=_pinned_requirements(tmp),
+                         assets_dir=os.path.join(tmp, "assets"))
+        assert code == 2, (code, out)
+        assert "no such fixture directory" not in out, out
+        for key in ("fixture ", "environment ", "asset "):
+            assert "\n  " + key in out, (key, out)
+        # a known release asset is described even without the spec
+        assert "arxiv-150k-v1.tgz, 483,468,013 bytes" in out, out
+        assert "--asset" in out, out
+        assert "nothing was checked" in out, out
+
+
+def _fixture_with_manifest(tmp, with_asset=True, extra_spec=None):
+    fdir, spec, fixtures = _tiny_fixture(tmp, with_asset=with_asset)
+    if extra_spec:
+        import yaml as _yaml
+        spec.update(extra_spec)
+        with open(os.path.join(fixtures, "tiny.fixture.yaml"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            _yaml.safe_dump(spec, f)
+    _manifest(fdir)
+    return fdir, spec, fixtures
+
+
+def test_a_missing_asset_still_checks_the_digests_and_exits_2():
+    with tempfile.TemporaryDirectory() as tmp:
+        _fdir, _spec, fixtures = _fixture_with_manifest(tmp, with_asset=False)
+        code, out = _run(id="tiny", fixtures_dir=fixtures,
+                         requirements=_pinned_requirements(tmp),
+                         assets_dir=os.path.join(tmp, "assets"))
+        assert code == 2, (code, out)
+        assert "verified      receipt  ground_truth.npy" in out, out
+        assert "asset        MISSING" in out, out
+        flat = " ".join(out.split())             # the summary is wrapped
+        assert ("No value was recomputed, because the release asset is not "
+                "present.") in flat, out
+        # the one universal it may say about the digests, because it holds
+        assert "listed files are present and match the manifest" in flat, out
+
+
+def test_every_missing_precondition_is_named_in_the_same_run():
+    """The environment and the asset, both, from one run -- not the first."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _fdir, _spec, fixtures = _fixture_with_manifest(tmp, with_asset=False)
+        code, out = _run(id="tiny", fixtures_dir=fixtures,
+                         requirements=_pinned_requirements(tmp,
+                                                           numpy="0.0.1"),
+                         assets_dir=os.path.join(tmp, "assets"))
+        assert code == 2, (code, out)
+        assert "environment  UNPINNED" in out, out
+        assert "pinned 0.0.1" in out, out
+        assert "pip install oneground==" in out, out
+        assert "asset        MISSING" in out, out
+        assert ("No value was recomputed, because this environment is not "
+                "running the pinned versions and the release asset is not "
+                "present.") in " ".join(out.split()), out
+
+
+def test_no_pin_source_is_never_read_as_pinned():
+    """Before 022 a missing requirements.txt was an empty pin set, and an
+    empty set has no mismatches."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _fdir, _spec, fixtures = _fixture_with_manifest(tmp)
+        nowhere = os.path.join(tmp, "nowhere")
+        os.makedirs(nowhere)
+        with _patched(fv, "distribution_pins", lambda: {}), _cwd(nowhere):
+            pins, source, looked = fv.resolve_pins()
+            assert (pins, source) == ({}, None), (pins, source)
+            code, out = _run(id="tiny", fixtures_dir=fixtures,
+                             assets_dir=os.path.join(tmp, "assets"))
+        assert code == 2, (code, out)
+        assert "environment  MISSING" in out, out
+        assert "verified      intrinsic" not in out, out
+
+
+def test_outside_a_checkout_the_distributions_own_pins_are_the_set():
+    with tempfile.TemporaryDirectory() as tmp:
+        numpy_now = fv.running_versions()["numpy"]
+        with _patched(fv, "distribution_pins",
+                      lambda: {"numpy": numpy_now}), _cwd(tmp):
+            pins, source, _looked = fv.resolve_pins()
+        assert pins == {"numpy": numpy_now}
+        assert source.startswith("the installed oneground"), source
+
+
+def test_an_injected_memory_error_on_one_value_leaves_the_rest_and_exits_0():
+    """The 018e intent. 018d's fresh-machine check died on one allocation and
+    reported no value at all."""
+    from oneground.fixture import reference
+    with tempfile.TemporaryDirectory() as tmp:
+        refs = {"reference_results": {"single_node_hnsw": {
+            "params": {"M": 8, "efConstruction": 40, "efSearch": 32},
+            "recall_at_10": 0.9, "tolerance": 0.01}}}
+        _fdir, spec, fixtures = _fixture_with_manifest(tmp, extra_spec=refs)
+
+        def out_of_memory(*_a, **_k):
+            raise MemoryError("Unable to allocate 211. MiB for an array")
+
+        with _patched(reference, "ref_single_node", out_of_memory):
+            code, out = _run(id="tiny", fixtures_dir=fixtures,
+                             requirements=_pinned_requirements(tmp),
+                             assets_dir=os.path.join(tmp, "assets"))
+        assert code == 0, (code, out)
+        assert ("couldnt_check single_node_hnsw.recall_at_10" in out
+                and "out of memory" in out), out
+        for field in fv.REPRODUCIBLE:
+            if field in spec["characterization"]:
+                assert f"verified      {field}" in out, (field, out)
+        flat = " ".join(out.split())             # the summary is wrapped
+        assert ("1 value could not be recomputed on this host; the rows above "
+                "give the reason: single_node_hnsw.recall_at_10.") in flat, out
+        assert ("The digests were checked before any value, so the 4 files "
+                "that verified are the published bytes") in flat, out
+        assert "Every" not in out, out
+
+
+def test_a_host_failure_never_softens_a_contradiction_beside_it():
+    from oneground.fixture import reference
+    with tempfile.TemporaryDirectory() as tmp:
+        refs = {"reference_results": {"single_node_hnsw": {
+            "params": {"M": 8, "efConstruction": 40, "efSearch": 32},
+            "recall_at_10": 0.9, "tolerance": 0.01}}}
+        _fdir, spec, fixtures = _fixture_with_manifest(tmp, extra_spec=refs)
+        import yaml as _yaml
+        spec["characterization"]["boundary_crispness"]["value"] += 0.5
+        with open(os.path.join(fixtures, "tiny.fixture.yaml"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            _yaml.safe_dump(spec, f)
+
+        def out_of_memory(*_a, **_k):
+            raise MemoryError("no room")
+
+        with _patched(reference, "ref_single_node", out_of_memory):
+            code, out = _run(id="tiny", fixtures_dir=fixtures,
+                             requirements=_pinned_requirements(tmp),
+                             assets_dir=os.path.join(tmp, "assets"))
+        assert code == 1, (code, out)
+        assert "contradicted  boundary_crispness" in out, out
+
+
+def test_recompute_failed_names_the_environmental_causes():
+    assert fv.recompute_failed(MemoryError("x")).cause == fv.HOST
+    assert fv.recompute_failed(ImportError("x")).cause == fv.HOST
+    assert fv.recompute_failed(OSError("x")).cause == fv.HOST
+    # anything else is the recomputation failing, not the machine
+    assert fv.recompute_failed(TypeError("x")).cause == fv.RECOMPUTE
+
+
+def test_a_spec_with_nothing_published_needs_no_asset_and_exits_0():
+    """arxiv-smoke's shape: TO_BE_FILLED throughout."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fdir, spec, fixtures = _placeholder_spec(tmp)
+        import yaml as _yaml
+        with open(os.path.join(fixtures, "tiny.fixture.yaml"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            _yaml.safe_dump(spec, f)
+        for name in ("vectors.npy", "queries.npy"):
+            os.remove(os.path.join(fdir, name))
+        _manifest(fdir)
+        code, out = _run(id="tiny", fixtures_dir=fixtures,
+                         requirements=_pinned_requirements(tmp),
+                         assets_dir=os.path.join(tmp, "assets"))
+        assert code == 0, (code, out)
+        assert "asset        not needed" in out, out
+        assert ("No value is published in the spec yet"
+                in " ".join(out.split())), out
+
+
+def test_the_release_assets_agree_with_the_release_notes():
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "..", "..", "RELEASE_NOTES.md"),
+              encoding="utf-8") as f:
+        notes = f.read()
+    for fid, (name, size) in fv.RELEASE_ASSETS.items():
+        assert f"{name}\n  {size:,} bytes" in notes, (fid, name, size)
+
+
+# --- the summary, by the 019 rule --------------------------------------------
+
+def _row(name, outcome, cause=None):
+    return fv.ValueRow(name, outcome, "detail", cause)
+
+
+def _digest(name, outcome):
+    return (name, fv.RECEIPT, outcome, "detail")
+
+
+_MISSING_ASSET = [{"key": "asset", "met": False, "blocks_values": True,
+                   "because": "the release asset is not present"}]
+
+
+def test_every_published_value_is_said_only_when_the_published_set_is_covered():
+    rows = [_row("val_one", fv.VERIFIED), _row("val_two", fv.VERIFIED)]
+    said = fv.summary_sentences([], rows, ["val_one", "val_two"], [])
+    assert any(s.startswith("Every published value reproduced (2 of 2)")
+               for s in said), said
+    said = fv.summary_sentences([], rows,
+                                ["val_one", "val_two", "val_ceiling"], [])
+    assert not any("Every published value" in s for s in said), said
+    assert "Every value this command recomputes reproduced (2 of 2)." in said
+    assert ("1 published value is not recomputed by this command: "
+            "val_ceiling.") in said, said
+    assert not any("may be set to `verified`" in s for s in said), said
+
+
+def test_the_shipped_150k_specs_publish_values_this_command_does_not_recompute():
+    """Not synthetic. Found by task 022: `semantic_sharded` publishes its
+    routing ceiling and copy percentiles, which no row recomputes, so "every
+    published value reproduced" was never true of these specs."""
+    for name in ("arxiv-150k.fixture.yaml", "stackexchange-150k.fixture.yaml"):
+        spec = _shipped(name)
+        uncovered = (set(fv.published_value_names(spec))
+                     - set(fv.value_names(spec)))
+        assert "semantic_sharded.routing_ceiling" in uncovered, (name,
+                                                                 uncovered)
+
+
+def test_the_three_different_sentences_stay_different():
+    both = [_row("val_one", fv.COULDNT_CHECK, fv.NOT_ATTEMPTED),
+            _row("val_two", fv.COULDNT_CHECK, fv.NOT_ATTEMPTED)]
+    said = fv.summary_sentences([], both, [], _MISSING_ASSET)
+    assert ("No value was recomputed, because the release asset is not "
+            "present.") in said, said
+
+    host = [_row("val_one", fv.VERIFIED),
+            _row("val_two", fv.COULDNT_CHECK, fv.HOST)]
+    said = fv.summary_sentences([], host, [], [])
+    assert any(s.startswith("1 value could not be recomputed on this host")
+               for s in said), said
+    assert not any(s.startswith(("No value", "Every")) for s in said), said
+
+    placeholders = [_row("val_one", fv.COULDNT_CHECK, fv.UNPUBLISHED)]
+    said = fv.summary_sentences([], placeholders, [], [])
+    assert any(s.startswith("No value is published") for s in said), said
+
+
+def test_no_summary_sentence_asserts_more_than_its_rows():
+    """Task 019's rule, by hand, over every mix of three values and two
+    digests: a universal is written only when it holds for every row it
+    quantifies over, and a value is named only in the sentence for its own
+    outcome and cause."""
+    import itertools
+    from oneground.report import claims
+
+    kinds = [(fv.VERIFIED, None), (fv.CONTRADICTED, None),
+             (fv.COULDNT_CHECK, fv.NOT_ATTEMPTED),
+             (fv.COULDNT_CHECK, fv.HOST), (fv.COULDNT_CHECK, fv.UNPINNED),
+             (fv.COULDNT_CHECK, fv.UNPUBLISHED)]
+    marker = {fv.VERIFIED: "reproduced", fv.CONTRADICTED: "contradicted",
+              fv.NOT_ATTEMPTED: "not recomputed, because",
+              fv.HOST: "on this host", fv.UNPINNED: "outside the pinned",
+              fv.UNPUBLISHED: "not published"}
+    names = ("val_one", "val_two", "val_three")
+    douts = (fv.VERIFIED, fv.CONTRADICTED, fv.COULDNT_CHECK)
+    checked = 0
+    for combo in itertools.product(kinds, repeat=3):
+        rows = [_row(n, o, c) for n, (o, c) in zip(names, combo)]
+        for d in itertools.product(douts, repeat=2):
+            digests = [_digest("file_a", d[0]), _digest("file_b", d[1])]
+            said = fv.summary_sentences(digests, rows, list(names),
+                                        _MISSING_ASSET)
+            checked += 1
+            for s in said:
+                universal = (claims.universal_words_in(s)
+                             or s.startswith("No value"))
+                if s.startswith("All "):
+                    assert all(x[2] == fv.VERIFIED for x in digests), s
+                elif s.startswith("Every"):
+                    assert all(r[1] == fv.VERIFIED for r in rows), (s, rows)
+                elif s.startswith("No value was recomputed"):
+                    assert all(r.cause == fv.NOT_ATTEMPTED for r in rows), s
+                elif s.startswith("No value is published"):
+                    assert all(r.cause == fv.UNPUBLISHED for r in rows), s
+                else:
+                    assert not universal, (s, universal)
+                for r in rows:
+                    if r[0] not in s or s.startswith(("Every", "No value")):
+                        continue
+                    key = r.cause if r[1] == fv.COULDNT_CHECK else r[1]
+                    assert marker[key] in s, (r[0], key, s)
+    assert checked == 6 ** 3 * 3 ** 2

@@ -105,15 +105,23 @@ def running_versions():
     return out
 
 
-def running_pin_mismatches(requirements_path=REQUIREMENTS, versions=None):
+def running_pin_mismatches(requirements_path=REQUIREMENTS, versions=None,
+                           pinned=None):
     """[(package, running, pinned)] for the environment doing the work.
 
     This is the comparison that decides whether an artifact may be called
     canonical. Comparing a recorded `build_info` against `requirements.txt`
     answers a different question -- whether some past build was pinned -- and
     says nothing about the process running now.
+
+    `pinned` is a `{package: version}` to compare against instead of reading
+    `requirements_path`. Task 022: outside a checkout there is no
+    requirements.txt, and the installed distribution's own pins are the set.
     """
-    pinned = read_requirements_pins(requirements_path)
+    if pinned is None:
+        pinned = read_requirements_pins(requirements_path)
+    else:
+        pinned = {_normalise(k): v for k, v in pinned.items()}
     have = {_normalise(k): v for k, v in
             (running_versions() if versions is None else versions).items()}
     out = []

@@ -248,11 +248,15 @@ Two traps, both hit on the first pass:
 An external runner should never need your layout at all:
 
 ```
-oneground fixture verify arxiv-150k --asset ./arxiv-150k
+oneground fixture verify arxiv-150k --asset <where you extracted it>/fixtures/arxiv-150k
 ```
 
 `--asset` names the extracted folder outright, for both the digest half and
-the value half.
+the value half. The tarball's members are `fixtures/arxiv-150k/vectors.npy`,
+`queries.npy` and `sample.jsonl.zst`, so the folder is always
+`fixtures/<id>` under wherever it was extracted. `--asset ./arxiv-150k`, which
+this section used to show, points one level short: every value comes back
+couldn't-check with "the release asset is not present".
 
 ## 8. Developer runs
 

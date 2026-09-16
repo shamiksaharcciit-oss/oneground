@@ -1,0 +1,11 @@
+# The sdist must carry what setup.py copies into the wheel (task 022): a wheel
+# built from the sdist would otherwise ship no fixtures. The same allowlist as
+# oneground/fixture/shipped.py:SHIPPED_FILES -- test_packaging checks the two
+# agree. Never the vectors, queries, sample or projection.
+include setup.py
+include fixtures/*.fixture.yaml
+include fixtures/*/MANIFEST.sha256
+include fixtures/*/characterization.json
+include fixtures/*/build_info.json
+include fixtures/*/query_ids.json
+include fixtures/*/ground_truth.npy

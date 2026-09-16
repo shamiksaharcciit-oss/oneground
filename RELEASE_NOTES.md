@@ -122,8 +122,8 @@ that fixture's `MANIFEST.sha256` in this repository.
 
 ### Verifying your installation against one
 
-Anyone can run this. It needs no account, no GPU, and no particular directory
-layout — `--asset` points at wherever you extracted the tarball.
+Anyone can run this. It needs no account, no GPU, no clone and no particular
+directory layout — `--asset` points at wherever you extracted the tarball.
 
 ```
 python -m venv .venv                       # Python 3.12 or newer
@@ -132,23 +132,30 @@ pip install oneground
 
 oneground --version                        # 0.1.0
 
-git clone https://github.com/oneproof/oneground && cd oneground
-
-# no download needed -- the smoke fixture is in the repository
+# no download needed -- the smoke fixture publishes no values yet
 oneground fixture verify arxiv-smoke
 
 # download an asset from this release and extract it anywhere:
 tar -xzf arxiv-150k-v1.tgz
-oneground fixture verify arxiv-150k --asset ../fixtures/arxiv-150k
+oneground fixture verify arxiv-150k --asset fixtures/arxiv-150k
 
 tar -xzf stackexchange-150k-v1.tgz
 oneground fixture verify stackexchange-150k \
-    --asset ../fixtures/stackexchange-150k
+    --asset fixtures/stackexchange-150k
 ```
 
-The clone is for the fixture's published values and manifest, which are in the
-repository; the vectors are in the release asset, and `--asset` says where you
-put them.
+The package carries each fixture's spec, manifest and ground truth, so the
+command works from any directory; the vectors, queries and sample are in the
+release asset, and `--asset` says where you put them. Inside a clone of the
+repository the clone's copy of the fixture is used instead, and the output
+says which copy it read.
+
+**It names everything it is missing, in one run.** Before the digests it
+prints three preconditions — the fixture, the pinned environment and the
+release asset — each found or missing, with how to supply what is missing: the
+asset's name, its size, this release's page and the `--asset` flag. A run that
+is missing a precondition checks what it can, recomputes no value that needs
+the missing thing, and exits 2.
 
 **Digests come back in seconds. Values take about ten minutes** — each
 recomputes the characterization, the drift pair and both reference
@@ -163,12 +170,14 @@ release took **2 h 06 m for 588 seconds of CPU**, about 95% of it waiting on
 page faults, with 225 MB of physical memory free. The answer is identical when
 it finishes; only the clock is different.
 
-**With too little memory it does not finish.** The value recomputation needs a
-few hundred megabytes contiguous, and when the machine cannot give it the
-command raises `numpy ... Unable to allocate` and exits non-zero — after
-verifying every digest, so the receipt half is already done. Slow and stopped
-are different outcomes and want different responses: the first wants patience,
-the second wants memory.
+**With too little memory some values cannot be recomputed.** The value
+recomputation needs a few hundred megabytes contiguous. When the machine
+cannot give it, that value is reported `couldnt_check` with the failed
+allocation as its reason, the other values carry on, and the command exits 0
+if nothing is contradicted. The digests are checked before any value, so the
+bytes are confirmed either way, and the summary says so. Slow and short of
+memory are different outcomes and want different responses: the first wants
+patience, the second wants memory.
 
 On the machine that cut this release:
 
@@ -195,10 +204,14 @@ measured, but two — `semantic_sharded.recall_at_10` and
 release, which runs out of memory recomputing the 256-shard reference over
 150,000 vectors. Recorded with the reason, and not rounded up.
 
-**Every value comes back `couldnt_check` if your numpy, faiss-cpu or
-scikit-learn differ from `requirements.txt`.** That is deliberate: a value
-recomputed under different libraries has not been reproduced under the pins
-the fixture claims. The command says which package differs and by how much.
+**No value is reproduced if your numpy, faiss-cpu or scikit-learn differ from
+the pinned versions.** That is deliberate: a value recomputed under different
+libraries has not been reproduced under the pins the fixture claims. The
+command says which package differs and by how much, and that a fresh virtual
+environment with `pip install oneground==0.1.0` installs the pinned set; it
+recomputes no value and exits 2. With `--allow-unpinned` it recomputes them
+anyway, and every value that agrees comes back `couldnt_check` with its
+numbers shown.
 
 ## Licences
 
