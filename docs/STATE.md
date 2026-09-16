@@ -240,27 +240,32 @@ other ε values, and the rebuild rows really do change.
 | a recount from state | copy count, copy set, vectors each shard holds; and from them the histogram, storage, p99 and routing ceiling@10 |
 | a rebuild: a new `simulate` run | every candidate column, `true_rank`, candidates contributed; and from them recall, index loss and the neighbours a route missed |
 
-**Measured** on one laptop, `semantic_sharded` at the reference configuration,
-2,000 queries, median (p95) over 101 slider positions.
+**Measured** (task 023b) on one laptop, `semantic_sharded` at the reference
+configuration, 2,000 queries. Six rounds of 40 slider positions, ε order
+shuffled per round, with task 021's unchanged recount timed back to back with
+the view's at every position, so any drift lands on both. Figures are the
+median over 240 positions, with [p05–p95].
 
 | | 20,000 vectors | 150,000 vectors |
 |---|---|---|
-| `views.ground.recount`: closure, copy counts, shard sizes | 2.0 ms (2.6) | 22.9 ms (31.5) |
-| routing ceiling@10 over every query | 10.0 ms (18.6) | 10.1 ms (59.8) |
-| the rest of a ground draw: figures, marks, caption | 13.7 ms (138) | 12.5 ms (67) |
-| **a whole ground draw** | **27.5 ms (149)** | **44.7 ms (104)** |
+| task 021's recount, unchanged: the control | 1.4 ms [0.8–2.6] | 12.4 ms [7.9–20.6] |
+| `views.ground.recount` | 1.1 ms [0.7–2.4] | 11.4 ms [7.2–17.9] |
+| **a whole ground draw**: recount, ceiling@10, figures, marks, caption | **6.7 ms [4.3–11.2]**, max 25.6 | **21.3 ms [14.3–34.6]**, max 58.4 |
 | rebuild one ε: `simulate` build + query | 3–21 s | 194–398 s |
 | state file, semantic / columns the recount reads | 11.1 MB / 2.3 MB | 18.0 MB / 6.4 MB |
 
-- **Task 021 measured the same recount at 1.5 ms and 9.6 ms**, and a ground
-  draw at 0.6 ms and 4.4 ms. The machine is what changed: task 021's own
-  unchanged benchmark, re-run on the day task 023 measured, reported 6.4 ms
-  and 36.4 ms for its recount — about 3.8× its own earlier figures. Against
-  that control the recount built in task 023 is not slower than the path 021
-  measured.
-- **So the headline depends on the machine**, between roughly 14 ms and 45 ms
-  at 150,000 vectors for recount plus redraw. The decision below is the same
-  at either end: it is two orders of magnitude away from a rebuild.
+- **The view's recount is not slower than the path task 021 measured.** Paired
+  at each position, `recount / control` is 0.85 at 20k and 0.92 at 150k: it
+  does slightly less work.
+- **The host drifts while it measures.** Within one quiet session the per-round
+  median at 150,000 vectors moved from 8.9 to 14.4 ms for the control and from
+  15.3 to 24.2 ms for a draw, and a fixed 4M-element numpy sum timed once per
+  round varied 2.0–3.6 ms — 77%. No single timing figure here is a property of
+  the code.
+- **Task 021's "14 ms, inside a frame" was one pass on a machine whose state
+  nobody recorded**, and task 023 measured 44.7 ms for the same path on a
+  worse day. Both are draws from the distribution above. The honest statement
+  is the distribution.
 - **A ground draw's only size-independent cost** is the contract's defensive
   copy of the state header, about 1–2 ms. Everything else scales with the
   corpus or the query count.
@@ -310,6 +315,38 @@ and the lab marks which those are.
 - **The renderer.** `render_from_state.py --epsilon E --simulated DIR …` draws
   a declared set from the state directories it is given. ε values are compared
   at six decimals, the precision `simulate` writes.
+
+### The interaction budget, and what a host that cannot meet it must do
+
+A design that assumes a frame budget has to name the budget and its fallback,
+rather than assume the machine.
+
+- **The budget.** A slider that redraws on every move must finish a draw before
+  the next move arrives. Moves arrive at the display's refresh rate: 16.7 ms at
+  60 Hz, 8.3 ms at 120 Hz. So the requirement is **p95 of a whole ground draw
+  within one frame**, not the median. A median inside the frame with a p95
+  outside it stutters; worse, a draw slower than the event rate builds a
+  backlog, and what is on screen then belongs to an ε the control has already
+  left. That is an honesty failure, not a smoothness one — someone can
+  screenshot figures under the wrong ε.
+- **Measured against it on this laptop:** 20,000 vectors passes (p95 11.2 ms);
+  150,000 vectors does not (median 21.3 ms, p95 34.6 ms).
+- **The fallback: render on release, and say so.** Where p95 exceeds the frame,
+  the lab must not redraw on move. While the control is dragged, the ε readout
+  follows it and the ground stays as last drawn, captioned with both numbers —
+  "showing ε 0.20; release to redraw at 0.35". On release it recounts and
+  redraws once.
+- **In either mode, the same rules hold.** No figure is shown without the ε it
+  belongs to; nothing between simulated ε values is interpolated; the recall
+  panel keeps its rule above.
+- **The host decides, not the publisher.** A lab times its own first draws, on
+  the machine and corpus in front of it, and picks the mode from that p95. The
+  numbers above are one laptop on one day, and the same code measured twice as
+  slow on the same laptop a day earlier. The chosen mode belongs in the
+  ground's caption, so a screenshot carries it.
+- **Not built.** There is no lab UI yet: `render_from_state.py` draws once per
+  invocation. What is built is the recount, the caption contract and the one ε
+  set. Mode selection is a requirement on the lab when it is built.
 
 **One ε set, and an honest caption.**
 
