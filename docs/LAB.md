@@ -94,8 +94,17 @@ with a **threshold of 12.5 ms — 25% inside the 16.7 ms frame**:
   it redraws on release, so readings on both sides of the threshold choose
   release.
 - **Why 25%.** A host whose p95 fits 12.5 ms has room for its p95 to rise by a
-  third before a dragged control trails the drawing. The margin is a stated
+  third before a dragged control trails the drawing. That room is sized to the
+  host, not the code: in task 023b a fixed probe (the same numpy sum, once per
+  round) ranged 2.0–3.6 ms within one session on the development laptop — a
+  77% spread with nothing about the code changing. The margin is a stated
   number, in `oneground/lab/contract.py` (`MARGIN`), not a tuning.
+- **Why it can look like it does nothing.** On a host whose readings sit well
+  above or well below the threshold, 5% and 25% choose the same mode — task
+  024b's restarts, all far above, would have. A margin changes the answer only
+  on a host whose readings straddle the threshold, and that is the host it is
+  for: the one where a single reading would choose redraw on move on one start
+  and render on release on the next.
 - **The first reading above the threshold settles it,** so measuring stops
   there: a slow host starts in one reading, and only a host headed for redraw
   on move takes all five.
