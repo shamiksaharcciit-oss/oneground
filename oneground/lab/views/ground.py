@@ -68,9 +68,14 @@ class GroundView(View):
              "partition.region_ids", "route.probed_region",
              "candidates.true_ids", "load.vectors_held")
 
-    def __init__(self, eps=None, k=K_CEILING):
+    def __init__(self, eps=None, k=K_CEILING, render=None):
+        """`render` is the `contract.RenderMode` the host measured, when the
+        ground is drawn for a lab that redraws it: its sentence joins the
+        caption, so the mode travels with any screenshot (task 024)."""
         self.eps = eps or EpsilonSet()
         self.k = int(k)
+        # not `self.render`: that is the method every view is drawn through
+        self.render_mode = render
 
     def params(self):
         return {"epsilon": self.eps.epsilon, "k": self.k,
@@ -181,10 +186,11 @@ class GroundView(View):
                  data={"region": regions, "vectors_held": held},
                  encoding={"id": "region", "size": "vectors_held"}),
         ]
+        caption = self._caption(h, want, simulated, at_simulated, recountable)
+        if self.render_mode is not None:
+            caption = f"{caption} {self.render_mode.sentence()}"
         return Drawing(view=self.name, marks=marks, figures=figures,
-                       gaps=gaps,
-                       caption=self._caption(h, want, simulated,
-                                             at_simulated, recountable))
+                       gaps=gaps, caption=caption)
 
     def _caption(self, h, want, simulated, at_simulated, recountable):
         if want is None:

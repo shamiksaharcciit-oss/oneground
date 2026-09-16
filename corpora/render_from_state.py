@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """The teaser's two figures, drawn from simulator state through the lab's
 rendering contract. Task 020 step 4, reshaped into views by task 021; the
-epsilon control's declared set added by task 021b.
+epsilon control's declared set added by task 021b; the ground's live recount
+by task 023. Its run reader moved into `oneground/lab/runs.py` in task 024, so
+this script and `oneground lab` read a run the same way.
 
 This is the acceptance test for the simulator state, not a demo. It is given
 `state/` directories written by `oneground simulate --emit-state`, and nothing
@@ -20,21 +22,22 @@ never filled, and the script exits non-zero.
 
 The two figures:
 
-    ground         every base vector's copy count at the configuration's
-                   epsilon, and the counters: copies histogram, vectors copied,
-                   storage amplification, p99 copies, boundary crispness
+    ground         every base vector's copy count, recounted at the epsilon
+                   asked for, and the counters: copies histogram, vectors
+                   copied, storage amplification, p99 copies, boundary
+                   crispness, routing ceiling@10
     query_trace    one query's routed region, the regions probed and why, its
                    true neighbours, how many lie outside the routed region, and
                    its recall panel -- drawn for the named query and for every
                    query
 
-Epsilon (task 021b). `--epsilon` is where the lab's control stands. The
-`state_dir` and every `--simulated` directory together declare the epsilons
-this configuration was simulated at. The query trace is drawn from the state
-simulated at the epsilon asked for, when there is one. Otherwise it is drawn
-from the base state, geometric readouts only, and its recall panel says
-`not simulated at this epsilon`, with the measured cost of simulating one in
-minutes and the command that would. It is never interpolated and never blank.
+Epsilon. `--epsilon` is where the lab's control stands. The `state_dir` and
+every `--simulated` directory together declare the epsilons this configuration
+was simulated at, and both views are drawn with that one set. The ground
+recounts at the epsilon asked for. The query trace is drawn from the state
+simulated there when there is one; otherwise its recall panel says
+`not simulated at this epsilon`, with the measured cost in minutes and the
+command that would simulate it.
 
 The JSON keeps the shape task 020 gave it (`ground`, `query`, `every_query`),
 so the acceptance comparison reads it unchanged, and adds `epsilon` and
@@ -51,148 +54,25 @@ simulator state, so no position is drawn and nothing here claims a pixel match.
 """
 
 import argparse
-import glob
 import json
 import os
-import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from oneground.lab import contract, guard                    # noqa: E402
+from oneground.lab.runs import (declared_set, find_state,     # noqa: E402
+                                plan, states_in)
 from oneground.lab.views import GroundView, QueryTraceView    # noqa: E402
+
+__all__ = ["declared_set", "find_state", "plan", "states_in", "draw_ground",
+           "draw_query", "draw_every_query", "main"]
 
 COULDNT_CHECK = contract.COULDNT_CHECK
 
 # The teaser's recall depth for "true neighbours".
 K_TRUE = 10
-
-
-def states_in(state_dir, family):
-    """Every state file of `family` in `state_dir`: through `state_info.json`
-    when it is present, and through the headers otherwise."""
-    info_p = os.path.join(state_dir, "state_info.json")
-    paths = []
-    if os.path.exists(info_p):
-        with open(info_p, encoding="utf-8") as f:
-            info = json.load(f)
-        for entry in info.get("configurations", []):
-            if entry.get("family") == family and entry.get("file"):
-                paths.append(os.path.join(state_dir, entry["file"]))
-    else:
-        for p in sorted(glob.glob(os.path.join(state_dir, "*.state.npz"))):
-            head, _ = contract.load_state(p)
-            if head["family"] == family:
-                paths.append(p)
-    return paths
-
-
-def find_state(state_dir, family):
-    """The one state file for `family` in `state_dir`. More than one
-    configuration of the family is refused rather than picked from."""
-    paths = states_in(state_dir, family)
-    if not paths:
-        raise SystemExit(f"no {family} state in {state_dir}")
-    if len(paths) > 1:
-        raise SystemExit(f"{len(paths)} {family} configurations in "
-                         f"{state_dir}; pass --file to name one")
-    return paths[0]
-
-
-def _configuration(head):
-    """A configuration's parameters with epsilon left out: the states of one
-    declared set differ in epsilon and in nothing else."""
-    return json.dumps({k: v for k, v in head["params"].items()
-                       if k not in ("epsilon", "shard_depth")},
-                      sort_keys=True)
-
-
-def _run_info(state_dir):
-    """The declared `simulate_info.json` beside a `state/` directory."""
-    p = os.path.join(os.path.dirname(os.path.abspath(state_dir)),
-                     "simulate_info.json")
-    if not os.path.exists(p):
-        return {}
-    with open(p, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def declared_set(base_path, simulated_dirs, family):
-    """{epsilon: state path} for the base state's configuration, and what
-    simulating one of them has cost.
-
-    Collects every state of `family` in the base state's directory and in
-    `simulated_dirs` whose parameters match the base state's in everything
-    but epsilon. The cost is each such configuration's build and query time,
-    read from the declared timings in its run's `simulate_info.json`.
-    """
-    head0, _ = contract.load_state(base_path)
-    key = _configuration(head0)
-    by_eps, seconds, requirements = {}, [], None
-    for d in [os.path.dirname(os.path.abspath(base_path))] + \
-            list(simulated_dirs):
-        info = _run_info(d)
-        timings = info.get("timings") or {}
-        req = (info.get("requirements_file") or {}).get("path")
-        if req and requirements is None:
-            requirements = re.split(r"[\\/]", req)[-1]
-        for p in states_in(d, family):
-            h, _ = contract.load_state(p)
-            if _configuration(h) != key:
-                continue
-            eps = h["assignment"]["epsilon"]
-            if eps is None:
-                continue
-            by_eps.setdefault(round(float(eps), 6), p)
-            t = timings.get(h["config_label"])
-            if t:
-                seconds.append(float(t["build_seconds"])
-                               + float(t["query_seconds"]))
-    return by_eps, seconds, requirements, head0
-
-
-def plan(base_path, simulated_dirs, family, epsilon=None):
-    """Which state each view is drawn from, for the epsilon asked for."""
-    by_eps, seconds, requirements, head = declared_set(
-        base_path, simulated_dirs, family)
-    base_eps = head["assignment"]["epsilon"]
-    if base_eps is None and epsilon is not None:
-        raise SystemExit(f"{family} has no epsilon; --epsilon does not apply")
-    want = base_eps if epsilon is None else float(epsilon)
-    trace_path = base_path
-    if want is not None and round(float(want), 6) in by_eps:
-        trace_path = by_eps[round(float(want), 6)]
-
-    base = contract.load_state(base_path)
-    trace = base if trace_path == base_path else \
-        contract.load_state(trace_path)
-
-    cost = (f"{COULDNT_CHECK}: no simulate_info.json timings were found for "
-            "this configuration")
-    if seconds:
-        cost = {"low": round(min(seconds) / 60.0, 1),
-                "high": round(max(seconds) / 60.0, 1),
-                "basis": (f"build and query of this configuration at the "
-                          f"{len(seconds)} simulated epsilon(s) with declared "
-                          "timings, on the machine that ran them; loading "
-                          "vectors, ground truth and k-means add to it")}
-    params = {k: v for k, v in head["params"].items() if k != "shard_depth"}
-    params["epsilon"] = want
-    req = requirements or "<requirements.yaml>"
-    action = {"kind": "simulate", "family": family, "epsilon": want,
-              "params": params,
-              "grid": {family: {k: [v] for k, v in params.items()}},
-              "requirements": req,
-              "command": f"oneground simulate {req} --emit-state"}
-    # One source for which epsilons were simulated, handed to both views, so
-    # the ground and the query trace cannot disagree about it (task 023).
-    eps = contract.EpsilonSet.make(epsilon=want, simulated=sorted(by_eps),
-                                   cost=cost, action=action)
-    return {"base_path": base_path, "base": base,
-            "trace_path": trace_path, "trace": trace,
-            "epsilon": want, "simulated": sorted(by_eps),
-            "cost": cost, "action": action, "eps": eps}
 
 
 def _figures_and_gaps(drawing):

@@ -154,3 +154,112 @@ def check_views():
         if v:
             found[os.path.basename(path)] = v
     return found
+
+
+# ------------------------------------------------------------- transport
+# Task 024: the lab's server is a transport, never a second renderer. It sends
+# drawings views produced and must not compute them. Its own modules have to
+# read files and speak HTTP, which a view may do neither of, so they are held
+# to the rules that forbid computing rather than to the view profile:
+#
+#   import             nothing that measures -- and, for the server's own
+#                      modules, not numpy at all: a module that cannot hold an
+#                      array cannot compute one
+#   vector-arithmetic  as for views
+#   vector-data        as for views
+#   dynamic-code       eval, exec, __import__
+#
+# `check_transport` reads the server's own modules. The test suite also
+# imports the server in a clean process and holds every oneground module it
+# pulled in to the same rules, numpy allowed.
+
+LAB_DIR = os.path.dirname(os.path.abspath(__file__))
+TRANSPORT_MODULES = ("server.py", "runs.py")
+MEASURING = (
+    "faiss", "sklearn", "scipy", "torch", "umap", "sentence_transformers",
+    "pynndescent", "numba", "hnswlib", "annoy",
+    "oneground.models", "oneground.measures", "oneground.truth",
+    "oneground.simulate", "oneground.characterize", "oneground.embed",
+    "oneground.sample", "oneground.calibrate", "oneground.fixture",
+    "oneground.verify", "oneground.adapters", "oneground.pod",
+    "oneground.report",
+)
+EVAL_CODE = frozenset({"eval", "exec", "__import__"})
+# Modules the server imports that may break exactly one named rule, each
+# with its reason. Per rule, not per file: the exemption covers naming a
+# vector column, never arithmetic or a measuring import.
+TRANSPORT_ALLOWLIST = {
+    "oneground/models/state.py": (
+        {"vector-data"},
+        "the state format itself: it defines the vector columns that every "
+        "other module is refused, so it has to name them"),
+    "oneground/lab/contract.py": (
+        {"vector-data"},
+        "the contract names partition.centroids in order to refuse it to "
+        "every view"),
+}
+
+
+def transport_violations(source, filename="<transport>",
+                         package="oneground.lab", allow_numpy=False):
+    """[(line, rule, detail)] for one transport module's source."""
+    tree = ast.parse(source, filename)
+    docs = _docstrings(tree)
+    forbidden = MEASURING if allow_numpy else MEASURING + ("numpy",)
+    out = []
+
+    def add(node, rule, detail):
+        out.append((getattr(node, "lineno", 0), rule, detail))
+
+    def check_module(node, module):
+        if any(module == f or module.startswith(f + ".") for f in forbidden):
+            add(node, "import", module)
+        for part in module.split("."):
+            if part in VECTOR_ARITHMETIC:
+                add(node, "vector-arithmetic", part)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                check_module(node, alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                try:
+                    base = importlib.util.resolve_name(
+                        "." * node.level + base, package)
+                except ImportError:
+                    add(node, "import", "." * node.level + base)
+                    continue
+            check_module(node, base)
+            for alias in node.names:
+                check_module(node, f"{base}.{alias.name}")
+        elif isinstance(node, (ast.BinOp, ast.AugAssign)) \
+                and isinstance(node.op, ast.MatMult):
+            add(node, "vector-arithmetic", "@")
+        elif isinstance(node, (ast.Attribute, ast.Name)):
+            name = node.attr if isinstance(node, ast.Attribute) else node.id
+            if name in VECTOR_ARITHMETIC:
+                add(node, "vector-arithmetic", name)
+            if name in VECTOR_DATA:
+                add(node, "vector-data", name)
+            if name in EVAL_CODE:
+                add(node, "dynamic-code", name)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and id(node) not in docs and node.value in VECTOR_COLUMNS:
+            add(node, "vector-data", node.value)
+    return sorted(set(out))
+
+
+def check_transport():
+    """{module file name: [(line, rule, detail)]} for every server module
+    that breaks the transport rules. Empty means the server computes
+    nothing a view draws."""
+    found = {}
+    for name in TRANSPORT_MODULES:
+        path = os.path.join(LAB_DIR, name)
+        with open(path, encoding="utf-8") as f:
+            v = transport_violations(f.read(), path)
+        if v:
+            found[name] = v
+    return found

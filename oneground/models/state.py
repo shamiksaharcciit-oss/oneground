@@ -600,3 +600,16 @@ def read_state(path):
                 cols[info.filename[:-4]] = np.lib.format.read_array(
                     io.BytesIO(z.read(info.filename)), allow_pickle=False)
     return head, cols
+
+
+def read_header(path):
+    """The header of one `.state.npz`, without reading a column: enough to
+    find, group and label states without holding them in memory (task 024).
+    Refuses a `state_version` it does not understand, as `read_state` does."""
+    with zipfile.ZipFile(path, "r") as z:
+        head = json.loads(z.read("header.json").decode("utf-8"))
+    if head.get("state_version") != STATE_VERSION:
+        raise ValueError(
+            f"{path}: state_version {head.get('state_version')}, this reader "
+            f"understands {STATE_VERSION}")
+    return head

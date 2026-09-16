@@ -98,4 +98,4 @@ oneground = "oneground.cli:main"
 include = ["oneground*"]
 
 [tool.setuptools.package-data]
-oneground = ["py.typed"]
+oneground = ["py.typed", "lab/static/*"]

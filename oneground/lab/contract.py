@@ -70,6 +70,54 @@ class EpsilonSet:
         values = self.simulated if simulated is None else simulated
         return any(same_epsilon(epsilon, e) for e in values)
 
+
+# ------------------------------------------------------------ render mode
+# Task 023b named the budget: a lab that redraws the ground on every move of
+# the epsilon control must finish a whole draw within one frame at p95, or
+# what is on screen trails the control. A host that cannot renders on release
+# instead, and says so. Task 024's server measures which, at startup.
+FRAME_MS = 1000.0 / 60.0
+MOVE = "redraw on move"
+RELEASE = "render on release"
+STATIC = "no epsilon control"
+
+
+@dataclass(frozen=True)
+class RenderMode:
+    """How the lab's epsilon control redraws, and the measurement that chose
+    it (tasks 023b, 024).
+
+    Declared by whoever measured the host and handed to the ground, so the
+    ground's caption -- and a screenshot of it -- carries the mode and why.
+    `measured` is what measurement alone chose, kept when `--mode` overrides.
+    """
+
+    mode: str
+    p95_ms: Optional[float]
+    frame_ms: float = FRAME_MS
+    draws: int = 0
+    chosen_by: str = "measurement"
+    measured: Optional[str] = None
+
+    def as_dict(self):
+        return {"mode": self.mode, "p95_ms": self.p95_ms,
+                "frame_ms": round(self.frame_ms, 1), "draws": self.draws,
+                "chosen_by": self.chosen_by, "measured_mode": self.measured}
+
+    def sentence(self):
+        if self.p95_ms is None:
+            return f"Rendering: {self.mode} -- this family has no epsilon."
+        measured = (f"a ground draw measured p95 {self.p95_ms:.1f} ms over "
+                    f"{self.draws} draws on this host, against a "
+                    f"{self.frame_ms:.1f} ms frame")
+        if self.chosen_by == "--mode":
+            return (f"Rendering: {self.mode}, chosen by --mode; {measured}, "
+                    f"where measurement alone would choose {self.measured}.")
+        if self.mode == MOVE:
+            return f"Rendering: {self.mode} -- {measured}."
+        return (f"Rendering: {self.mode} -- {measured}, so the ground "
+                "redraws when the control is released.")
+
 # ---------------------------------------------------------------- epsilon
 # What moving epsilon does to each state column (task 021). Epsilon is the
 # closure rule's one parameter: it decides which regions a vector is copied
@@ -176,6 +224,11 @@ def state_format():
 def load_state(path):
     """(header, columns) of one `.state.npz`."""
     return state_format().read_state(path)
+
+
+def load_header(path):
+    """The header of one `.state.npz`, without reading a column."""
+    return state_format().read_header(path)
 
 
 class StateColumns:
