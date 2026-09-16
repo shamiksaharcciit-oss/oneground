@@ -95,7 +95,14 @@ label and silently ignored, while the run reported numbers as if it had been
 applied. **A file that used to run with a misspelled key will now stop, and
 that is deliberate.** No working configuration changes: a key that was
 silently ignored was never applied, so every number measured without it is
-the number measured with it.
+the number measured with it. One file does change: `simulate.json` rows for
+`single_node_hnsw` and `hash_sharded` no longer list `shard_depth` in their
+`params`, because neither family ever read it, so a `0.1.0` run of the same
+configuration writes a different file from a preview run — no number and no
+label moved. To show that no measurement moved with it, both fixtures were
+recomputed on this code under the pinned versions: every value `fixture
+verify` recomputes reproduced, 8 of 8 for `arxiv-150k` and 8 of 8 for
+`stackexchange-150k`, each inside its published tolerance.
 
 ## The release assets
 
