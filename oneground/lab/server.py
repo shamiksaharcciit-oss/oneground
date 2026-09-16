@@ -50,7 +50,8 @@ from .runs import LabRunError, LoadedRun                      # noqa: F401
 from .views import GroundView, QueryTraceView
 
 K_TRUE = 10
-MODE_DRAWS = 20
+MODE_READINGS = 5
+MODE_DRAWS = 20             # per reading
 MODE_WARMUP = 3
 EPSILON_CEILING = 1.0
 
@@ -126,9 +127,16 @@ def p95(values):
     return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
 
-def measure_render_mode(run, draws=MODE_DRAWS, override=None):
+def measure_render_mode(run, draws=MODE_DRAWS, override=None,
+                        readings=MODE_READINGS):
     """Time whole ground draws on this host, for this corpus, and choose the
-    mode task 023b requires: redraw on move only if p95 fits one frame.
+    mode (tasks 023b, 024b).
+
+    Up to `readings` readings of `draws` draws each, across the epsilon range.
+    Redraw on move only if every reading's p95 is within the margined
+    threshold (`choose_mode`). The first reading above it settles the
+    decision, so measuring stops there: a slow host does not pay for readings
+    that cannot change the answer.
 
     `override` (from `--mode`) wins, and the measurement is still taken and
     kept, so the caption can say what measurement alone would have chosen.
@@ -137,28 +145,48 @@ def measure_render_mode(run, draws=MODE_DRAWS, override=None):
         return contract.RenderMode(mode=contract.STATIC, p95_ms=None,
                                    chosen_by="this family has no epsilon")
     draws = max(2, int(draws))
+    readings = max(1, int(readings))
     top = run.epsilon_max()
     positions = [top * i / (draws - 1) for i in range(draws)]
     for e in positions[:MODE_WARMUP]:
         contract.draw(GroundView(run.epsilon_set(e)), *run.base)
-    timings = []
-    for e in positions:
-        eps = run.epsilon_set(e)
-        start = time.perf_counter()
-        contract.draw(GroundView(eps), *run.base)
-        timings.append((time.perf_counter() - start) * 1000.0)
-    return choose_mode(round(p95(timings), 1), draws, override)
+    per_reading, everything = [], []
+    for _ in range(readings):
+        timings = []
+        for e in positions:
+            eps = run.epsilon_set(e)
+            start = time.perf_counter()
+            contract.draw(GroundView(eps), *run.base)
+            timings.append((time.perf_counter() - start) * 1000.0)
+        per_reading.append(round(p95(timings), 1))
+        everything.extend(timings)
+        if per_reading[-1] > contract.THRESHOLD_MS:
+            break
+    return choose_mode(per_reading, draws, override,
+                       pooled=round(p95(everything), 1))
 
 
-def choose_mode(p95_ms, draws, override=None):
-    """Task 023b's rule, and nothing else: redraw on move only when p95 of a
-    whole ground draw fits one frame; render on release otherwise. An
-    override wins and keeps the measured choice beside it."""
-    measured = contract.MOVE if p95_ms <= contract.FRAME_MS \
+def choose_mode(readings_ms, draws, override=None, pooled=None):
+    """The rule, and nothing else: redraw on move only when every reading's
+    p95 is within `contract.THRESHOLD_MS`; render on release when the
+    readings straddle it or sit above it. An override wins and keeps the
+    measured choice beside it."""
+    readings = tuple(float(x) for x in readings_ms)
+    if not readings:
+        raise ValueError("a render mode needs at least one reading")
+    within = [x <= contract.THRESHOLD_MS for x in readings]
+    if all(within):
+        verdict = contract.WITHIN
+    elif any(within):
+        verdict = contract.STRADDLED
+    else:
+        verdict = contract.ABOVE
+    measured = contract.MOVE if verdict == contract.WITHIN \
         else contract.RELEASE
     return contract.RenderMode(
-        mode=override or measured, p95_ms=p95_ms, draws=draws,
-        chosen_by="--mode" if override else "measurement", measured=measured)
+        mode=override or measured, p95_ms=max(readings), draws=draws,
+        chosen_by="--mode" if override else "measurement", measured=measured,
+        readings_ms=readings, pooled_p95_ms=pooled, verdict=verdict)
 
 
 def _sha256(path):
@@ -379,8 +407,13 @@ class LabServer:
         if r.p95_ms is None:
             why = r.mode
         else:
-            why = (f"{r.mode}: ground draw p95 {r.p95_ms:.1f} ms over "
-                   f"{r.draws} draws against a {r.frame_ms:.1f} ms frame")
+            readings = "/".join(f"{x:.1f}" for x in r.readings_ms)
+            n = len(r.readings_ms)
+            why = (f"{r.mode}: ground draw p95 {r.p95_ms:.1f} ms, the "
+                   f"highest of {n} reading{'' if n == 1 else 's'} of "
+                   f"{r.draws} draws ({readings} ms: {r.verdict}), threshold "
+                   f"{r.threshold_ms:.1f} ms = {r.margin:.0%} inside the "
+                   f"{r.frame_ms:.1f} ms frame")
             if r.chosen_by == "--mode":
                 why += f" (chosen by --mode; measured: {r.measured})"
         return (f"oneground lab: {self.url}  |  {why}  |  "

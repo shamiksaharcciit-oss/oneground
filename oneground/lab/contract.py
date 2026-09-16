@@ -75,21 +75,46 @@ class EpsilonSet:
 # Task 023b named the budget: a lab that redraws the ground on every move of
 # the epsilon control must finish a whole draw within one frame at p95, or
 # what is on screen trails the control. A host that cannot renders on release
-# instead, and says so. Task 024's server measures which, at startup.
+# instead, and says so.
+#
+# Task 024b applied 023b's own finding to the decision as well as to the
+# measurement: one p95 from one burst of draws, near the frame, flips between
+# runs of the same code on the same host (024 measured 16.3, 17.8, 36.3 and
+# 26.2 ms at 20k). So the decision takes several readings and a margin:
+#
+#   redraw on move     only if EVERY reading's p95 is within THRESHOLD_MS,
+#                      which is MARGIN inside the frame
+#   render on release  otherwise -- whether the readings straddle the
+#                      threshold or all sit above it
+#
+# A slider that stutters is worse than one that says it redraws on release,
+# so the tie goes to release. The margin is a stated number, not a tuning: a
+# host whose p95 fits it has room for its p95 to rise by a third before a
+# dragged control trails what is drawn.
 FRAME_MS = 1000.0 / 60.0
+MARGIN = 0.25
+THRESHOLD_MS = FRAME_MS * (1.0 - MARGIN)
 MOVE = "redraw on move"
 RELEASE = "render on release"
 STATIC = "no epsilon control"
+
+WITHIN = "within"          # every reading within the threshold
+STRADDLED = "straddled"    # readings on both sides of it
+ABOVE = "above"            # every reading above it
 
 
 @dataclass(frozen=True)
 class RenderMode:
     """How the lab's epsilon control redraws, and the measurement that chose
-    it (tasks 023b, 024).
+    it (tasks 023b, 024, 024b).
 
     Declared by whoever measured the host and handed to the ground, so the
     ground's caption -- and a screenshot of it -- carries the mode and why.
-    `measured` is what measurement alone chose, kept when `--mode` overrides.
+
+    `readings_ms` is each reading's p95, in order; `p95_ms` is the highest of
+    them, the value the decision turned on. `verdict` says where the readings
+    fell against `threshold_ms`. `measured` is what measurement alone chose,
+    kept when `--mode` overrides.
     """
 
     mode: str
@@ -98,25 +123,46 @@ class RenderMode:
     draws: int = 0
     chosen_by: str = "measurement"
     measured: Optional[str] = None
+    readings_ms: tuple = ()
+    threshold_ms: float = THRESHOLD_MS
+    margin: float = MARGIN
+    pooled_p95_ms: Optional[float] = None
+    verdict: str = ""
 
     def as_dict(self):
         return {"mode": self.mode, "p95_ms": self.p95_ms,
-                "frame_ms": round(self.frame_ms, 1), "draws": self.draws,
-                "chosen_by": self.chosen_by, "measured_mode": self.measured}
+                "frame_ms": round(self.frame_ms, 1),
+                "threshold_ms": round(self.threshold_ms, 1),
+                "margin": self.margin, "draws": self.draws,
+                "readings_ms": list(self.readings_ms),
+                "pooled_p95_ms": self.pooled_p95_ms,
+                "verdict": self.verdict, "chosen_by": self.chosen_by,
+                "measured_mode": self.measured}
+
+    def evidence(self):
+        """The measurement in words, the same wherever it is shown."""
+        readings = ", ".join(f"{x:.1f}" for x in self.readings_ms)
+        n = len(self.readings_ms)
+        return (f"{n} reading{'' if n == 1 else 's'} of {self.draws} ground "
+                f"draws on this host, p95 {readings} ms, against a "
+                f"{self.threshold_ms:.1f} ms threshold ({self.margin:.0%} "
+                f"inside the {self.frame_ms:.1f} ms frame)")
 
     def sentence(self):
         if self.p95_ms is None:
             return f"Rendering: {self.mode} -- this family has no epsilon."
-        measured = (f"a ground draw measured p95 {self.p95_ms:.1f} ms over "
-                    f"{self.draws} draws on this host, against a "
-                    f"{self.frame_ms:.1f} ms frame")
         if self.chosen_by == "--mode":
-            return (f"Rendering: {self.mode}, chosen by --mode; {measured}, "
-                    f"where measurement alone would choose {self.measured}.")
+            return (f"Rendering: {self.mode}, chosen by --mode; "
+                    f"{self.evidence()}, where measurement alone would "
+                    f"choose {self.measured}.")
         if self.mode == MOVE:
-            return f"Rendering: {self.mode} -- {measured}."
-        return (f"Rendering: {self.mode} -- {measured}, so the ground "
-                "redraws when the control is released.")
+            return (f"Rendering: {self.mode} -- every reading within the "
+                    f"threshold: {self.evidence()}.")
+        why = ("the readings straddled the threshold"
+               if self.verdict == STRADDLED else
+               "the readings were above the threshold")
+        return (f"Rendering: {self.mode} -- {why}: {self.evidence()}. The "
+                "ground redraws when the control is released.")
 
 # ---------------------------------------------------------------- epsilon
 # What moving epsilon does to each state column (task 021). Epsilon is the

@@ -159,6 +159,19 @@ section {
 .legend .c3 { background: var(--copies-3); }
 .legend .c4 { background: var(--copies-4); }
 
+.outline-key { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; }
+.outline-key .key {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin-right: 0.35rem;
+  vertical-align: -0.1rem;
+}
+/* the same colours and relative weights lab.js strokes on the canvas */
+.outline-key .routed { border: 3px solid var(--ochre); }
+.outline-key .probed { border: 2px solid var(--muted); }
+.outline-key .neighbours { border: 1px solid var(--ink); }
+
 .caption { max-width: 72ch; }
 
 .gaps { list-style: none; padding: 0; margin: 0.5rem 0 0; }

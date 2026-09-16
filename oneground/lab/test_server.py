@@ -15,8 +15,9 @@ The properties:
     paths       traversal, absolute paths and directory listings are refused
     host        non-loopback needs --i-know; an unexpected Host is refused
     methods     only GET; no CORS; a strict Content-Security-Policy
-    mode        chosen by measurement against one frame, shown in the caption,
-                and overridable with the same caption behaviour
+    mode        chosen by several readings against a frame with a margin,
+                shown in the caption, and overridable with the same caption
+                behaviour
     offline     the interface asks for nothing from another origin
 
     python oneground/lab/test_server.py
@@ -28,9 +29,11 @@ import hashlib
 import http.client
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(
     __file__)), "..", ".."))
@@ -395,16 +398,73 @@ def test_bad_parameters_are_refused_synthetic():
 
 
 # -------------------------------------------------------------------- mode
-def test_the_mode_follows_one_frame_at_p95_synthetic():
-    frame = contract.FRAME_MS
-    assert server.choose_mode(frame - 0.1, 20).mode == contract.MOVE
-    assert server.choose_mode(frame, 20).mode == contract.MOVE
-    assert server.choose_mode(frame + 0.1, 20).mode == contract.RELEASE
-    forced = server.choose_mode(frame + 5, 20, contract.MOVE)
+def test_the_mode_needs_every_reading_inside_the_margin_synthetic():
+    """Task 024b: redraw on move only when every reading's p95 is within the
+    threshold, which is 25% inside the frame. Readings that straddle it, or
+    that fit the frame but not the margin, render on release."""
+    t = contract.THRESHOLD_MS
+    assert abs(t - contract.FRAME_MS * 0.75) < 1e-9
+    assert round(t, 1) == 12.5
+
+    within = server.choose_mode([t - 2, t - 1, t, t - 3, t - 0.5], 20)
+    assert within.mode == contract.MOVE and within.verdict == contract.WITHIN
+    assert within.p95_ms == t, "the decision turns on the highest reading"
+
+    straddled = server.choose_mode([t - 2, t - 1, t + 0.1], 20)
+    assert straddled.mode == contract.RELEASE
+    assert straddled.verdict == contract.STRADDLED
+
+    # the case 024 hit: every reading fits the frame, none fits the margin
+    frame_only = server.choose_mode([16.3, 16.0, 16.6], 20)
+    assert frame_only.mode == contract.RELEASE
+    assert frame_only.verdict == contract.ABOVE
+
+    # 024's four real readings at 20k: once inside the frame, three times not
+    assert server.choose_mode([16.3, 17.8, 36.3, 26.2], 20).mode == \
+        contract.RELEASE
+
+    forced = server.choose_mode([40.0], 20, contract.MOVE)
     assert forced.mode == contract.MOVE and forced.chosen_by == "--mode"
     assert forced.measured == contract.RELEASE
+    assert forced.readings_ms == (40.0,)
+
+    try:
+        server.choose_mode([], 20)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a mode was chosen from no reading")
+
     assert server.p95([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
                        16, 17, 18, 19, 100]) == 19
+
+
+def test_measuring_stops_at_the_first_reading_above_the_threshold_synthetic():
+    """A reading above the threshold settles the decision, so a slow host
+    does not pay for the rest; a fast one takes every reading."""
+    with tempfile.TemporaryDirectory() as tmp:
+        run = LoadedRun(_workdir(tmp))
+        calls = []
+        real = server.contract.draw
+
+        def slow_draw(view, header, columns):
+            calls.append(1)
+            time.sleep(0.02)                 # 20 ms: above the threshold
+            return real(view, header, columns)
+
+        server.contract.draw = slow_draw
+        try:
+            slow = server.measure_render_mode(run, draws=4, readings=5)
+        finally:
+            server.contract.draw = real
+        assert slow.mode == contract.RELEASE
+        assert len(slow.readings_ms) == 1, slow.readings_ms
+        assert slow.verdict == contract.ABOVE
+
+        fast = server.measure_render_mode(run, draws=4, readings=5)
+        if fast.verdict == contract.WITHIN:
+            assert len(fast.readings_ms) == 5
+            assert fast.mode == contract.MOVE
 
 
 def test_the_measured_mode_is_printed_and_in_the_ground_caption_synthetic():
@@ -414,11 +474,14 @@ def test_the_measured_mode_is_printed_and_in_the_ground_caption_synthetic():
         try:
             r = lab.render
             assert r.chosen_by == "measurement" and r.p95_ms is not None
-            assert r.mode == (contract.MOVE if r.p95_ms <= contract.FRAME_MS
-                              else contract.RELEASE)
+            assert r.mode == (
+                contract.MOVE if all(x <= contract.THRESHOLD_MS
+                                     for x in r.readings_ms)
+                else contract.RELEASE)
             line = lab.startup_line(1.0, "run")
             assert lab.url in line and r.mode in line
             assert f"p95 {r.p95_ms:.1f} ms" in line
+            assert r.verdict in line and "threshold 12.5 ms" in line
             run = json.loads(_get(lab, "/api/run")[2])
             assert run["render"]["mode"] == r.mode
             caption = json.loads(_get(lab, "/api/ground?epsilon=0.15")[2]
@@ -454,6 +517,24 @@ def test_the_interface_asks_for_nothing_from_another_origin():
         "inline script would be refused by the CSP"
 
 
+def test_the_interface_script_parses():
+    """Not synthetic: the shipped lab.js, parsed by node.
+
+    Task 024b wrote a string literal that broke the whole script while every
+    other test here passed: they read the file as text and never run it. A
+    script that does not parse is a page that shows nothing. Where node is not
+    installed this skips and says so; it does not pass.
+    """
+    node = shutil.which("node")
+    if node is None:
+        import pytest
+        pytest.skip("node is not on PATH, so lab.js was not parsed")
+    result = subprocess.run(
+        [node, "--check", os.path.join(server.STATIC_DIR, "lab.js")],
+        capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+
+
 # ----------------------------------------------------------------- workdir
 def test_a_directory_that_is_not_a_run_is_refused_synthetic():
     with tempfile.TemporaryDirectory() as tmp:
@@ -478,6 +559,10 @@ def _main():
         except Exception as e:
             failed += 1
             print(f"FAIL  {name}: {type(e).__name__}: {e}")
+        except BaseException as e:            # pytest.skip outside pytest
+            if type(e).__name__ != "Skipped":
+                raise
+            print(f"skip  {name}: {e}")
     print(f"\n{len(tests) - failed} passed, {failed} failed")
     return 1 if failed else 0
 

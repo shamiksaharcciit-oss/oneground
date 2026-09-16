@@ -67,6 +67,7 @@
   let shownEpsilon = null; // the epsilon the drawing on screen belongs to
 
   // --------------------------------------------------------------- layout
+  const GUTTER = 3;        // the widest outline's weight
   // Cells by home region. Home region does not depend on epsilon, so this is
   // computed once from the first drawing and every later drawing only
   // recolours the same pixels.
@@ -79,14 +80,16 @@
     for (const m of members) largest = Math.max(largest, m.length);
     const side = Math.ceil(Math.sqrt(largest));
     const columns = Math.ceil(Math.sqrt(regionCount));
-    const cell = side + 2;
+    // A 3-pixel gutter on every side of a cell: the trace outlines are drawn
+    // in it, so no outline ever covers a vector's pixel.
+    const cell = side + 2 * GUTTER;
     const width = columns * cell;
     const rows = Math.ceil(regionCount / columns);
     const at = new Int32Array(ids.length);
     const cellOrigin = [];
     members.forEach((list, region) => {
-      const cx = (region % columns) * cell + 1;
-      const cy = Math.floor(region / columns) * cell + 1;
+      const cx = (region % columns) * cell + GUTTER;
+      const cy = Math.floor(region / columns) * cell + GUTTER;
       cellOrigin[region] = [cx, cy];
       list.forEach((index, k) => {
         at[index] = (cy + Math.floor(k / side)) * width + cx + (k % side);
@@ -121,7 +124,7 @@
     if (!origin) return;
     ctx.strokeStyle = colour;
     ctx.lineWidth = weight;
-    ctx.strokeRect(origin[0] - 1 + weight / 2, origin[1] - 1 + weight / 2,
+    ctx.strokeRect(origin[0] - GUTTER + weight / 2, origin[1] - GUTTER + weight / 2,
                    layout.cell - weight, layout.cell - weight);
   }
 
@@ -262,6 +265,17 @@
     if (run.render.mode !== MOVE) drawAt(sliderEpsilon());
   }
 
+  // ------------------------------------------------------ render verdicts
+  const VERDICT_WORDS = {
+    within: 'every reading within the threshold',
+    straddled: 'the readings straddled the threshold',
+    above: 'above the threshold',
+  };
+  function readings(r) {
+    const n = r.readings_ms.length;
+    return `${n} reading${n === 1 ? '' : 's'} of ${r.draws} draws`;
+  }
+
   // ---------------------------------------------------------------- check
   function showCheck(check) {
     const dl = $('check');
@@ -274,12 +288,15 @@
     check.digests.forEach((entry) => {
       if (!entry.manifest) { row('digests', `${entry.directory}: ${entry.note}`, 'unverified'); return; }
       const good = entry.files.filter((f) => f.verified).length;
-      row('digests', `${entry.directory}/MANIFEST.sha256: ${good} of ${entry.files.length} verified`,
+      const sep = entry.directory.includes('\\') ? '\\' : '/';
+      row('digests', `${entry.directory}${sep}MANIFEST.sha256: ${good} of ${entry.files.length} verified`,
           entry.all_verified ? null : 'unverified');
     });
     const r = check.render;
     row('render mode', r.p95_ms === null ? r.mode
-      : `${r.mode} (${r.chosen_by}; ground draw p95 ${r.p95_ms} ms over ${r.draws} draws, frame ${r.frame_ms} ms)`);
+      : `${r.mode} (${r.chosen_by}; ${VERDICT_WORDS[r.verdict]}: ground draw p95 ${r.readings_ms.join(' / ')} ms ` +
+        `over ${readings(r)}; threshold ${r.threshold_ms} ms, ` +
+        `${Math.round(r.margin * 100)}% inside the ${r.frame_ms} ms frame)`);
     row('writes', check.writes);
     row('token', check.token);
   }
@@ -291,19 +308,32 @@
     text($('run-line'), `${fmtInt(run.n_base)} vectors · ${fmtInt(run.n_queries)} queries · ${run.family}`);
     const r = run.render;
     text($('mode'), r.p95_ms === null ? `rendering: ${r.mode}`
-      : `rendering: ${r.mode} — ground draw p95 ${r.p95_ms} ms on this host, frame ${r.frame_ms} ms` +
-        (r.chosen_by === '--mode' ? ` (chosen by --mode; measured: ${r.measured_mode})` : ''));
+      : `rendering: ${r.mode} — ${VERDICT_WORDS[r.verdict]}: ground draw p95 ${r.readings_ms.join(' / ')} ms ` +
+        `over ${readings(r)} on this host ` +
+        `against ${r.threshold_ms} ms (${Math.round(r.margin * 100)}% inside the ${r.frame_ms} ms frame)` +
+        (r.chosen_by === '--mode' ? ` — chosen by --mode; measured: ${r.measured_mode}` : ''));
+
+    // The page's own URL may name where to start: `epsilon` and `query`,
+    // beside the token. They set the control; they are not sent anywhere else.
+    const start = new URLSearchParams(location.search);
     const query = $('query');
     query.max = String(run.n_queries - 1);
+    if (start.has('query')) {
+      query.value = String(Math.min(run.n_queries - 1, Math.max(0, Number(start.get('query')) || 0)));
+    }
 
     const slider = $('eps');
+    let initial = run.epsilon;
     if (run.epsilon === null || r.mode === STATIC) {
       slider.disabled = true;
       text($('eps-simulated'), 'this family has no epsilon');
     } else {
       slider.max = String(run.epsilon_max);
-      slider.value = String(run.epsilon);
-      text($('eps-out'), Number(run.epsilon).toFixed(3));
+      if (start.has('epsilon') && Number.isFinite(Number(start.get('epsilon')))) {
+        initial = Math.min(run.epsilon_max, Math.max(0, Number(start.get('epsilon'))));
+      }
+      slider.value = String(initial);
+      text($('eps-out'), Number(initial).toFixed(3));
       text($('eps-simulated'), `simulated at ε ${run.simulated_epsilons.join(', ')}`);
       slider.addEventListener('input', onMove);
       slider.addEventListener('change', onRelease);
@@ -313,7 +343,7 @@
     $('next').addEventListener('click', () => { query.value = Math.min(run.n_queries - 1, Number(query.value) + 1); redrawTrace(); });
 
     showCheck(await api('/api/check'));
-    await drawAt(run.epsilon === null ? null : run.epsilon);
+    await drawAt(initial === null ? null : initial);
   }
 
   boot().catch((error) => text($('config'), `the lab could not load: ${error.message}`));

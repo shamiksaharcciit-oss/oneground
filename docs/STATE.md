@@ -329,8 +329,10 @@ rather than assume the machine.
   backlog, and what is on screen then belongs to an ε the control has already
   left. That is an honesty failure, not a smoothness one — someone can
   screenshot figures under the wrong ε.
-- **Measured against it on this laptop:** 20,000 vectors passes (p95 11.2 ms);
-  150,000 vectors does not (median 21.3 ms, p95 34.6 ms).
+- **Measured against it on this laptop:** 20,000 vectors passed (p95 11.2 ms);
+  150,000 vectors does not (median 21.3 ms, p95 34.6 ms). 11.2 ms fits the
+  frame and also the margined threshold below, by 1.3 ms — which is why this
+  laptop's choice at 20k depends on the state it is in when the lab starts.
 - **The fallback: render on release, and say so.** Where p95 exceeds the frame,
   the lab must not redraw on move. While the control is dragged, the ε readout
   follows it and the ground stays as last drawn, captioned with both numbers —
@@ -340,13 +342,26 @@ rather than assume the machine.
   belongs to; nothing between simulated ε values is interpolated; the recall
   panel keeps its rule above.
 - **The host decides, not the publisher.** A lab times its own first draws, on
-  the machine and corpus in front of it, and picks the mode from that p95. The
+  the machine and corpus in front of it, and picks the mode from them. The
   numbers above are one laptop on one day, and the same code measured twice as
   slow on the same laptop a day earlier. The chosen mode belongs in the
   ground's caption, so a screenshot carries it.
-- **Not built.** There is no lab UI yet: `render_from_state.py` draws once per
-  invocation. What is built is the recount, the caption contract and the one ε
-  set. Mode selection is a requirement on the lab when it is built.
+- **The decision needs a margin, not only the measurement.** Deciding from one
+  p95 near the frame repeats, in the decision, the defect this section found
+  in the measurement: at 20,000 vectors four back-to-back readings on one
+  laptop were 16.3, 17.8, 36.3 and 26.2 ms — one inside the frame, three not.
+  So the rule is: **take several readings** (up to five, each a p95 of 20
+  whole ground draws), and **redraw on move only if every reading is within a
+  threshold 25% inside the frame** — 12.5 ms at 60 Hz. When the readings
+  straddle the threshold, or sit above it, **render on release.** A slider that
+  stutters is worse than one that says it redraws on release. The first reading
+  above the threshold settles the decision, so a slow host is not made to take
+  the rest. `contract.MARGIN`, `contract.THRESHOLD_MS`, and the readings and
+  verdict travel with the `RenderMode` into the caption.
+- **Where it is built.** `oneground lab` (task 024, `docs/LAB.md`) measures at
+  startup, prints the mode and its readings, and puts both in the ground's
+  caption; `render_from_state.py` still draws once per invocation and has no
+  mode.
 
 **One ε set, and an honest caption.**
 

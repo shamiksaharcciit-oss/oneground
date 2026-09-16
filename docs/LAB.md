@@ -49,7 +49,12 @@ directory is read once, at startup, and never written.
 - **One query's trace.** Where the query was routed, the regions it probed and
   why, its true neighbours and how many live outside the routed region, and
   its recall panel. On the ground, the routed region, the other probed regions
-  and the regions its neighbours live in are outlined.
+  and the regions its neighbours live in are outlined, in the gutter around
+  each cell so no outline covers a vector, with a key under the ground.
+
+The page opens at the run's own ε and query 0. Its URL may name another start
+beside the token — `&epsilon=0.15&query=15` — which sets the controls and
+nothing else.
 
 Both are the views in `oneground/lab/views/`, drawn through the rendering
 contract in `docs/STATE.md`. The server does not draw anything itself.
@@ -71,17 +76,34 @@ contract in `docs/STATE.md`. The server does not draw anything itself.
 
 A lab that redraws the ground on every move of the ε control must finish a
 draw within one frame at p95, or what is on screen trails the control (task
-023b). So at startup the server times a whole ground draw for this corpus, 20
-times across the ε range, and chooses:
+023b). One p95 near the frame is not enough to decide that: on the same laptop
+and code, four back-to-back readings at 20,000 vectors were 16.3, 17.8, 36.3
+and 26.2 ms, so a single reading would have chosen differently from one start
+to the next (task 024b).
+
+So at startup the server takes **up to five readings**, each a p95 of 20 whole
+ground draws for this corpus across the ε range, and compares every reading
+with a **threshold of 12.5 ms — 25% inside the 16.7 ms frame**:
 
 | mode | when | what the control does |
 |---|---|---|
-| **redraw on move** | ground draw p95 ≤ 16.7 ms | every move asks for a new drawing; at most one request is in flight, and the latest position is always drawn last |
-| **render on release** | p95 > 16.7 ms | moving updates the ε readout and says which ε the ground on screen belongs to — "showing ε 0.20; release to redraw at 0.35"; letting go redraws |
+| **redraw on move** | every reading's p95 ≤ 12.5 ms | every move asks for a new drawing; at most one request is in flight, and the latest position is always drawn last |
+| **render on release** | any reading's p95 > 12.5 ms — the readings straddle the threshold, or all sit above it | moving updates the ε readout and says which ε the ground on screen belongs to — "showing ε 0.20; release to redraw at 0.35"; letting go redraws |
 
-The startup line prints the chosen mode with the measured p95. The interface
-shows it at the top of the page, in the check footer, and in the ground's own
-caption, so a screenshot carries it. `--mode move` or `--mode release`
+- **Ties go to release.** A slider that stutters is worse than one that says
+  it redraws on release, so readings on both sides of the threshold choose
+  release.
+- **Why 25%.** A host whose p95 fits 12.5 ms has room for its p95 to rise by a
+  third before a dragged control trails the drawing. The margin is a stated
+  number, in `oneground/lab/contract.py` (`MARGIN`), not a tuning.
+- **The first reading above the threshold settles it,** so measuring stops
+  there: a slow host starts in one reading, and only a host headed for redraw
+  on move takes all five.
+
+The startup line prints the chosen mode, every reading, and whether they were
+within, straddled or above the threshold. The interface shows the same at the
+top of the page, in the check footer, and in the ground's own caption, so a
+screenshot carries it. `--mode move` or `--mode release`
 overrides the choice; the caption then says it was chosen by `--mode` and what
 measurement alone would have chosen.
 

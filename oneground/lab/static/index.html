@@ -32,9 +32,13 @@
       <figcaption class="source">
         Laid out by home region: one cell per region, its vectors in id order.
         This is not a projection — the state holds no positions. Outlines mark
-        the query trace below: the routed region, the other probed regions, and
-        the regions its true neighbours live in.
+        the query trace below.
       </figcaption>
+      <ul class="outline-key source" aria-label="what the outlines mark">
+        <li><span class="key routed"></span>the region the query was routed to</li>
+        <li><span class="key probed"></span>the other regions it probed</li>
+        <li><span class="key neighbours"></span>the home regions of its true neighbours</li>
+      </ul>
     </figure>
 
     <div class="panel readout">
