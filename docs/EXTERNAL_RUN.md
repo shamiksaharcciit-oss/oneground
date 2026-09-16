@@ -112,6 +112,15 @@ publishes four more -- the semantic-sharded routing ceiling and its copy
 percentiles -- that it does not recompute, and the summary names them rather
 than calling eight "every published value".
 
+**The number of verified digests depends on where you run it, and that is
+expected.** The repository carries files the wheel does not. For
+`oneground fixture verify arxiv-smoke`, a clone verifies eight of the eleven
+listed files and a bare wheel install verifies four: `queries.npy` and the
+three ground-view tables are in the repository and not in the package. So an
+instruction printed from a clone says `digests 8 verified` where your install
+says `digests 4 verified`. Neither is a failure: nothing is contradicted, both
+exit 0, and each couldn't-check line gives the reason that file is absent.
+
 ## What the three outcomes mean
 
 **verified** — recomputed here, matches what was published, inside the
