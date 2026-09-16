@@ -958,15 +958,16 @@ function buildReceipt(values, via) {
   const release = $('release-link');
   if (release) release.href = RELEASE_URL;
 
+  // Task 022a. Only what works today from a clone with no install. The
+  // installed-package route, `oneground fixture verify`, fails on 0.1.0rc1:
+  // that wheel ships no fixture data. Task 022 changes that, and this panel
+  // changes with it.
   const pre = $('verify-cmd');
   pre.textContent = '';
-  pre.appendChild(document.createTextNode('pip install oneground\n'));
-  pre.appendChild(document.createTextNode(r.verify_command + '\n'));
-  const note = el('span', 'c',
-    '\n# checks every artifact digest against MANIFEST.sha256, then\n' +
-    '# reproduces each published value from a local rebuild.\n' +
-    '# verified / contradicted / couldn\'t-check — never rounded up.');
-  pre.appendChild(note);
+  pre.appendChild(document.createTextNode(
+    'python site/teaser/verify_teaser_data.py\n'));
+  pre.appendChild(el('span', 'c',
+    '# needs a clone of the repository and nothing else: standard library only.'));
 
   const cx = m.cross_check_vs_build3_tables;
   $('receipt-source').textContent =
