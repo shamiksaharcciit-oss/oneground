@@ -399,6 +399,21 @@ def test_a_fully_committed_corpus_uploads_nothing_synthetic():
         assert (inputs, external) == ([], []), (inputs, external)
 
 
+def _skip_unless_a_git_checkout():
+    """Skip, naming the missing .git, when this tree is not a git checkout.
+
+    Task 022. The tests that call this ask git which of the real tree's files
+    it tracks. From a GitHub archive zip, or any exported copy, there is no
+    `.git`, git cannot answer, and `git_carries` reads its silence as
+    "untracked" -- so these tests failed there on a question that has no answer
+    outside a checkout. The pod sessions they describe always run from one.
+    """
+    from oneground import environment
+    if environment.tracked_files() is None:
+        pytest.skip("not a git checkout (no .git): git cannot say which files "
+                    "it tracks, and this test is about what it tracks")
+
+
 def test_the_real_smoke_requirements_upload_exactly_the_vectors():
     """Not synthetic: this is the file the next pod session will run.
 
@@ -406,6 +421,7 @@ def test_the_real_smoke_requirements_upload_exactly_the_vectors():
     tracked, so exactly one corpus file may be uploaded. If this ever comes
     back empty, session 20260909-205151 is about to happen again.
     """
+    _skip_unless_a_git_checkout()
     from oneground.verify import runpod as rp
     from oneground import intake
     req = intake.load("requirements.smoke.yaml")
@@ -868,6 +884,8 @@ def test_the_arxiv_session_declares_a_tarball_and_a_manifest():
     # halve the run if it were wrong.
     assert env["ONEGROUND_ENGINES"] == "qdrant,pgvector"
     # The manifest has to reach the pod, and it does so only if git carries it.
+    # The fields above are checked everywhere; this half needs a checkout.
+    _skip_unless_a_git_checkout()
     from oneground.verify import runpod as rp
     carried, why = rp.git_carries("fixtures/arxiv-150k/MANIFEST.sha256")
     assert carried, why

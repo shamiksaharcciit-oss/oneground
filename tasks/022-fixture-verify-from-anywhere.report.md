@@ -478,11 +478,14 @@ to completion.
 - **A `git clone` is not needed.** GitHub's archive download of `main`
   (`main.zip`, not a git repository) plus that bare install plus the extracted
   asset verified all eight values (run 13, 7 m 50 s).
-- **A reader of the archive zip also meets a test defect.** Both identifier-scan
+- **A reader of the archive zip also meets test failures.** Both identifier-scan
   tests in `oneground/test_environment.py` call `pytest.skip` on their
   not-a-checkout branch without importing `pytest`, so from the zip, or any tree
   without `.git`, both fail with `NameError`. A checkout never reaches that
-  branch, which is why it went unseen. Fixed in the additions below.
+  branch, which is why it went unseen. Two tests in
+  `oneground/verify/test_matched.py` that ask git which files it tracks fail
+  there too. All four are fixed below: from an exported copy, the suite's only
+  failure is now the live RunPod stock test.
 - **The repository's contents are needed, by clone or by archive.** `--asset`
   supplies the vectors, queries and sample, and nothing else. The spec, the
   manifest and the ground truth come from `fixtures/` under the current
@@ -1069,7 +1072,7 @@ The affected files: 124 passed.
 **Full suite, in the checkout:** **812 passed, 0 failed** (3 m 59 s). The live RunPod plan test passed this time: EU-RO-1 had stock.
 
 **Full suite, from an exported copy of the tree with no `.git`** (what a reader
-of the archive zip runs): **3 failed, 804 passed, 5 skipped** (3 m 38 s). Skips include the two identifier-scan tests, which now skip rather than raise `NameError`. The failures: the live RunPod plan test, on GPU stock in EU-RO-1 four minutes after it passed in the checkout; and two tests in `oneground/verify/test_matched.py` that assume a git checkout (see Observed, not done).
+of the archive zip runs): **3 failed, 804 passed, 5 skipped** (3 m 38 s). Skips include the two identifier-scan tests, which now skip rather than raise `NameError`. The failures: the live RunPod plan test, on GPU stock in EU-RO-1 four minutes after it passed in the checkout; and two tests in `oneground/verify/test_matched.py` that assume a git checkout. That was the count at `ba3350c`; those two now skip, and the final count is in the last section.
 
 **`&&` in Windows PowerShell 5.1**, observed:
 
@@ -1329,19 +1332,9 @@ summary: digests 7 verified, 0 contradicted, 10 couldnt_check (6 receipt, 11 dec
 
 ### Observed, not done
 
-- **Two more tests fail only outside a git checkout,** the same class as the
-  `pytest` import. Found by the exported-copy suite run above; not fixed,
-  because the brief named the one import:
-  - `oneground/verify/test_matched.py::test_the_real_smoke_requirements_upload_exactly_the_vectors`
-    expects `queries.npy` to be excluded from the upload because git tracks
-    it. Without `.git`, nothing is tracked, so both files are listed.
-  - `…::test_the_arxiv_session_declares_a_tarball_and_a_manifest` asserts
-    `rp.git_carries("fixtures/arxiv-150k/MANIFEST.sha256")`, which answers
-    `untracked` without `.git`.
-
-  Both describe pod sessions, which run from a checkout, so the behaviour
-  under test is right. It is the tests that should skip, as the identifier
-  scans now do.
+- ~~Two more tests fail only outside a git checkout~~ **Fixed in the final
+  addition below.** At `ba3350c` this item recorded them as found and
+  unfixed.
 - **The live RunPod plan test is at the mercy of stock minute to minute.** It
   passed in the checkout run and failed in the exported-copy run started four
   minutes later: EU-RO-1 then offered L4, RTX 2000 Ada, RTX 5090 and RTX PRO
@@ -1368,6 +1361,81 @@ summary: digests 7 verified, 0 contradicted, 10 couldnt_check (6 receipt, 11 dec
 
 ### Blocked on developer (additions)
 
-1. Push `main`; the retag moves to this commit, not `c3615e1`.
+1. Push `main`; the retag moves to the final commit named in the section
+   below, not `c3615e1` or `ba3350c`.
 2. The open question above: refuse a system interpreter outright, after the
+   release?
+
+---
+
+## Final addition: the two git-dependent tests
+
+### What was done
+
+Both tests in `oneground/verify/test_matched.py` that ask git about the real
+tree now call `_skip_unless_a_git_checkout()`. When `environment.tracked_files()`
+cannot get an answer from git, the helper skips with the reason `not a git
+checkout (no .git): git cannot say which files it tracks, and this test is
+about what it tracks`. That is the same test the identifier scans use.
+
+- `test_the_real_smoke_requirements_upload_exactly_the_vectors` skips before
+  it loads anything.
+- `test_the_arxiv_session_declares_a_tarball_and_a_manifest` skips only at its
+  last step, the `git_carries` question. Its seven assertions about the
+  session's fields run everywhere, including from a zip.
+
+**Skip rather than read the tracked set another way:** an exported copy has no
+index, so nothing outside git knows what git tracks. `.gitignore` alone says
+what is ignored, not what is tracked.
+
+### Measurements
+
+The two tests, by name (`pytest -k`, `-rs`):
+
+| where | result |
+|---|---|
+| the checkout | **2 passed.** They ran; the skip does not hide them where git can answer |
+| an exported copy, no `.git` | **2 skipped**, `test_matched.py:413: not a git checkout (no .git): …` |
+
+Full suite:
+
+| where | passed | skipped | failed |
+|---|---|---|---|
+| the checkout | 812 | 0 | 0 |
+| an exported copy, no `.git` | 804 | 7 | **1** |
+
+**The one failure from the exported copy is the live RunPod plan test**, which
+is environmental and stays recorded: `PlanError: none of the requested GPU
+types is offered on SECURE in EU-RO-1 … offered here: A100 SXM, L4, RTX A4500`.
+Nothing else fails.
+
+**The seven skips from the exported copy, each with its reason:**
+- the two identifier scans (`not a git checkout; nothing to scan`);
+- these two tests;
+- three that need a local workdir under `runs/`, which is gitignored and in
+  no export (`no local arxiv-150k workdir …` in `test_end_to_end.py` and
+  `test_matched.py`, `no local workdir for either fixture` in
+  `test_claims.py`).
+
+### Observed, not done
+
+- **`runpod.git_carries` itself answers `untracked` when git cannot answer at
+  all.** Outside a checkout, `git check-ignore` and `git ls-files` both exit
+  128, and the function reads that as "untracked", the same over-read these
+  tests had. It is only called while preparing a pod session, which runs from
+  a checkout, so no run has met it; a third answer ("git could not say") would
+  close it.
+
+### Repo now contains (final addition)
+
+    oneground/verify/test_matched.py   _skip_unless_a_git_checkout(), called by the two tests
+    tasks/022-fixture-verify-from-anywhere.report.md   this section, corrected references above
+
+### Blocked on developer
+
+1. **Push `main` and retag `v0.1.0` at the commit that carries this section:**
+   the one whose subject begins `task 022: the git-dependent tests skip`. Its
+   hash is reported with the hand-off, not written here, since a commit
+   cannot contain its own hash. Rebuild the artifacts and re-run the fresh-venv check.
+2. The open question: refuse a system interpreter outright, after the
    release?
