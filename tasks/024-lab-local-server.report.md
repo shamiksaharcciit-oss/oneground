@@ -115,7 +115,9 @@ oneground lab: http://127.0.0.1:53802/?token=FJQAqKQ8V581UsRVsdIBsBi-FQ14V4REIGY
 - **`oneground/lab/test_lab.py`: 27 of 27,** including the composer tests, now run through `runs.py`.
 - **`oneground/test_environment.py` 42, `test_cli.py` 8, `models/test_conformance.py` 23, `test_packaging.py` 13:** all pass. `oneground lab` is on `UNGUARDED` with its reason, and the coverage test accepts it.
 - **Full suite** (`pytest oneground corpora`, from the worktree root): **839 passed, 3 skipped, 0 failed**, in 414.0 s. That is 16 more than task 023's 823: the server tests. The 3 skips are the same environment gates as before: no local `runs/arxiv-150k-via-characterize` verify or report workdir, at `oneground/report/test_claims.py:443`, `oneground/report/test_end_to_end.py:348` and `oneground/verify/test_matched.py:1182`.
-- **Task 020's acceptance through the refactored composer:** its unchanged acceptance script (sha256 `9fc0a0d9…`) still passes 20 of 20 on the arXiv state, and the output equals task 020's rendering in all 24 compared fields; both checks were re-run after `render_from_state.py` moved onto `runs.py`.
+- **Re-run after `render_from_state.py` moved onto `runs.py`: two checks, which prove different things.**
+  - **The published figures still reproduce.** Task 020's unchanged acceptance script (sha256 `9fc0a0d9…`) passes 20 of 20 on the arXiv state rendered through the refactored composer. This is necessary, and it is all this check shows: it reads the figures the teaser published and nothing else, so a change to any other field would pass it.
+  - **The composer's output is unchanged.** The same rendering equals task 020's `render.json` in all 24 fields task 020 wrote, across 2,000 queries (`tasks/scratch/021-render-equivalence.py`). This is what covers the fields the acceptance script does not read. It compares those 24 fields only; fields added since task 020, such as the ground's caption and ceiling, are outside it.
 - **Identifier scan:** every changed and new file scanned before the commit, and the committed tree after.
 
 ## Observed, not done
