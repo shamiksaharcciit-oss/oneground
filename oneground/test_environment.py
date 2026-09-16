@@ -508,3 +508,119 @@ def test_a_generic_account_name_is_not_an_identifier():
     """`runner` is every GitHub Actions job and an English word besides."""
     assert "runner" not in env.machine_identifiers()
     assert "root" not in env.machine_identifiers()
+
+
+# --------------------------------------------------- inside archives (022b)
+# The stackexchange-150k release tarball carried the packing machine's user
+# name and uid/gid in every header. The tree scan skipped archives by suffix
+# and the asset is not tracked, so nothing saw it. Synthetic identifiers only.
+
+def _tgz(path, members, gzip_name="", **owner):
+    """A .tgz of `members` ({name: bytes}), every header given `owner`.
+
+    The gzip member is written by hand (RFC 1952) so FNAME holds `gzip_name`
+    verbatim: `gzip.GzipFile` keeps only a basename, which would make a stored
+    path impossible to test.
+    """
+    import struct
+    import tarfile
+    import zlib
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as t:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            for k, v in owner.items():
+                setattr(info, k, v)
+            t.addfile(info, io.BytesIO(data))
+    tar = buf.getvalue()
+    flags = 8 if gzip_name else 0
+    head = struct.pack("<BBBBIBB", 0x1F, 0x8B, 8, flags, 0, 0, 255)
+    if gzip_name:
+        head += gzip_name.encode("latin-1") + b"\0"
+    deflate = zlib.compressobj(9, zlib.DEFLATED, -15)
+    body = deflate.compress(tar) + deflate.flush()
+    tail = struct.pack("<II", zlib.crc32(tar) & 0xFFFFFFFF,
+                       len(tar) & 0xFFFFFFFF)
+    with open(path, "wb") as f:
+        f.write(head + body + tail)
+    return path
+
+
+def test_an_archive_with_a_named_owner_is_caught_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        p = _tgz(os.path.join(tmp, "a.tgz"), {"fixtures/x/vectors.npy": b"\0" * 64},
+                 uid=197609, gid=197609, uname="someuser", gname="")
+        kinds = {kind for _m, kind, _d in
+                 env.archive_findings(p, identifiers={"someuser"})}
+        assert kinds == {"owner id", "owner name"}, kinds
+
+
+def test_a_numeric_owner_archive_is_clean_synthetic():
+    """What `--owner=0 --group=0 --numeric-owner` writes: 0/0, no names."""
+    with tempfile.TemporaryDirectory() as tmp:
+        p = _tgz(os.path.join(tmp, "a.tgz"), {"fixtures/x/vectors.npy": b"\0" * 64,
+                                              "fixtures/x/notes.txt": b"hello\n"},
+                 uid=0, gid=0, uname="", gname="")
+        assert env.archive_findings(p, identifiers={"someuser"}) == []
+        # `root` names nobody, and is what many archivers write for uid 0.
+        p = _tgz(os.path.join(tmp, "b.tgz"), {"fixtures/x/q.npy": b"\0"},
+                 uid=0, gid=0, uname="root", gname="root")
+        assert env.archive_findings(p, identifiers={"someuser"}) == []
+
+
+def test_a_path_in_the_gzip_header_or_a_text_member_is_caught_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        p = _tgz(os.path.join(tmp, "a.tgz"), {"fixtures/x/q.npy": b"\0"},
+                 gzip_name=r"C:\Users\someuser\build\x.tar")
+        hits = env.archive_findings(p, identifiers={"someuser"})
+        assert [d for _m, _k, d in hits if d.startswith("gzip FNAME")], hits
+        p = _tgz(os.path.join(tmp, "b.tgz"),
+                 {"logs/build.log": b"ok\nwrote /home/someuser/out\n"})
+        hits = env.archive_findings(p, identifiers={"someuser"})
+        assert [m for m, _k, _d in hits] == ["logs/build.log:2"], hits
+
+
+def test_an_unreadable_archive_is_reported_not_passed_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "broken.tgz")
+        with open(p, "wb") as f:
+            f.write(b"\x1f\x8bnot really gzip")
+        hits = env.archive_findings(p, identifiers={"someuser"})
+        assert hits and hits[0][1] == "unreadable archive, not checked", hits
+
+
+def test_the_asset_scan_says_none_when_there_is_nothing_to_scan_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        assert env.asset_archive_findings(
+            [os.path.join(tmp, "absent")], identifiers={"someuser"}) is None
+        _tgz(os.path.join(tmp, "a.tgz"), {"x": b"\0"}, uid=1000, uname="someuser")
+        found = env.asset_archive_findings([tmp], identifiers={"someuser"})
+        assert {k for _p, _m, k, _d in found} == {"owner id", "owner name"}
+
+
+def test_the_tracked_scan_opens_tracked_archives_synthetic():
+    """`smoke-small.tgz` is tracked; the walk used to skip every .tgz."""
+    import subprocess
+    with tempfile.TemporaryDirectory() as tmp:
+        _tgz(os.path.join(tmp, "small.tgz"), {"x.json": b"{}"},
+             uid=1000, uname="someuser")
+        subprocess.run(["git", "init", "-q", tmp], check=True)
+        subprocess.run(["git", "-C", tmp, "add", "small.tgz"], check=True)
+        found = env.identifier_findings(root=tmp, allowlist={})
+        assert {(p, k) for p, _n, k, _d in found} == {
+            ("small.tgz!x.json", "owner id"),
+            ("small.tgz!x.json", "owner name")}, found
+
+
+def test_no_release_asset_archive_carries_owner_metadata():
+    """Not synthetic: every archive in the asset directory on this machine.
+
+    The release tarballs are uploaded from here. An archive whose headers name
+    the account that packed it publishes that name with the release.
+    """
+    found = env.asset_archive_findings()
+    if found is None:
+        pytest.skip("no asset directory on this machine (looked for "
+                    + ", ".join(env.DEFAULT_ASSET_DIRS) + ")")
+    assert found == [], "\n".join("%s!%s  %s  %s" % f for f in found)

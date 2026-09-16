@@ -480,6 +480,117 @@ def scan_text(text, identifiers=None):
     return found
 
 
+# ----------------------------------------------- inside archives (task 022b)
+#
+# The walk below read text and skipped every archive by suffix. The
+# stackexchange-150k release tarball -- a public release asset -- carried the
+# packing machine's user name, uid and gid in every member header, and the
+# scan never looked, because it never opened a .tgz and the asset is not
+# tracked anyway. An archive is scanned for what it records about whoever made
+# it: the gzip header's stored name and comment, each member's owner ids and
+# names, member and link names, pax headers, and the text of small text
+# members (a build log is a file like any other).
+
+ARCHIVE_SUFFIXES = (".tgz", ".tar.gz", ".tar")
+
+# Where release assets are kept on a developer's machine: the directory
+# `fixture verify` reads by default. Not tracked, so the tree walk cannot see
+# it.
+DEFAULT_ASSET_DIRS = (os.path.join(os.path.expanduser("~"), "oneground-assets"),)
+
+# Members larger than this are data, not text; reading 460 MB of vectors to
+# look for a user name finds nothing and costs the whole array.
+_ARCHIVE_TEXT_LIMIT = 1 << 20
+
+
+def _gzip_header_strings(path):
+    """The FNAME and FCOMMENT a gzip header stores (RFC 1952), or []."""
+    import struct
+    out = []
+    with open(path, "rb") as f:
+        head = f.read(10)
+        if len(head) < 10 or head[:2] != b"\x1f\x8b":
+            return out
+        flags = head[3]
+        if flags & 4:                                 # FEXTRA
+            (xlen,) = struct.unpack("<H", f.read(2))
+            f.read(xlen)
+        for bit, field in ((8, "gzip FNAME"), (16, "gzip FCOMMENT")):
+            if flags & bit:
+                s = bytearray()
+                while True:
+                    b = f.read(1)
+                    if not b or b == b"\0":
+                        break
+                    s += b
+                out.append((field, s.decode("latin-1")))
+    return out
+
+
+def archive_findings(path, identifiers=None):
+    """[(member, kind, detail)] for what one tar archive records about its maker.
+
+    Owner ids other than 0 and owner names other than a generic account are
+    findings whoever they belong to: `--owner=0 --group=0 --numeric-owner` is
+    the rule, and another person's name would leak just the same. Names, pax
+    headers and small text members go through `scan_text`. An archive that
+    cannot be read is reported rather than passed -- it was not checked.
+    """
+    import tarfile
+    idents = machine_identifiers() if identifiers is None else set(identifiers)
+    out = []
+    for field, value in _gzip_header_strings(path):
+        for _n, kind, line in scan_text(value, idents):
+            out.append(("", kind, f"{field}: {line}"))
+    try:
+        with tarfile.open(path, "r:*") as t:
+            for m in t:
+                if m.uid or m.gid:
+                    out.append((m.name, "owner id",
+                                f"uid {m.uid} gid {m.gid}"))
+                for field, value in (("uname", m.uname), ("gname", m.gname)):
+                    if value and value.strip().lower() not in GENERIC_ACCOUNTS:
+                        out.append((m.name, "owner name",
+                                    f"{field} {value!r}"))
+                names = [m.name, m.linkname or ""]
+                names += [f"{k}={v}" for k, v in (m.pax_headers or {}).items()]
+                for text in names:
+                    for _n, kind, line in scan_text(text, idents):
+                        out.append((m.name, kind, line[:200]))
+                if m.isfile() and m.size <= _ARCHIVE_TEXT_LIMIT:
+                    raw = t.extractfile(m).read()
+                    if b"\0" not in raw[:8192]:
+                        for n, kind, line in scan_text(
+                                raw.decode("utf-8", "replace"), idents):
+                            out.append((f"{m.name}:{n}", kind, line[:200]))
+    except (tarfile.TarError, OSError, EOFError) as e:
+        out.append(("", "unreadable archive, not checked",
+                    f"{type(e).__name__}: {e}"))
+    return out
+
+
+def asset_archive_findings(dirs=None, identifiers=None):
+    """[(archive path, member, kind, detail)] for every archive in the asset dirs.
+
+    None when none of the directories exists: nothing was scanned, which is not
+    the same answer as "scanned and clean".
+    """
+    dirs = DEFAULT_ASSET_DIRS if dirs is None else dirs
+    existing = [d for d in dirs if os.path.isdir(d)]
+    if not existing:
+        return None
+    idents = machine_identifiers() if identifiers is None else identifiers
+    out = []
+    for d in existing:
+        for dirpath, _dirnames, filenames in os.walk(d):
+            for name in sorted(filenames):
+                if name.lower().endswith(ARCHIVE_SUFFIXES):
+                    p = os.path.join(dirpath, name)
+                    for member, kind, detail in archive_findings(p, idents):
+                        out.append((p, member, kind, detail))
+    return out
+
+
 def tracked_files(root=None):
     """Every path `git ls-files` reports, or None when git cannot answer.
 
@@ -514,9 +625,15 @@ def identifier_findings(root=None, allowlist=None):
     for rel in paths:
         if rel.replace("\\", "/") in allow:
             continue
+        full = os.path.join(root or ".", rel)
+        if rel.lower().endswith(ARCHIVE_SUFFIXES):
+            # Task 022b: opened, not skipped. `smoke-small.tgz` is tracked.
+            for member, kind, detail in archive_findings(full, idents):
+                out.append((rel.replace("\\", "/") + "!" + member, 0, kind,
+                            detail))
+            continue
         if rel.lower().endswith(_BINARY_SUFFIXES):
             continue
-        full = os.path.join(root or ".", rel)
         try:
             with open(full, "rb") as f:
                 raw = f.read()

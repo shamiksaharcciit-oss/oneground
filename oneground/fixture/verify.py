@@ -138,8 +138,8 @@ PACKAGE_FIXTURES = os.path.join(
 # preview's release and 0.1.0 at 0.1.0's.
 REPOSITORY = "https://github.com/shamiksaharcciit-oss/oneground"
 RELEASE_ASSETS = {
-    "arxiv-150k": ("arxiv-150k-v1.tgz", 483_468_013),
-    "stackexchange-150k": ("stackexchange-150k-v1.tgz", 460_106_978),
+    "arxiv-150k": ("arxiv-150k-v1.tgz", 483_467_899),
+    "stackexchange-150k": ("stackexchange-150k-v1.tgz", 460_106_909),
 }
 # What the tarball extracts to, and what the values read from it.
 ASSET_MEMBERS = ("vectors.npy", "queries.npy", "sample.jsonl.zst")

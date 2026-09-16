@@ -1034,7 +1034,8 @@ def test_a_missing_fixture_names_all_three_preconditions_not_a_bare_error():
         for key in ("fixture ", "environment ", "asset "):
             assert "\n  " + key in out, (key, out)
         # a known release asset is described even without the spec
-        assert "arxiv-150k-v1.tgz, 483,468,013 bytes" in out, out
+        name, size = fv.RELEASE_ASSETS["arxiv-150k"]
+        assert f"{name}, {size:,} bytes" in out, out
         assert "--asset" in out, out
         assert "nothing was checked" in out, out
 

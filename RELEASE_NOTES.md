@@ -93,13 +93,17 @@ download.
 
 ```
 arxiv-150k-v1.tgz
-  483,468,013 bytes
-  sha256  0b7a0209fa4085683950e4715d49597c820cadc575b4a4fe85ef2d4f5365c015
+  483,467,899 bytes
+  sha256  437ac5db45cdb2c1c8cc21707816d508981327a0152d86283151be032d3310f2
 
 stackexchange-150k-v1.tgz
-  460,106,978 bytes
-  sha256  5d2a2be15c2c062e8b0f1ca9c24520c9e326e7d580ab411fcdbb71459181a66a
+  460,106,909 bytes
+  sha256  2871c61333bbe80adf124ff64ff15831ebd593f24bf180a3ae71edf72054484e
 ```
+
+Both were packed with `--owner=0 --group=0 --numeric-owner` and `gzip -n`, so
+no header names the account or the machine that packed them. Their members are
+byte-for-byte the ones listed below.
 
 Every member digest below was streamed out of the tarball and compared against
 that fixture's `MANIFEST.sha256` in this repository.
