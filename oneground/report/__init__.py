@@ -57,7 +57,10 @@ COULDNT_CHECK = vd.COULDNT_CHECK
 
 INPUT_FILES = ["characterization.json", "build_info.json", "sample_ids.json",
                "queries_ids.json", "simulate.json", "simulate_info.json",
-               "verify.json", "verify_info.json"]
+               "verify.json", "verify_info.json",
+               # Task 026: a pre-registered prediction, when the run had one.
+               # Declared, per the kind map simulate_info.json records.
+               "prediction.json"]
 
 OUTPUT_FILES = ["report.json", "manifest.yaml", "report.html"]
 

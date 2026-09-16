@@ -11,8 +11,9 @@ claiming. Nothing here is a date.*
 
 A person who is not a retrieval engineer describes a change in plain
 words — *"store the recent documents separately"*, *"probe three regions
-instead of two for the ambiguous queries"*, *"split the biggest shard"* —
-and the system turns that into something testable on their own corpus,
+instead of two"*, *"split the biggest shard"* — and the system turns that
+into something testable on their own corpus, or says which family it would
+need,
 predicts what it will do **before** running it, runs it, and publishes a
 card saying whether the prediction held.
 
@@ -41,11 +42,14 @@ place a user would least expect it. So:
   be worse and the report says which model was used, so the difference is
   visible rather than hidden.
 - **What leaves the machine is recorded verbatim.** Every prompt sent and
-  every response received is written to the run's workdir as a receipt.
-  A user can read exactly what was transmitted. This is not optional and
-  there is no quiet mode.
+  every response received is written to the run's workdir as a *declared*
+  record, digested in its manifest. Declared, not a receipt: a model's
+  response cannot be re-derived from seeds and rules, so its bytes are
+  frozen and hashed rather than reproduced. A user can read exactly what
+  was transmitted. This is not optional and there is no quiet mode.
 - **Nothing about the corpus contents is sent.** The model sees the
-  characterization (five numbers), the current configuration, the
+  characterization (five measures, six numbers — drift is a pair), the
+  current configuration, the
   constraint set, and the user's sentence. Not vectors, not text, not
   ids. That is a hard boundary, tested.
 
@@ -62,19 +66,26 @@ anything happens with it:
 ```yaml
 policy:
   family: semantic_sharded          # one of the shipped families
+  configuration: {centroids: 256, epsilon: 0.2, probe: 2, M: 32, efSearch: 96}
   changes:
     - param: probe                  # a named parameter of that family
       from: 2
       to: 3
-      scope: queries_where_ambiguous # a named, shipped predicate
   rationale: "…"                    # the model's words, quoted, never executed
 ```
 
 The rules:
 
-- **Every field is from a shipped enumeration.** Families, parameters and
-  scopes are those oneground implements. A policy naming anything else is
-  rejected with what was named and what exists.
+- **A policy is a parameter change over a whole configuration, full
+  stop.** It names the configuration it changes, every parameter of it,
+  and has no scope. A change to a subset of queries or vectors is *this
+  proposal requires a family that does not exist*.
+- **Every field is from a shipped enumeration.** Families and parameters
+  are those oneground implements: every family declares its parameter
+  table, and only keys whose role is *parameter* — the architecture, not a
+  constant the family fixes, a run-level setting or a build switch — may
+  change. A policy naming anything else is rejected with what was named
+  and what exists.
 - **No new code paths.** A policy selects among behaviours that already
   exist and are already tested. It cannot introduce a routing rule the
   simulator has not implemented — if the idea needs one, the answer is
@@ -94,8 +105,9 @@ check. The whole product is built on refusing that.
 
 ### 2.3 What a pre-registered prediction is
 
-**Answer: a signed statement, written before the run, of what would count
-as the proposal working — precise enough to be wrong.**
+**Answer: a hashed statement, written before the run and cited by the
+run's inputs, of what would count as the proposal working — precise enough
+to be wrong.**
 
 Before anything executes, the system writes to the workdir:
 
@@ -110,9 +122,15 @@ Before anything executes, the system writes to the workdir:
 
 Three rules that make it a prediction rather than a description:
 
-- **It is written and hashed before the run.** The card cites both
-  hashes; a prediction edited after a result is a different prediction
-  and the hash says so.
+- **It is written before the run, and the run cites it.** The run records
+  the prediction's sha256 in its own inputs as it starts. A prediction
+  written or edited afterwards does not match that citation and is not
+  judged. The hash says what the prediction is; the run's inputs citing it
+  are what say it came first — a hash on its own shows a change, not an
+  order.
+- **A predicted change smaller than the calibration tolerance is rejected
+  before the run, with the tolerance named.** A smaller difference cannot
+  be told from noise, so the prediction could never be checked.
 - **The model proposes the thresholds; the user approves them.** A model
   that sets its own bar after seeing the corpus would set it low.
 - **"It will be better" is rejected.** A prediction with no metric, no
@@ -127,8 +145,12 @@ in its own text.**
 A card carries: the plain sentence, the policy, the prediction with its
 hash, the measured result per predicted metric, the side-effect budget
 against its bounds, and one of three outcomes — **held**, **did not
-hold**, **couldn't check** — computed by the same verdict rules the report
-uses, under the same claim invariant.
+hold**, **couldn't check** — computed by a two-run verdict rule of its own,
+under the same claim invariant. A prediction is about a difference between
+two configurations measured in the same run, so the report's absolute
+thresholds do not apply to it: a delta within the calibration tolerance of
+the predicted threshold is *couldn't check*, as two recalls that close are
+indistinguishable in the report.
 
 What a card may never say:
 
@@ -153,8 +175,10 @@ corpora like yours.
 - No corpus content is sent to any model, ever.
 - The model's output is never executed. It selects among shipped
   behaviours or it is rejected.
-- No prediction without a metric, a direction and a threshold.
-- No card without a hash of the prediction that preceded the run.
+- No scopes: a policy changes a whole configuration.
+- No prediction without a metric, a direction and a threshold, and none
+  below the calibration tolerance.
+- No card without the prediction's hash, cited by the run's inputs.
 - No claim beyond the sample, the corpus and the single run.
 - No suppression of failed cards.
 

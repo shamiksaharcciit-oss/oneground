@@ -19,14 +19,29 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..base import (BuiltIndex, Candidates, Config, Footprint,
-                    estimate_memory_bytes, exact_over, resolve_deterministic,
-                    single_threaded_faiss)
+from ..base import (BUILD, BuiltIndex, Candidates, Config, Footprint,
+                    Param, declare_parameters, estimate_memory_bytes,
+                    exact_over, resolve_deterministic, single_threaded_faiss)
 
 NAME = "single_node_hnsw"
 
 DEFAULT_GRID = {"M": (16, 32), "efSearch": (64, 128, 256)}
 EF_CONSTRUCTION = 200
+
+# Every key this family reads (task 026). Ranges are validity bounds, not
+# recommendations. `efConstruction` is a real setting here -- `build` reads it
+# -- but the generated grid always builds at EF_CONSTRUCTION, so it is pinned
+# by an `include` entry, never swept.
+PARAMETERS = declare_parameters(NAME, (
+    Param("M", int, minimum=1, swept=True,
+          note="HNSW links per node"),
+    Param("efSearch", int, minimum=1, swept=True,
+          note="search beam width"),
+    Param("efConstruction", int, minimum=1,
+          note="build beam width; pinned by include, not swept"),
+    Param("deterministic", bool, role=BUILD,
+          note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
+))
 
 
 @dataclass

@@ -46,7 +46,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..base import (BuiltIndex, Candidates, Config, Footprint,
+from ..base import (BUILD, CONSTANT, BuiltIndex, Candidates, Config,
+                    Footprint, Param, declare_parameters,
                     estimate_memory_bytes, exact_over, merge_candidates,
                     resolve_deterministic, single_threaded_faiss)
 
@@ -56,6 +57,26 @@ SHARD_DEPTH = 30
 EF_CONSTRUCTION = 200
 
 DEFAULT_GRID = {"M": (32,), "efSearch": (96,)}
+
+# Every key this family reads, and the two it fixes (task 026). Unlike
+# semantic_sharded, this family never read `shard_depth` from a config: its
+# per-shard depth is max(SHARD_DEPTH, k), computed in `search`. The simulator
+# used to add the key anyway, where it was ignored.
+PARAMETERS = declare_parameters(NAME, (
+    Param("shards", int, minimum=1, swept=True,
+          note="N shards by seeded hash; every query fans out to all"),
+    Param("M", int, minimum=1, swept=True,
+          note="HNSW links per node, per shard"),
+    Param("efSearch", int, minimum=1, swept=True,
+          note="search beam width, per shard"),
+    Param("shard_depth", int, role=CONSTANT,
+          fixed=f"max({SHARD_DEPTH}, k), computed per search",
+          note="not read from the config"),
+    Param("efConstruction", int, role=CONSTANT, fixed=EF_CONSTRUCTION,
+          note="every shard is built at EF_CONSTRUCTION"),
+    Param("deterministic", bool, role=BUILD,
+          note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
+))
 
 
 def shard_of(vector_id, n_shards, seed):

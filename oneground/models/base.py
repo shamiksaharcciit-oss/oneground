@@ -94,6 +94,130 @@ def single_threaded_faiss(enabled=True):
         faiss.omp_set_num_threads(prev)
 
 
+# --------------------------------------------------------------------------
+# parameter tables (task 026)
+# --------------------------------------------------------------------------
+# Until 026 a configuration key no family read was accepted, folded into the
+# label, and silently ignored: `probez: 3` in a requirements file produced a
+# config called `semantic_sharded[...,probez=3]` measured exactly like one
+# without it. A proposal loop built on that would publish a result for a
+# change that was never applied. So every family declares the keys it reads,
+# and a configuration naming anything else is refused, with the declared set.
+
+# What a key is to a family.
+PARAMETER = "parameter"    # the architecture; the only role a policy changes
+RUN = "run"                # set per run by the simulator, uniform across it
+BUILD = "build"            # how the index is built, not what it is
+CONSTANT = "constant"      # fixed inside the family; refused in any config
+
+ROLES = (PARAMETER, RUN, BUILD, CONSTANT)
+
+
+class ParameterError(ValueError):
+    """A configuration names or sets a key its family does not accept."""
+
+
+@dataclass(frozen=True)
+class Param:
+    """One declared key.
+
+    `minimum`/`maximum` are validity bounds -- what the family can build at
+    all -- not recommendations. `swept` says whether the family's `configs()`
+    reads a requirements grid for it; a declared key that is not swept can
+    still be pinned by an `include` entry. `fixed` is a constant's value, for
+    the message that refuses it.
+    """
+
+    name: str
+    type: type
+    role: str = PARAMETER
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    swept: bool = False
+    fixed: Any = None
+    note: str = ""
+
+
+# family name -> {key: Param}. Filled by each family at import.
+PARAMETER_TABLES: Dict[str, Dict[str, Param]] = {}
+
+
+def declare_parameters(family, params):
+    """Register a family's parameter table. Returns it, keyed by name."""
+    table = {}
+    for p in params:
+        if p.role not in ROLES:
+            raise ValueError(f"{family}.{p.name}: unknown role {p.role!r}")
+        if p.name in table:
+            raise ValueError(f"{family}.{p.name} declared twice")
+        table[p.name] = p
+    PARAMETER_TABLES[family] = table
+    return table
+
+
+def parameter_table(family):
+    try:
+        return PARAMETER_TABLES[family]
+    except KeyError:
+        raise ParameterError(
+            f"no parameter table for family {family!r}; declared: "
+            f"{', '.join(sorted(PARAMETER_TABLES)) or 'none'}") from None
+
+
+def _describe_table(family, table, roles=None):
+    names = sorted(n for n, p in table.items()
+                   if roles is None or p.role in roles)
+    return f"{family} declares: {', '.join(names) or 'nothing'}"
+
+
+def check_value(family, param, value):
+    """A problem with one value for one declared key, or None."""
+    import numbers
+    where = f"{family}.{param.name}"
+    if param.role == CONSTANT:
+        return (f"{where} is a constant fixed at {param.fixed} inside the "
+                f"family; it is not configurable (given {value!r})")
+    if param.type is bool:
+        ok = isinstance(value, bool)
+    elif param.type is int:
+        ok = (isinstance(value, numbers.Integral)
+              and not isinstance(value, bool))
+    elif param.type is float:
+        ok = isinstance(value, numbers.Real) and not isinstance(value, bool)
+    else:                                             # pragma: no cover
+        ok = isinstance(value, param.type)
+    if not ok:
+        return (f"{where} must be {param.type.__name__}, not "
+                f"{type(value).__name__} {value!r}")
+    if param.minimum is not None and value < param.minimum:
+        return f"{where} must be at least {param.minimum} (given {value!r})"
+    if param.maximum is not None and value > param.maximum:
+        return f"{where} must be at most {param.maximum} (given {value!r})"
+    return None
+
+
+def parameter_problems(family, params):
+    """Every problem with a configuration's keys and values, as sentences."""
+    table = parameter_table(family)
+    problems = []
+    for key in sorted(params):
+        param = table.get(key)
+        if param is None:
+            problems.append(f"{family} has no parameter {key!r}. "
+                            + _describe_table(family, table))
+            continue
+        problem = check_value(family, param, params[key])
+        if problem:
+            problems.append(problem)
+    return problems
+
+
+def validate_params(family, params):
+    problems = parameter_problems(family, params)
+    if problems:
+        raise ParameterError("; ".join(problems))
+
+
 def resolve_deterministic(config, override=None):
     """Explicit argument wins, then the config, then the project default."""
     if override is not None:
@@ -116,13 +240,37 @@ class Config:
     params: Dict[str, Any]
     label: str
 
+    def __post_init__(self):
+        # Task 026: however a Config is made -- `make`, or directly, as the
+        # simulator does to add `shard_depth` -- its keys are the family's.
+        validate_params(self.family, self.params)
+
     @staticmethod
     def make(family, params):
         bits = ",".join(f"{k}={params[k]}" for k in sorted(params))
         return Config(family=family, params=dict(params),
                       label=f"{family}[{bits}]")
 
+    def declares(self, key):
+        """Whether this config's family declares `key` at all -- including a
+        constant it fixes and refuses."""
+        return key in parameter_table(self.family)
+
+    def accepts(self, key):
+        """Whether a value for `key` may be set: declared, and not a
+        constant. The question a caller adding a key has to ask."""
+        param = parameter_table(self.family).get(key)
+        return param is not None and param.role != CONSTANT
+
     def get(self, key, default=None):
+        """A declared key's value. An undeclared key is refused, naming the
+        declared ones: reading a key the table does not list is how a family
+        comes to depend on a setting nobody can validate."""
+        table = parameter_table(self.family)
+        if key not in table:
+            raise ParameterError(
+                f"{self.family} does not declare {key!r}. "
+                + _describe_table(self.family, table))
         return self.params.get(key, default)
 
 
@@ -142,7 +290,41 @@ class ConfigSpace:
     include: List[Dict[str, Any]] = field(default_factory=list)
 
     def for_family(self, family):
-        return dict(self.grid.get(family) or {})
+        """This family's grid, refused where a key would be ignored.
+
+        A grid key the family does not declare, or declares but does not
+        sweep, used to vanish: `configs()` loops over the keys it knows, so
+        `efConstruction: [400]` in a single_node_hnsw grid built every config
+        at 200 and said nothing (task 026).
+        """
+        grid = dict(self.grid.get(family) or {})
+        table = parameter_table(family)
+        problems = []
+        for key in sorted(grid):
+            param = table.get(key)
+            if param is None:
+                problems.append(f"{family} has no parameter {key!r}. "
+                                + _describe_table(family, table))
+            elif param.role == CONSTANT:
+                problems.append(check_value(family, param, grid[key]))
+            elif not param.swept:
+                problems.append(
+                    f"{family}.{key} is declared but not swept: its "
+                    f"configs() reads no grid for it, so the values would be "
+                    f"ignored. Pin it with an `include` entry instead. "
+                    + _describe_table(family, {n: p for n, p in table.items()
+                                               if p.swept}))
+            else:
+                values = grid[key]
+                if not isinstance(values, (list, tuple)):
+                    values = [values]
+                for v in values:
+                    problem = check_value(family, param, v)
+                    if problem:
+                        problems.append(problem)
+        if problems:
+            raise ParameterError("; ".join(problems))
+        return grid
 
     def included_for(self, family):
         out = []

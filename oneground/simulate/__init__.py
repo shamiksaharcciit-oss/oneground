@@ -51,6 +51,7 @@ import numpy as np
 
 from .. import intake
 from ..models import Config, ConfigSpace, UnknownFamily, get as get_model
+from ..models.base import ParameterError
 from ..receipts import (library_versions, round_floats, sha256_file,
                         write_json_stable, write_manifest)
 from ..sample import loaders
@@ -196,7 +197,12 @@ def plan_sweep(req, seed):
             model = get_model(fam)
         except UnknownFamily as e:
             raise SimulateError(str(e)) from None
-        cfgs = _pinned_first(model, space, fam)
+        try:
+            cfgs = _pinned_first(model, space, fam)
+        except ParameterError as e:
+            # Task 026: a grid or include naming a key the family does not
+            # read is refused before anything is measured, not ignored.
+            raise SimulateError(str(e)) from None
         if per_family is not None and len(cfgs) > per_family:
             for c in cfgs[per_family:]:
                 dropped.append({
@@ -231,6 +237,21 @@ def shard_depth_for(ks):
     return max(30, max(ks))
 
 
+def _cite_prediction(workdir):
+    """`{"file", "sha256", "read"}` for a prediction in the workdir, or None.
+
+    Read at the start of `run`, so the digest is of the file as it stood
+    before anything was measured.
+    """
+    from ..proposals.prediction import PREDICTION_NAME
+    path = os.path.join(workdir, PREDICTION_NAME)
+    if not os.path.exists(path):
+        return None
+    return {"file": PREDICTION_NAME, "sha256": sha256_file(path),
+            "read": "at the start of the run, before any configuration was "
+                    "measured"}
+
+
 def _with_shard_depth(config, depth):
     """A copy of `config` carrying `shard_depth`, with the label unchanged.
 
@@ -238,7 +259,10 @@ def _with_shard_depth(config, depth):
     a run and recorded once in `simulate_info.json`; folding it into every
     label would churn every row id for a value that never varies within a run.
     """
-    if "shard_depth" in config.params:
+    # Task 026: only a family that reads it. hash_sharded computes its own
+    # depth and single_node_hnsw has no shards; the key used to be added to
+    # both and ignored.
+    if not config.accepts("shard_depth") or "shard_depth" in config.params:
         return config
     return Config(family=config.family,
                   params={**config.params, "shard_depth": int(depth)},
@@ -296,6 +320,13 @@ def run(requirements_path, log_fn=log):
             "architectures on a sample that has already been characterized; "
             f"run this first:\n\n    oneground characterize "
             f"{requirements_path}\n")
+
+    # Task 026. A pre-registered prediction is cited by the run's own inputs:
+    # its sha256 is read here, before any configuration is measured, and
+    # written into simulate_info.json. A prediction written or edited after
+    # this point does not match the citation, and the two-run verdict refuses
+    # to judge it.
+    cited_prediction = _cite_prediction(workdir)
 
     sim = req.data.get("simulate") or {}
     budget = sim.get("budget") or {}
@@ -376,7 +407,10 @@ def run(requirements_path, log_fn=log):
 
     versions, torch_info = library_versions(log=log_fn)
     info = {
-        "kind": {"simulate.json": "receipt", "simulate_info.json": "declared"},
+        "kind": dict({"simulate.json": "receipt",
+                      "simulate_info.json": "declared"},
+                     **({cited_prediction["file"]: "declared"}
+                        if cited_prediction else {})),
         "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
         "python_version": platform.python_version(),
@@ -397,10 +431,12 @@ def run(requirements_path, log_fn=log):
         "stopped_after_config": stopped_at,
         "requirements_file": {"path": os.path.abspath(requirements_path),
                               "sha256": sha256_file(requirements_path)},
+        "prediction": cited_prediction,
     }
     write_json_stable(os.path.join(workdir, "simulate_info.json"), info)
 
     present = [f for f in CHARACTERIZE_FILES + SIMULATE_FILES
+               + ([cited_prediction["file"]] if cited_prediction else [])
                if os.path.exists(os.path.join(workdir, f))]
     write_manifest(workdir, present)
 
@@ -467,6 +503,8 @@ def _centroid_cache(base, seed, log_fn):
     cache = {}
 
     def context_for(config):
+        if not config.accepts("centroids"):
+            return None
         n = config.get("centroids")
         if n is None:
             return None

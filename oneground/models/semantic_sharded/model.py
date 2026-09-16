@@ -37,7 +37,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..base import (BuiltIndex, Candidates, Config, Footprint,
+from ..base import (BUILD, CONSTANT, RUN, BuiltIndex, Candidates, Config,
+                    Footprint, Param, declare_parameters,
                     estimate_memory_bytes, exact_over, merge_candidates,
                     resolve_deterministic, single_threaded_faiss)
 
@@ -67,6 +68,30 @@ DEFAULT_GRID = {
     "M": (32,),
     "efSearch": (96,),
 }
+
+# Every key this family reads, and the one it deliberately does not (task
+# 026). `shard_depth` is set per run by the simulator from the ks it reports.
+# `efConstruction` is fixed for every shard: declared so that naming it gets
+# "a constant" rather than "no such parameter", and refused in any config,
+# since a config carrying it would be labelled as if it varied.
+PARAMETERS = declare_parameters(NAME, (
+    Param("centroids", int, minimum=1, swept=True,
+          note="k-means regions"),
+    Param("epsilon", float, minimum=0.0, swept=True,
+          note="closure: copy a vector into every region within (1+eps)"),
+    Param("probe", int, minimum=1, swept=True,
+          note="regions searched per query"),
+    Param("M", int, minimum=1, swept=True,
+          note="HNSW links per node, per shard"),
+    Param("efSearch", int, minimum=1, swept=True,
+          note="search beam width, per shard"),
+    Param("shard_depth", int, role=RUN, minimum=1,
+          note="candidates taken from each probed shard; set by simulate"),
+    Param("efConstruction", int, role=CONSTANT, fixed=EF_CONSTRUCTION,
+          note="every shard is built at EF_CONSTRUCTION"),
+    Param("deterministic", bool, role=BUILD,
+          note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
+))
 
 
 @dataclass

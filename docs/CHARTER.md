@@ -252,6 +252,9 @@ are what rule that out.
   exist on Kaggle) to show how model-dependent the recommendation is.
 
 ### Phase 5 — Proposals (Q2 2027)
+- Planned, not shipped. [PROPOSALS.md](PROPOSALS.md) is the position written
+  before the code, not a description of anything that runs: no command
+  translates an idea, runs a proposal or publishes a card.
 - Tier-1 (parametric) proposal loop: plain-language idea → translated
   policy (visible, editable) → adversarial review → pre-registered
   prediction → run → card, pass or fail.
