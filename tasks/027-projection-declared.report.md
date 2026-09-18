@@ -186,6 +186,57 @@ canvas 900×900 projected and 688×688 by region.
 - **Two scan tests confuse "not a checkout" with "git is not runnable."**
   Below; `main`'s file, outside this brief.
 
+## A check that would have proved the wrong thing
+
+Recorded prominently because it was caught before anything was spent, and
+because the failure would have been invisible: a green result, on a real pod,
+for a claim the run never tested.
+
+**What the script did.** `027_acceptance.py` compares the lab's ground against
+the teaser's `base.bin`. On this laptop no state carried a projection, so the
+script read the declared parquet and *attached* the columns itself before
+drawing — which is right here, and is why the laptop run proves the **drawing**
+path.
+
+**What that would have done on a pod.** The pod session exists to prove the
+**emit** path: that `simulate --emit-state` writes those columns correctly at
+150,000 vectors. But the script attached the projection unconditionally. Run
+against a pod-emitted state it would have **overwritten the columns `simulate`
+had just written**, drawn from the parquet instead, and printed `0 and 0` —
+the same answer, from the same source, having never read what the run emitted.
+The session would have cost real money to re-prove a thing already proved, and
+the report would have said the emit path was verified.
+
+Nothing would have failed. That is the whole point of recording it: a check
+that silently substitutes its own input for the one under test does not go red,
+it goes green for the wrong reason.
+
+**The fix.** The script now uses the state's own columns where they exist, says
+which it used, and refuses if an emitted column differs from the declared file
+it was supposed to be written from:
+
+```
+        projection: READ FROM THE STATE as emitted
+        emitted column == the declared file: True
+```
+
+against a state carrying them, and
+
+```
+        projection: ATTACHED here (this state emitted none)
+```
+
+against task 020's. Both still `0 and 0`. `027-acceptance.json` gains
+`projection_emitted_by_simulate`, so the artifact records which of the two ran
+rather than leaving it to the log.
+
+**The general shape**, which is the part worth keeping: *a verification that
+can supply its own input will eventually be pointed at a case where the input
+is the thing being tested.* The same class as task 025's "a 200 says nothing
+about whether the script that consumes it ran", and as the identifier scan
+reporting a green skip while scanning nothing. In all three the check was
+honest about what it measured and silent about what it had quietly replaced.
+
 ## A defect the environment hid
 
 Recorded because it is the kind that makes a green suite mean less than it
@@ -242,6 +293,14 @@ merge.
 - **A pod run of `simulate --emit-state` on arXiv 150k with the projection
   declared**, to prove the emit path end to end at scale. Everything else about
   it is proved; this is the one step this machine cannot take.
+  **Prepared and priced, awaiting your `y`:**
+  `sessions/027-emit-state-arxiv.yaml`, with
+  `requirements.arxiv-150k.projection.pod.yaml` and
+  `corpora/run_027_emit_state.sh`. `oneground pod plan` resolves it live to
+  RTX PRO 4000 (Blackwell) in EU-RO-1, derived from the `vecbench` volume, at
+  **$0.50-$0.57/hr**, confirmed at the top of the range: **up to $0.57** for
+  the one-hour cap, inside `max_usd $2.00`. Uploads 8.32 MB against the 50 MB
+  cap; the 460 MB corpus is read from the volume, not sent.
 - **The fixture finding above** — 35 region and 40 copy-count disagreements in
   `ground_view_base.parquet` — for the main stream, as you said you would route.
 - **Whether `requirements.arxiv-150k.yaml` should declare the projection.** It
