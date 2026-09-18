@@ -69,10 +69,30 @@ on one view is the value the other answers at.
   redraws. In **redraw on move** it follows the control. Which one you get is
   measured on your machine at startup: see the mode caption below.
 
-**The ground** draws one cell per region, and inside it the vectors whose home
-is that region, in id order, coloured by how many regions hold a copy of each.
-It is a layout, not a map — the state holds no positions, and the page says so
-under the drawing. Beside it:
+**The ground** draws every vector, coloured by how many regions hold a copy of
+it at the current ε. It has two layouts, and where the run carries a declared
+projection a control above the picture switches between them. They answer
+different questions, which is why both are kept:
+
+| | what it shows | what it is good for |
+|---|---|---|
+| **Projection** | every vector at its declared 2-D position, with a ring marking each region at the mean position of its own vectors | the shape of the corpus: where the dense parts are, where the boundaries fall, which regions sit together |
+| **By region** | one cell per region, and inside it the vectors whose home it is, in id order | which region a vector belongs to, and how full each region is — it places a vector by its region and by nothing else |
+
+**The projection is declared, not measured.** It is the 2-D placement the
+fixture publishes, which its own spec calls illustrative: regions, distances
+and copy counts were all computed in the full space, and nothing on the
+picture was measured from where the points are. The drawing says so itself,
+under the picture and in its caption, so a screenshot carries it. Neither the
+lab nor any view can compute from those coordinates — the array a view is
+handed refuses arithmetic. See `docs/STATE.md`, "The declared projection".
+
+**A run without one** shows only the cell layout, the control is hidden, and
+the `positions` row under "what this drawing says about itself" reads
+`couldnt_check` with the reason. A projection is never a precondition for the
+lab.
+
+Beside the picture:
 
 - four readouts — vectors copied, storage, p99 copies, routing ceiling@10 —
   each with a line saying what it means. They recount as ε moves.
@@ -94,10 +114,20 @@ region it routed to, how many neighbours lie outside it, and — at a simulated 
 
 The trace itself is four hops: scored against the centroids, routed and probed
 with the reason for each probe, its ten true neighbours and where they live,
-and what the probed regions returned. Under it the ground is drawn again with
-the routed region, the other probed regions and the neighbours' regions
-outlined, and a key saying which outline is which. Outlines are drawn in a
-gutter around each cell, so no outline ever covers a vector.
+and what the probed regions returned. Under it the ground is drawn again,
+marked for this query, in whichever layout the ground is showing — with a key
+that names the marks actually on screen, because they differ between the two:
+
+- **On the projection:** a ring at the routed region, rings at the other
+  probed regions, each true neighbour ringed and louder where it lives outside
+  the routed region, and the query itself as a cross. The query's position is
+  declared like the rest — it is the mean of its own true neighbours'
+  positions, because a query was never projected and has no position of its
+  own.
+- **By region:** the routed region, the other probed regions and the regions
+  the neighbours live in are outlined. Outlines are drawn in a gutter around
+  each cell, so no outline ever covers a vector. There is no mark for the
+  query, because a query has no home region to put one in.
 
 **The ε rule, as you meet it.** Move ε and the geometry follows immediately:
 copies, the histogram, storage, p99, shard sizes and the routing ceiling are

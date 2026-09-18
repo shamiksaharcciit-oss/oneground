@@ -78,10 +78,9 @@ it.
 
 - **The vectors.** A state file holds ids, regions, distances and scores, not
   embeddings.
-- **2-D positions.** The teaser places points with a UMAP projection that the
-  fixture spec declares illustrative. It is not a measurement and the simulator
-  does not produce one, so the ground renders copy counts per point without
-  positions.
+- **A projection of its own.** The simulator never fits one. Where a run
+  *declares* a projection it is carried, labelled, as three columns — see
+  "The declared projection" below — and nothing is ever computed from it.
 - **Text and metadata.** Titles and categories belong to the corpus, not to
   what the architecture did.
 
@@ -120,6 +119,137 @@ With the field in place, every arXiv figure rendered from state matched what
 the teaser published: crispness, storage, the copies histogram, and the routed
 region and outside count for all 2,000 queries. The comparison is in
 `tasks/020-simulator-state.report.md`.
+
+---
+
+## The declared projection (task 027)
+
+The ground used to be a grid of region cells, captioned "a layout, not a map:
+the state holds no positions", because the 2-D projection the teaser draws is
+declared illustrative by the fixture spec and so was never emitted as state.
+The contract was doing its job, and the consequence was that the instrument
+refused to draw the picture the product is sold on. The developer's decision
+on 18 September: **the projection becomes a declared column, labelled, and the
+ground draws it.**
+
+### Three columns, one read from a file
+
+| column | shape | what it is |
+|---|---|---|
+| `assignment.projection` | (N, 2) float32 | where to draw each base vector |
+| `route.projection` | (Q, 2) float32 | where to draw each query |
+| `partition.projection` | (R, 2) float32 | where to draw each region |
+
+Only the first comes from a file. The other two are **derived by the pipeline
+at emit time**, and that is not an implementation convenience — both are
+arithmetic over projected coordinates, which no view may do:
+
+- **A query has no position.** The fixture's projection was fitted on base
+  vectors; projecting a query into it would be a new computation in a space
+  the run does not use. It is drawn at the mean of its own true neighbours'
+  positions, which is what the teaser draws. Checked against
+  `ground_view_queries.parquet`: identical, float32 for float32.
+- **A centroid is not a base vector either.** A region is drawn at the mean
+  position of the vectors whose home it is. A region with no home vectors gets
+  NaN, not the origin — the origin is a real place.
+
+All three are additive: `state_version` is unchanged, and a state written
+before them simply lacks them.
+
+### Declared, and recorded as such
+
+`corpus.sample.projection.path` in the requirements, digested with the other
+inputs. Read once before anything is measured, so a projection that does not
+fit the corpus stops the run in a second rather than after an hour — a row
+count that does not match is refused rather than padded, truncated or
+reordered, because a placement that does not line up draws every point in
+somebody else's place and looks fine.
+
+`state_info.json` records the source path, its sha256 and size, the row count,
+the method, seed and library where the requirements declare them, the query
+placement rule and its `k`, and the fixture spec's own sentence verbatim: *2-D
+placement is illustrative; regions, distances and copy counts are computed in
+the full space.* Where the requirements do not declare a method or seed it
+says `couldnt_check` and why.
+
+Two formats, because the two corpora that have one differ: `.npy` (N, 2), and
+`.parquet` with `x` and `y` columns — which is how `arxiv-150k` ships it,
+inside `ground_view_base.parquet`. `pyarrow` is imported only for the second
+and only when asked, since it is in the `[view]` extra.
+
+**Never a precondition.** With no projection declared, `state_info.json`
+records `kind: absent` with the reason, the states carry no positions, and the
+lab falls back to the cell layout with its own caption.
+
+### What a view may do with it, and what it may not
+
+A vector column can simply be withheld — a view does not need one. A
+projection cannot: drawing the picture *is* passing these numbers to a mark.
+So the rule moves from "you cannot have it" to **"you cannot compute with
+it"**, and it is enforced twice.
+
+**At run time.** `contract.Positions` is the array a view is handed. Every
+ufunc and array function raises `MeasuredFromProjection`, so a difference, a
+scaling, a norm, a mean, a matmul, a comparison and a stack all fail at the
+line where they are written. Indexing, slicing, iteration and `.tolist()`
+work, because that is what drawing needs, and a slice stays a `Positions`, so
+taking the x column does not launder the refusal.
+
+**Statically.** `guard._projection_violations` binds the names a view module
+takes from a projection column and flags those names in arithmetic, a
+comparison, or a numpy statistic. Naming the columns alone would be useless: a
+view that draws them mentions them legitimately, in `reads` and in the
+subscript that reads them.
+
+**The stated limit** is the vector rule's: `np.asarray(p)` returns a plain
+array, and a view determined to measure could call it. This makes the mistake
+impossible to make by accident and obvious to see in review.
+
+**Why the rule is sharper here than anywhere else.** A projection is
+illustrative and the fixture spec says so. A figure measured from it would be
+a second measurement, in a space nothing else in the run uses, that can
+disagree with the table — and it would arrive wearing a picture, which is the
+most convincing form a wrong number can take.
+
+### The caption is part of the drawing
+
+`contract.draw` refuses a drawing that read a projection and does not say so.
+The words are checked, not a flag, because the words are what a screenshot
+carries:
+
+> Positions are a declared projection, illustrative: nothing on this picture
+> was measured from where the points are. Regions, distances and copy counts
+> are computed in the full space.
+
+The check is on the columns actually read, so a view that stops drawing
+positions stops needing the sentence. The `positions` row in the ground's
+gaps changes from `couldnt_check` to `declared`; without a projection it stays
+`couldnt_check` and now says what happens instead.
+
+### Epsilon does not move a point
+
+All three columns are `UNCHANGED` in `ON_EPSILON`. Epsilon decides which
+regions hold a copy of a vector, which is its colour; it has nothing to say
+about where it is drawn. Both of the lab's layouts are therefore built once
+and only chosen between afterwards.
+
+### Checked against the teaser
+
+At epsilon 0.20, over all 150,000 arXiv vectors, compared by id against
+`site/teaser/data/base.bin`:
+
+| | |
+|---|---|
+| maximum coordinate difference | **0** (bit-identical) |
+| copy-count disagreements | **0** |
+| home-region disagreements | **0** |
+
+`base.bin` was written by `corpora/export_teaser_data.py` from the fixture
+build's `projection.npy`; the state's positions come from
+`ground_view_base.parquet`, written by `corpora/export_ground_view.py` from
+that same file by a different code path into a different format. Copy counts
+come from neither — the ground recounts them from the state's own stored
+distances. Task 020's acceptance script still passes 20 of 20.
 
 ---
 
