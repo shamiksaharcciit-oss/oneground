@@ -285,8 +285,16 @@ for this family across machines.
 - It does mean **a user reproducing the fixture on their own machine may not
   get the published `storage_amplification` to six decimals**, and the fixture
   verification's tolerances are what decides whether that reads as verified or
-  contradicted. That is worth checking against the declared tolerances; I have
-  not.
+  contradicted. **Answered, by the developer on 18 September: the fixture's
+  tolerances are 0.02 on the ratios and these deltas are ~1.3e-5, so a rebuild
+  reports `verified`. The published claim holds.** Three orders of margin: this
+  is a defect in the reproducibility of the bytes, not in the correctness of
+  the values, and those are different things.
+- **What is incomplete is the fixture's stated reason for byte differences**,
+  which names embedding non-determinism and not this. There are two
+  independent sources and the fixture documents one, so the explanation will
+  mislead exactly the person trying to work out why their rebuild differs.
+  Main-stream, with the defect above; not this task's.
 - The lab is unaffected. Positions are declared and read from a file, so they
   are bit-identical everywhere; the ground's colours are recounted from
   whatever the state holds, and are correct for that state.
