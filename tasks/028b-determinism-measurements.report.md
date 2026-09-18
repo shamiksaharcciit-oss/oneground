@@ -16,12 +16,15 @@ agreement. `main` was not touched.
 
 Two things about the repo that were not there when 028 was written:
 
-* **The 029 brief is now on `main`.** While 028b was starting, the developer
-  checked out `main` and cherry-picked `7c13582` onto it as `e2c9a01`. The
-  file is byte-identical in the two commits (`git diff 7c13582 e2c9a01 --
-  tasks/029-kmeans-determinism.md` is empty), so `task-028` still carries its
-  own copy and a later merge has two commits adding the same content. Not a
-  conflict; worth knowing before the merge.
+* **The 029 brief moved off this branch, twice.** While 028b was starting the
+  developer cherry-picked `7c13582` onto `main` as `e2c9a01`; by the time
+  028c looked again, `main` was back at `570f07d` — frozen, as it should be —
+  and the brief was on a new `task-029` at `e610275`, branched from
+  `570f07d`, with `e2c9a01` left dangling. **This paragraph said the brief
+  was on `main`; corrected in 028c.** The file is byte-identical in `7c13582`
+  and `e610275`, so `task-028` and `task-029` each add the same content and a
+  later merge of both has two commits doing it. Not a conflict while they stay
+  identical; worth knowing before the merge.
 * Nothing else moved. `tasks/020-simulator-state.md` is still the only
   untracked file.
 

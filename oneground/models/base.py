@@ -49,8 +49,38 @@ at efSearch=10. `single_node_hnsw` therefore builds single-threaded by
 default (`deterministic=True`, via `single_threaded_faiss`), and pays a
 measured build-time penalty for it -- see `docs/MODELS.md`.
 
-`hash_sharded` and `semantic_sharded` build `IndexHNSWFlat` per shard and have
-not been converted; they take the same helper when someone does.
+`hash_sharded` and `semantic_sharded` build `IndexHNSWFlat` per shard and were
+converted in task 015 (`dc85609`): each wraps its whole build --- the k-means,
+the closure and every shard's adds --- in the same `single_threaded_faiss`
+helper. These two lines said they had *not* been converted until task 028c,
+a week after they had; task 029's brief then quoted the stale sentence as a
+recorded gap, which is the cost of a comment that outlives what it describes.
+
+What `deterministic=True` guarantees, per family, all of it measured on one
+machine (tasks 012, 015, 028b):
+
+    single_node_hnsw    two builds from the same (vectors, config, seed)
+                        return the same ids. Task 012: 37% of ids differed at
+                        efSearch=10 without it.
+    semantic_sharded    the k-means, the epsilon closure and every shard's
+                        graph are built under one thread, so the regions, the
+                        copy counts and each shard's ids are the same. Task
+                        028b: two builds of one 5,219-vector shard differed on
+                        3.455% of returned ids at efSearch=96 under four
+                        threads, and were identical under one.
+    hash_sharded        the same wrapper over the same kind of per-shard
+                        build; converted by the same commit, not separately
+                        measured.
+
+What it does not guarantee: the same numbers on a *different* machine. A pod
+run and a laptop run produced different k-means centroids from the same seed
+and the same vectors -- task 027's report, on the `task-020` branch until it
+merges, gives distances differing by up to 0.004463 and 35 of 150,000 home
+regions moving --
+and single threading does not address that. Within one machine the k-means is
+stable: two runs of it are bit-identical, threaded or not (028b). Searching an
+already-built index is deterministic either way (028b). The cross-environment
+question is open.
 """
 
 import contextlib

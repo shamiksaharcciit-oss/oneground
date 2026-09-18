@@ -598,7 +598,23 @@ test did.
    `1fe8e26`, separating the code revision from the run. The first two are
    minutes of compute here. I stopped at the decomposition — which layer —
    because the brief is the tier-1 loop.
-7. **A proposal card would not currently show a reader that the index layer
+7. **The baselines these cards cite were measured by the pre-015 build.**
+   Task 028b established it: `dc85609` (task 015, 2026-09-10T16:47Z) put both
+   sharded families' builds under one thread, and this workdir's sweep ran
+   2026-09-09T16:47:12Z — a day earlier, multi-threaded. Every
+   `semantic_sharded` and `hash_sharded` row in
+   `runs/arxiv-150k-via-characterize/simulate.json` is therefore one draw from
+   a build that was not deterministic; the `single_node_hnsw` row is not
+   affected, that family having been converted earlier.
+
+   **Nothing here is wrong.** Those rows sit inside every published tolerance,
+   and the two cards' verdicts are decided at margins more than 800 times the
+   difference. What it means is narrower: a card that compares a new
+   single-threaded row against an old multi-threaded one carries that
+   difference inside its delta, at the 1e-5 to 1e-3 scale 028b measured.
+   Re-sweeping this workdir would remove it from future cards. **That is the
+   developer's decision and the re-sweep was not run.**
+8. **A proposal card would not currently show a reader that the index layer
    moves.** Its delta is a difference of two `recall_at_10` numbers; the
    ceiling and the loss split are in `card.json:measured` but no sentence
    reads them. If the determinism work concludes that index-layer movement is
