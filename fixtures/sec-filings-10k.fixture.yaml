@@ -1,0 +1,560 @@
+# sec-filings-10k — the third public fixture (task 030).
+#
+# Mirrors arxiv-150k and stackexchange-150k in shape so the three can be read
+# side by side: same size, same model, same five measures, same tolerances,
+# same two reference configurations. Everything that differs, differs because
+# the corpus does — and here one thing differs by construction, which is the
+# point of building it.
+#
+# The other two fixtures cannot measure chunking. An arXiv abstract is one
+# chunk; a Stack Overflow question is usually one chunk. Where you cut them
+# does not arise. A 10-K runs 50 to 150 pages and is structurally marked
+# (Item 1, Item 1A, Item 7), so where you cut it matters and whether the cut
+# landed on a boundary is measurable rather than couldn't-check.
+#
+# This fixture exists to answer two questions honestly, and it was written
+# down before the corpus existed so that neither could be arranged:
+#
+#   1. How much of a filing's structure can actually be recovered from filer
+#      HTML? Extraction quality varies wildly across filers, so the fixture
+#      reports what its rule REJECTED, by category, beside what it accepted.
+#      A fixture that silently drops a third of its corpus is measuring its
+#      own parser.
+#
+#   2. How much duplication is in the corpus before anyone chunks it?
+#      Boilerplate repetition in filings is intrinsic — a 10-K repeats last
+#      year's 10-K at length, and filers repeat each other's risk factors
+#      nearly verbatim. Without that baseline, a chunking strategy's
+#      duplicate rate cannot be told apart from the corpus's own.
+#
+# status: planned — every receipt value below is TO_BE_FILLED until the
+# canonical build fills it. The rules, seeds, thresholds and cutoffs are
+# fixed here first, in writing, precisely so that the choice of corpus, rule
+# and cutoff is settled BEFORE any number exists.
+
+fixture:
+  id: sec-filings-10k
+  version: 1
+  status: planned
+  purpose: chunking
+  license_notice: >
+    SEC filings are compulsory public disclosures held in EDGAR, a database
+    operated by the U.S. Securities and Exchange Commission, which states of
+    this material: "Anyone can access and download this information for
+    free." The SEC asserts no copyright over EDGAR content and attaches no
+    licence conditions to its reuse; the conditions it does impose are
+    conditions of ACCESS — a declared user agent and a request rate — and
+    they are recorded in `source` and honoured by the builder.
+
+    Stated precisely rather than loosely: this fixture does not claim 17
+    U.S.C. § 105, which covers works authored by the U.S. Government. A 10-K
+    is authored by the registrant and filed with the government, not written
+    by it. What is relied on is that the material is a public record placed
+    in a government database that the agency publishes for free reuse without
+    licence terms, which is the basis on which EDGAR corpora are redistributed
+    generally. No stronger claim is made, and any residual interest of a
+    registrant in its own filed text is untested rather than dismissed.
+
+    Every record keeps its accession number, from which the canonical filing
+    URL — and therefore the filer, the date and the original document — is
+    reachable.
+
+source:
+  name: EDGAR 10-K annual reports
+  provider: U.S. Securities and Exchange Commission
+  repository: https://www.sec.gov/Archives/edgar/
+  index_url: https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{q}/form.idx
+  document_url: https://www.sec.gov/Archives/{path}   # the form.idx File Name column
+  project_url: https://github.com/shamiksaharcciit-oss/oneground
+  form_type: 10-K
+  includes_10q: false
+  includes_10q_note: >
+    10-Q is deliberately excluded. A quarterly report is shorter and, more to
+    the point, numbers its items under a different schema — Part I Items 1 to
+    4 and Part II Items 1 to 6, against the annual report's Items 1 to 16.
+    Mixing them would put two structural conventions in one corpus and make
+    "the chunk cut through a section" mean two different things in the same
+    measure. 10-K alone supplies more filings than the target needs.
+  date_range: ['2022-01-01', '2024-12-31']
+  quarters: 12
+  date_range_note: >
+    Three calendar years rather than two because 10-K filings cluster hard in
+    the first quarter — 6,016 in 2022 QTR1 against 400 in QTR3 — and because
+    the target needs headroom against an unknown rejection rate. 21,287
+    filings leaves room for a rejection rate up to 53% before 10,000 accepted
+    is at risk.
+  index_rows_10k: 22036
+  distinct_accessions: 21287
+  distinct_ciks: 8481
+  co_registrant_rows: 749
+  co_registrant_note: >
+    A combined filing is indexed once per co-registrant — American Electric
+    Power files one 10-K under eight CIKs, same accession and date, the paths
+    differing only in the CIK directory — so the selection dedupes by
+    accession. 749 of 22,036 index rows are these.
+  filings_by_year: {2022: 7538, 2023: 7118, 2024: 6631}
+  # manifest_digest over the twelve quarterly index files; see
+  # sessions/sec-filings-quarters.sha256. Computed by the project's own
+  # oneground.receipts.manifest_digest so a disk read and a network read
+  # cannot disagree about it.
+  snapshot_sha256: 114f40559fb7354ec0eb0d14aa3015dbc796a312cb69ef74aa34c0bb35ada159
+  quarter_digests: sessions/sec-filings-quarters.sha256
+  # sha256 over the sorted list of the 21,287 selected accession numbers, one
+  # per line. Re-derivable from the twelve indexes, so a receipt.
+  selection_sha256: 59f847d74d0167950169ffb633ac960b9ec31f391aa04dc1e9a001701fb6ab3f
+  resolved_on: '2026-09-19'
+  access: streamed
+  access_note: >
+    One request per filing, and nothing is stored. The complete submission at
+    edgar/data/<cik>/<accession>.txt is SGML-wrapped, each part a <DOCUMENT>
+    with a declared <TYPE>; the 10-K is the first part, about 1 kB in. The
+    reader stops at the end of that part and abandons the rest of the
+    response, so a 16 MB submission costs the ~3.4 MB the filing occupies and
+    no primary-document lookup is needed. Measured over a seeded probe of 12
+    filings: mean 3.35 MB read, the 10-K first in every one.
+  digest_scope: index-digested-in-full; documents digested as fetched
+  digest_scope_note: >
+    The twelve index files are streamed through a hash end to end, so
+    snapshot_sha256 covers every byte of the declared source. Each fetched
+    filing is digested as it arrives and its digest recorded per record, so
+    the corpus is re-fetchable and checkable filing by filing. This is a
+    stronger receipt than stackexchange-150k's, whose sharded parquet source
+    can only be verified from pinned metadata before reading.
+  user_agent: oneground/0.1 (shamik.saha.rcciit@gmail.com)
+  user_agent_note: >
+    EDGAR requires a declared user agent carrying a reachable contact, and
+    refusing to declare one is not an option. SEC's published form is
+    "Sample Company Name AdminContact@<sample company domain>.com".
+
+    This is published deliberately: the access policy asks for a contact that
+    can be reached, and a fixture whose source cannot be re-fetched is not
+    reproducible. **A REBUILDER MUST SUBSTITUTE THEIR OWN ADDRESS.** Nobody
+    should put load on EDGAR under this one. See `rebuild`.
+
+    A URL may not appear in it. Measured against the live service on
+    2026-09-19: any user agent containing a domain is refused with 403, with
+    or without a scheme and with or without a leading "+"; the same string
+    carrying only the e-mail address is served. The project URL is carried in
+    `source.project_url` instead.
+
+    What an undeclared agent costs is worse than an error. Before refusing,
+    SEC's edge serves the document with a bot-detection <script> injected
+    into it carrying a random nonce, so the same static filing returned
+    2,161,793 bytes under a contactless agent and 2,161,429 bytes under a
+    declared one, differing from byte 963. Two fetches under the declared
+    agent are byte-identical. An undeclared build would therefore produce a
+    corpus whose per-document digests are irreproducible, with nothing
+    raising and nothing failing.
+  rate_limit: 10 requests/second (SEC's stated maximum)
+  rate_limit_used: 8 requests/second
+  retry_note: >
+    EDGAR returns a transient 503 under load — one of the first 12 filings
+    probed. The builder retries with bounded exponential backoff and counts a
+    filing that never arrives as the rejection category `fetch_failed`, so a
+    network failure is reported rather than quietly shrinking the corpus.
+  kind: declared
+
+# ---------------------------------------------------------------------------
+# The extraction rule. Written down in full in oneground/sample/sec_filings.py
+# and summarised here; the module is the normative text.
+extraction:
+  module: oneground/sample/sec_filings.py
+  rule: >
+    (1) the SGML <TEXT> body of the <DOCUMENT> whose <TYPE> is 10-K;
+    (2) comments, <script>, <style>, inline-XBRL <ix:header> and display:none
+    containers removed, these being hidden XBRL facts rather than the filing a
+    reader sees; (3) each <table> dropped if at least 60% of its cells are
+    numeric or empty, else linearised with " | " between cells; (4) block tags
+    become newlines and every other tag a space; (5) entities unescaped,
+    NBSP and Unicode punctuation normalised under NFKC; (6) runs of spaces
+    collapsed to one and runs of blank lines to one.
+
+    Nothing is lower-cased, nothing is stemmed, and no boilerplate is removed.
+    Boilerplate is a property this fixture exists to report, so stripping it
+    would delete the finding.
+  table_numeric_fraction: 0.60
+  table_note: >
+    A 10-K is mostly financial tables, and a linearised balance sheet embeds
+    as a run of numbers with no sentence in it. Dropping every table instead
+    would delete real narrative, because filers lay prose out in grids. The
+    threshold is declared, not tuned.
+  sections:
+    rule: >
+      Item headings are found line-anchored, allowing a space inside the word
+      ITEM and a newline before its number — filers letter-space headings
+      across inline elements, so the word arrives as "It em 7." or "I T EM 6."
+      or "ITEM\n1A.". A run of six or more candidates spaced under 800
+      characters apart and beginning in the first 20% of the text is the
+      contents page and is dropped whole; runs break where the Item order
+      steps backwards, because a contents page never counts down and the
+      body's own Item 1 follows it closely. Of the survivors, the longest
+      subsequence in increasing canonical Item order is kept, which drops
+      cross-references. A candidate with no separator after its number whose
+      title continues in lower case is a sentence, not a heading.
+    canonical_items: ['1','1A','1B','1C','2','3','4','5','6','7','7A','8','9',
+                      '9A','9B','9C','10','11','12','13','14','15','16']
+    titles_published: true
+    titles_note: >
+      Section titles are published beside the numbers because an Item number
+      does not mean one thing across years. Item 1C is Cybersecurity in
+      filings from 2024, but Caterpillar and Lincoln Electric both used it in
+      2022 for Executive Officers, with 1,714 and 3,716 characters of real
+      content, when the SEC had not yet allocated the number.
+  rejections:
+    fetch_failed:     the submission could not be retrieved after retries
+    no_10k_document:  no <DOCUMENT> in the submission declares <TYPE>10-K
+    not_html:         the 10-K part is not HTML (plain text or encoded binary)
+    decode_failed:    the bytes decode under neither utf-8 nor cp1252
+    too_short:        the extracted text is under 20,000 characters
+    no_sections:      no Item heading survived contents-page filtering
+    too_few_sections: fewer than 6 distinct Items were recovered
+    no_core_section:  none of Items 1, 1A, 7 or 8 was recovered
+    sections_empty:   the Items were recovered but carry no prose
+  sections_empty_note: >
+    The category that would have done the most damage if it did not exist. An
+    asset-backed issuer files a structurally perfect 10-K under General
+    Instruction J: Items 1 to 15 all present, in order, correctly numbered,
+    every one of them reading "Omitted." A rule that counts headings accepts
+    it — 22 Items recovered from 45,915 characters, the best-structured
+    filing in the development sample — and what lands in the corpus is a
+    cover page and a list of Item titles.
+  development_sample:
+    filings: 40
+    seed: 20260919
+    accepted: 38
+    rejected: 2
+    rejection_rate: 0.050
+    reasons: {sections_empty: 2}
+    items_recovered: {min: 20, p50: 22, max: 23}
+    chars: {min: 87171, p50: 368329, max: 840926, mean: 353615}
+    note: >
+      A seeded development sample of 40 filings, used to write the rule and
+      not part of the corpus. Both rejections are asset-backed trusts and
+      both are correct. This is not the fixture's rejection rate: it is 40
+      filings, and the build measures all of them.
+  # Filled by the canonical build, over every filing it examined.
+  examined: TO_BE_FILLED
+  accepted: TO_BE_FILLED
+  rejection_rate: TO_BE_FILLED
+  rejections_by_category: TO_BE_FILLED
+  kind: receipt
+
+sampling:
+  target_documents: 10000
+  rule: >
+    The 21,287 distinct accessions are shuffled once under `seed`, examined in
+    that order, and the first 10,000 that the extraction rule accepts become
+    the corpus. The examined count is published beside the accepted count and
+    the rejections are reported by category.
+
+    Examine-until-target rather than examine-everything-then-sample, for a
+    reason of cost rather than statistics: each filing costs about 3.4 MB
+    streamed, so examining all 21,287 transfers roughly 71 GB to keep 10,000.
+    The order is a uniform random permutation, so the rejection rate over the
+    examined prefix is an unbiased estimate of the rate over the population,
+    and the accepted set is a uniform sample of the acceptable filings.
+
+    No balancing by filer, sector, size or year. The real skew — that large
+    filers file longer documents, that Q1 carries most of the year, that some
+    companies appear in all three years — is a property of the corpus, not
+    noise, and the last of those is the one this fixture is for.
+  seed: 20260919
+  deduplicate_by: accession
+  drift_cutoff: '2024-01-01'
+  drift_cutoff_note: >
+    The year boundary closest to a 60/40 split of the source population:
+    cumulative filings reach 35.4% by 2023-01-01 and 68.9% by 2024-01-01, so
+    2024 is 8.9 points off and 2023 is 24.6. Chosen from the index before the
+    corpus was built; the split realised on the built sample is published in
+    `findings` rather than used to move the cutoff.
+  documents_sha256: TO_BE_FILLED
+  kind: receipt
+
+# ---------------------------------------------------------------------------
+# What this fixture ships that the other two do not.
+chunking:
+  is_a_baseline_not_a_recommendation: true
+  statement: >
+    This fixture ships one chunking because the five standard measures need a
+    vector set. Shipping one is not endorsing it. It is the thing a strategy
+    has to beat — chosen to be the obvious naive default rather than a good
+    idea — and no result here should be read as advice about how to chunk.
+    Comparing strategies against it is task 031's job, not this fixture's.
+  baseline:
+    size_tokens: 512
+    overlap_tokens: 64
+    stride_tokens: 448
+    min_final_chunk_tokens: 32
+    tokenizer: the embedding model's own (BAAI/bge-base-en-v1.5)
+    splitting_rule: >
+      Fixed-size over the document's token stream, stride 448, taking the
+      character span from the first token's start offset to the last token's
+      end offset. Deterministic: the cut points are a function of the text and
+      the tokenizer alone, and no seed enters. A trailing window under 32
+      tokens is dropped rather than shipped as a fragment.
+    section_blind: true
+    section_blind_note: >
+      On purpose, and this is the design decision that makes the fixture
+      useful. The fixture publishes every document's section offsets so a
+      strategy can be scored on whether it cut through one; a baseline that
+      respected those boundaries would already be the treatment. This one
+      knows nothing about Item headings and will cut through them. How often
+      it does is published below, and it is the number a section-aware
+      strategy has to improve on.
+    size_note: >
+      512 because it is bge-base-en-v1.5's max_seq_length, so no chunk is
+      truncated at embedding time and chunk size is not confounded with
+      truncation. 64 of overlap because some overlap is near-universal in
+      practice and zero would make the baseline a straw man. Neither number
+      was tuned against any measurement.
+  chunks_total: TO_BE_FILLED
+  chunks_per_document: TO_BE_FILLED
+  chunks_crossing_a_boundary: TO_BE_FILLED
+  kind: declared
+
+# Per document: its sections with character offsets into the published text,
+# so a chunking strategy can be scored on whether it cut through one.
+section_statistics:
+  offsets_published: true
+  offsets_index: the extracted text exactly as published in documents.jsonl.zst
+  sections_per_document: TO_BE_FILLED
+  section_chars: TO_BE_FILLED
+  item_coverage: TO_BE_FILLED
+  kind: receipt
+
+# Per corpus, BEFORE any chunking: the baseline every chunking measure must be
+# read against. See oneground/measures/duplicates.py.
+near_duplicates:
+  measure: lexical Jaccard over 5-word shingles, exact on LSH candidates
+  why_not_cosine: >
+    docs/CHUNKING.md defines near-duplicate rate on chunk vectors at a cosine
+    threshold, and task 031 will use it. It cannot be the baseline those
+    comparisons are read against: a chunk vector exists only once a chunking
+    has been chosen, so a duplicate rate computed from chunk vectors already
+    contains the strategy under test. This measure depends on no embedding
+    model and no chunk size. It is reported as a lexical rate and never
+    converted into a cosine one.
+  shingle_words: 5
+  num_perm: 128
+  bands: 32
+  rows: 4
+  seed: 20260919
+  thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  primary_threshold: 0.80
+  thresholds_note: >
+    The range was fixed from a pilot before the build, so that no cutoff could
+    be moved afterwards to suit a result. Three filers' consecutive 10-Ks
+    (Nicholas Financial, Medallion Financial, Henry Schein) score Jaccard 0.49
+    to 0.62 between adjacent years and 0.34 to 0.50 two years apart, so this
+    corpus's repetition is massive and sits below 0.80; reporting only high
+    cutoffs would have reported no duplication at all. The pilot is three
+    companies and is not the rate.
+  exactness: >
+    MinHash with LSH banding proposes candidate pairs and exact Jaccard scores
+    every candidate; only exact scores are reported. LSH proposes a true pair
+    with probability 1.000 at 0.80 and 0.874 at 0.50, so rows below 0.999
+    recall are published as a lower bound with the recall beside them, never
+    rounded up to a rate.
+  rate_by_threshold: TO_BE_FILLED
+  kind: receipt
+
+queries:
+  count: 2000
+  rule: >
+    2,000 chunks held out from the sample before ground truth, drawn uniformly
+    under `seed`, and used as queries against the remaining base.
+
+    This differs from arxiv-150k and stackexchange-150k, where the query is
+    the record's title and so is much shorter than the document, and the
+    difference is stated rather than hidden: a 10-K has no title-like field,
+    and manufacturing a short query for each chunk would need a model, which
+    would put a model inside the fixture's ground truth. Queries here are
+    therefore the same length as base records. This is chunk-to-chunk
+    self-retrieval, the construction docs/CHUNKING.md calls path B, and it
+    measures retrievability rather than answer-bearing search.
+  seed: 20260920
+  queries_sha256: TO_BE_FILLED
+  kind: receipt
+
+embedding:
+  model: BAAI/bge-base-en-v1.5
+  weights_sha256: c7c1988aae201f80cf91a5dbbd5866409503b89dcaba877ca6dba7dd0a5167d7
+  library: sentence-transformers
+  library_version: TO_BE_FILLED
+  max_seq_length: 512
+  normalize: true
+  dtype: float32
+  dimension: 768
+  batch_size: 128
+  device: TO_BE_FILLED
+  vectors_sha256: TO_BE_FILLED
+  kind: receipt
+
+ground_truth:
+  method: exact k-NN, brute force (faiss IndexFlatIP)
+  k: 100
+  metric: inner_product
+  base_excludes_queries: true
+  base_size: 150000
+  base_size_note: >
+    150,000 chunk vectors, sampled under `sampling.seed` from every chunk the
+    baseline chunking produces, so that this fixture is the same size as
+    arxiv-150k and stackexchange-150k and the three read line for line. That
+    comparability is the design principle of the pair, and it is why the
+    corpus is not shipped as every chunk it has.
+  ground_truth_sha256: TO_BE_FILLED
+  kind: receipt
+
+# Tier 2 analogy: how a user's corpus is matched to this fixture.
+analogy:
+  kind: declared
+  corpus_type: filings
+  text_length: long
+  structure: marked
+  time_ordered: true
+  topics_trend: false
+  languages: [en]
+  dimension: 768
+  embedding_model: BAAI/bge-base-en-v1.5
+  model_family: bge
+
+characterization:
+  intrinsic_dimensionality:
+    estimator: TwoNN
+    value: TO_BE_FILLED
+    tolerance: 0.5
+  boundary_crispness:
+    definition: >
+      Fraction of base vectors whose second-nearest centroid distance exceeds
+      1.20 x their nearest centroid distance, under k-means with 256 centroids
+      (seed 20260919, 20 iterations). Higher is crisper.
+    value: TO_BE_FILLED
+    tolerance: 0.02
+  ambiguous_query_rate:
+    definition: fraction of queries with d2 <= 1.10 * d1 against the same centroids
+    value: TO_BE_FILLED
+    tolerance: 0.02
+  skew_top10_share:
+    definition: share of base vectors in the 10 largest centroid regions
+    value: TO_BE_FILLED
+    tolerance: 0.02
+  drift:
+    definition: >
+      Centroids trained on chunks from filings dated before 2024-01-01;
+      recall@10 at one-region routing measured separately on queries whose
+      source filing is before / after that date. Reported as the pair.
+    value_before: TO_BE_FILLED
+    value_after: TO_BE_FILLED
+    tolerance: 0.02
+  kind: receipt
+
+# The same two configurations the other fixtures publish, at the same
+# parameters, so the three are comparable line for line.
+reference_results:
+  single_node_hnsw:
+    params: {M: 32, efConstruction: 200, efSearch: 128}
+    recall_at_10: TO_BE_FILLED
+    tolerance: 0.01
+  semantic_sharded:
+    params: {centroids: 256, epsilon: 0.2, probe: 2, M: 32, efSearch: 96}
+    recall_at_10: TO_BE_FILLED
+    routing_ceiling: TO_BE_FILLED
+    storage_amplification: TO_BE_FILLED
+    p50_copies: TO_BE_FILLED
+    p95_copies: TO_BE_FILLED
+    p99_copies_per_vector: TO_BE_FILLED
+    tolerance: 0.01
+  kind: receipt
+
+# The comparison this fixture is not, named so that its absence is a decision
+# rather than an oversight.
+contrast:
+  fixture: eur-lex
+  status: not built
+  what_it_is: >
+    EU legislation from EUR-Lex: long, public, and far better structured than
+    a 10-K — articles, paragraphs and recitals numbered by law rather than by
+    convention, with none of the filer-by-filer variance that makes this
+    corpus's extraction rate a measurement in its own right.
+  what_it_would_settle: >
+    Whether the chunking results here are about long documents or about
+    BADLY MARKED long documents. On this corpus a section boundary is
+    recovered by a rule that 5% of filings defeat; on EUR-Lex the structure is
+    given. If a section-aware strategy beats the baseline on both, the finding
+    is about length. If it beats it only on EUR-Lex, the finding is that
+    structure-aware chunking needs structure it can trust, and the honest
+    advice for a corpus of filings is different.
+  why_not_this_one: >
+    Better structured but a weaker retrieval story: nobody searches EU
+    legislation the way an analyst searches filings, so a recall number on it
+    is harder to connect to a decision anyone makes. Same pattern as arXiv and
+    StackOverflow, where the finding was the two corpora disagreeing.
+  kind: declared
+
+projection:
+  method: UMAP
+  params: {n_neighbors: 30, min_dist: 0.08, metric: cosine, seed: 20260919}
+  color_by: the Item the chunk's midpoint falls in
+  note: >
+    The projection is illustrative. Regions and closure bands drawn on it are
+    computed in the full 768-d space, then mapped onto the projection.
+  kind: declared
+
+rebuild:
+  command: oneground fixture build sec-filings-10k
+  substitute_the_user_agent: >
+    A rebuilder MUST set their own contact in `source.user_agent` before
+    running the build. The address published here is the maintainer's, present
+    because EDGAR requires a reachable contact and because a source that
+    cannot be re-fetched is not a reproducible fixture. It is not an invitation
+    to run this build under someone else's name, and a rebuild that does so
+    puts load on a public service under a contact that did not consent to it.
+  note: >
+    The build is network-bound on EDGAR and honours 8 requests/second. A
+    rebuild transfers roughly 3.4 MB per filing examined and stores none of it.
+
+artifacts:
+  directory: fixtures/sec-filings-10k/
+  files:
+    - documents.jsonl.zst        # 10,000 filings: text, sections with offsets, digest
+    - chunks.jsonl.zst           # the sampled 150,000 chunks, with their spans
+    - vectors.npy
+    - queries.npy
+    - query_ids.json
+    - ground_truth.npy
+    - characterization.json
+    - near_duplicates.json
+    - section_statistics.json
+    - build_info.json
+    - projection.npy
+    - ground_view_base.parquet
+    - ground_view_queries.parquet
+    - ground_view_centroids.parquet
+    - MANIFEST.sha256
+
+verification:
+  command: oneground fixture verify sec-filings-10k
+  passes_when: >
+    Every artifact digest matches MANIFEST.sha256, and every characterization
+    and reference_results value reproduces within its stated tolerance from a
+    local rebuild of ground truth and the two reference configurations.
+  outcomes: [verified, contradicted, couldnt_check]
+  note: >
+    couldnt_check is reported when a dependency version differs from the
+    pinned one; it is never rounded up to verified. The large artifacts ship
+    as a release asset, so a clone without them reports couldnt_check for
+    every value that needs them — pass `--asset` to point at an extracted copy.
+
+changelog:
+  - build: 1-prep
+    date: '2026-09-19'
+    note: >
+      Specification written. Source resolved live against EDGAR and pinned:
+      twelve quarterly indexes, 2022-01-01 to 2024-12-31, 22,036 10-K rows and
+      21,287 distinct accessions, streamed and digested without being stored.
+      The extraction rule, the baseline chunking and the near-duplicate
+      measure are declared here and implemented in
+      oneground/sample/sec_filings.py and oneground/measures/duplicates.py,
+      with 27 tests. Canonical build pending.
+
+findings: []
