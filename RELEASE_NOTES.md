@@ -289,6 +289,10 @@ redistributed in either asset — the vectors are, the weights are not.
 - **Tier 2 issues no verdicts.** A declared corpus gets a fixture analogy and
   capacity arithmetic, both labelled, and nothing else. See
   [docs/INTAKE.md](docs/INTAKE.md).
+- **`pytest` is the supported test runner.** Running a test file directly
+  (`python oneground/fixture/test_verify.py`) collects only the tests defined
+  above that file's `__main__` block, which in several modules is a fraction of
+  them; CI and the release checks run `pytest`, which collects every test.
 
 ## Provenance
 

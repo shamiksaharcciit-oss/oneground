@@ -3,7 +3,10 @@
 ## Repo state expected vs found
 
 Expected `main` at `df84e2d` (022e), clean apart from the untracked
-`tasks/020-simulator-state.md`: found, both. `v0.1.0` still on `872e7a6`.
+`tasks/020-simulator-state.md`: found, both. `v0.1.0` was on `1fe8e26`, where
+the developer had retagged it after 026c, and was not moved by this task.
+(Corrected in 022g: this line first said `872e7a6`, carried over from the 026c
+report instead of read from `git rev-parse v0.1.0`.)
 
 Expected `_main` and its `if __name__ == "__main__"` block in the middle of
 `oneground/test_environment.py`, above the task-014, 017 and 022b sections, and
