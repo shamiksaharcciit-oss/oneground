@@ -1037,3 +1037,49 @@ def test_the_grounds_mark_order_is_points_then_bars_synthetic():
                       *_state_with_projection())
     assert [m.kind for m in d.marks] == ["point", "bar", "region"], \
         [m.kind for m in d.marks]
+
+
+def test_the_trace_draws_on_the_same_placement_synthetic():
+    """Step 4: the trace lands on the ground's picture rather than beside it.
+
+    Its mark order is also pinned, for the reason the ground's is: the
+    interface takes them positionally, scored / link / neighbours. The query's
+    own placement is appended as a fourth mark, never inserted.
+    """
+    head, cols = _state_with_projection()
+    n_q = int(head["n_queries"])
+    rng = np.random.default_rng(127)
+    cols = dict(cols)
+    cols["route.projection"] = rng.normal(size=(n_q, 2)).astype(np.float32)
+    head = dict(head)
+    head["columns"] = dict(head["columns"])
+    head["columns"]["route.projection"] = {
+        "dtype": "float32", "shape": [n_q, 2],
+        "meaning": "DECLARED 2-D placement"}
+
+    eps = contract.EpsilonSet.make(0.2, (0.2,))
+    d = contract.draw(QueryTraceView(0, 3, eps=eps), head, cols)
+
+    kinds = [m.kind for m in d.marks]
+    assert kinds[:3] == ["region", "link", "point"], kinds
+    assert kinds[3] == "point", kinds          # the query's own placement
+    neighbours = d.marks[2]
+    assert "x" in neighbours.data and "y" in neighbours.data
+    assert len(neighbours.data["x"]) == len(neighbours.data["vector_id"])
+    assert d.marks[3].data["query"] == [0]
+    assert d.figures["positions"] == "declared"
+    # and it says what the positions are, as the ground does
+    assert "declared projection" in d.caption
+    assert "illustrative" in d.caption
+
+
+def test_a_trace_without_a_projection_draws_as_before_synthetic():
+    """A projection is never a precondition: the trace without one is task
+    021b's trace, unchanged, and says nothing about positions."""
+    head, cols = _state()
+    d = contract.draw(QueryTraceView(0, 3, eps=contract.EpsilonSet.make(
+        0.2, (0.2,))), head, cols)
+    assert [m.kind for m in d.marks] == ["region", "link", "point"]
+    assert "x" not in d.marks[2].data
+    assert "positions" not in d.figures
+    assert d.caption == ""

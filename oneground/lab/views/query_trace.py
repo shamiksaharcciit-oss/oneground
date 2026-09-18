@@ -44,6 +44,9 @@ K_TRUE = 10
 NON_SQUARED = "euclidean (non-squared)"
 
 
+from .ground import PLACEMENT
+
+
 class QueryTraceView(View):
     name = "query_trace"
     reads = (
@@ -54,6 +57,8 @@ class QueryTraceView(View):
         # the recall panel's columns, read only at a simulated epsilon
         "candidates.offsets", "candidates.cand_id", "candidates.cand_score",
         "candidates.survived_dedupe", "candidates.true_rank",
+        # declared placements, drawn and never computed with (task 027)
+        "assignment.projection", "route.projection",
     )
 
     def __init__(self, query=15, k=K_TRUE, eps=None, ambiguity=None):
@@ -163,6 +168,25 @@ class QueryTraceView(View):
                            "color": "outside_routed_region"}),
         ]
 
+        # The same declared placement the ground draws, so the trace lands on
+        # the picture rather than beside it. Read, indexed, listed: the
+        # contract hands these over as `Positions`, which refuses arithmetic,
+        # so this is the whole of what the view can do with them.
+        placed = state.has("assignment.projection")
+        if placed:
+            xy = state["assignment.projection"]
+            marks[2].data["x"] = [float(xy[int(v), 0]) for v in ids]
+            marks[2].data["y"] = [float(xy[int(v), 1]) for v in ids]
+            marks[2].encoding.update({"x": "x", "y": "y"})
+            figures["positions"] = "declared"
+            if state.has("route.projection"):
+                qxy = state["route.projection"]
+                marks.append(Mark(
+                    "point",
+                    data={"query": [q],
+                          "x": [float(qxy[q, 0])], "y": [float(qxy[q, 1])]},
+                    encoding={"id": "query", "x": "x", "y": "y"}))
+
         # ---- recall: only at the epsilon this state was simulated at ----
         if at_state:
             panel = self._recall(state, q, k, want, ids)
@@ -176,8 +200,9 @@ class QueryTraceView(View):
                     "declared for this configuration"),
                 "action": self.eps.action or self._default_action(h, want),
             }
+        caption = PLACEMENT if placed else ""
         return Drawing(view=self.name, marks=marks, figures=figures,
-                       gaps=gaps, panels={"recall": panel})
+                       gaps=gaps, panels={"recall": panel}, caption=caption)
 
     @staticmethod
     def _ranked_from_candidates(state, q, k):
