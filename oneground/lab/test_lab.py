@@ -1016,3 +1016,24 @@ def test_a_projected_drawing_must_caption_its_positions_synthetic():
     else:
         raise AssertionError("a projected drawing without the sentence was "
                              "not refused")
+
+
+def test_the_grounds_mark_order_is_points_then_bars_synthetic():
+    """The interface and `render_from_state.py` take the ground's marks
+    positionally. Task 027 first put the new region mark at the front, which
+    would have handed the page a region mark where it expects points -- and
+    nothing in the suite noticed, because every existing state lacks a
+    projection and so never built one.
+    """
+    for head_cols in (_state(), _state_with_projection()):
+        d = contract.draw(GroundView(contract.EpsilonSet.make(0.2, (0.2,))),
+                          *head_cols)
+        kinds = [m.kind for m in d.marks]
+        assert kinds[0] == "point", kinds
+        assert kinds[1] == "bar", kinds
+        assert "x" in d.marks[0].data or "projection" not in str(d.reads)
+    # with a projection the centroids are appended, not inserted
+    d = contract.draw(GroundView(contract.EpsilonSet.make(0.2, (0.2,))),
+                      *_state_with_projection())
+    assert [m.kind for m in d.marks] == ["point", "bar", "region"], \
+        [m.kind for m in d.marks]

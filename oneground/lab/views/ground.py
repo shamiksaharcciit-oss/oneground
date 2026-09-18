@@ -192,7 +192,11 @@ class GroundView(View):
                       "copy_count": copies}
         point_encoding = {"id": "vector_id", "color": "copy_count",
                           "group": "home_region"}
-        marks = []
+        # Order matters and must not change: the interface and
+        # `render_from_state.py` take the ground's marks positionally, points
+        # first and bars second. A region mark for the centroids is appended,
+        # never inserted.
+        regions_mark = None
         if drawn:
             # Handed straight through to the mark: read, indexed, listed. The
             # contract gives these as `Positions`, which refuses arithmetic,
@@ -205,18 +209,22 @@ class GroundView(View):
             figures["positions"] = "declared"
             if state.has("partition.projection"):
                 rxy = state["partition.projection"]
-                marks.append(Mark(
+                regions_mark = Mark(
                     "region",
                     data={"region": regions,
                           "x": [float(v) for v in rxy[:, 0]],
                           "y": [float(v) for v in rxy[:, 1]],
                           "vectors_held": held},
                     encoding={"id": "region", "x": "x", "y": "y",
-                              "size": "vectors_held"}))
-        marks.append(Mark("point", data=point_data, encoding=point_encoding))
-        marks.append(Mark("bar",
-                          data={"region": regions, "vectors_held": held},
-                          encoding={"id": "region", "size": "vectors_held"}))
+                              "size": "vectors_held"})
+        marks = [
+            Mark("point", data=point_data, encoding=point_encoding),
+            Mark("bar",
+                 data={"region": regions, "vectors_held": held},
+                 encoding={"id": "region", "size": "vectors_held"}),
+        ]
+        if regions_mark is not None:
+            marks.append(regions_mark)
         caption = self._caption(h, want, simulated, at_simulated,
                                 recountable, drawn)
         if self.render_mode is not None:
