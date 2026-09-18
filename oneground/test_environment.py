@@ -8,7 +8,11 @@ The property under test: a command that writes a canonical artifact cannot
 produce one outside the pins without the artifact saying so.
 
     .venv/Scripts/python.exe oneground/test_environment.py
+    .venv/Scripts/python.exe oneground/test_environment.py --list
     .venv/Scripts/python.exe -m pytest oneground/test_environment.py
+
+Both runners collect the same tests, and `test_script_mode_collects_every_
+test_pytest_does` is what says so.
 """
 
 import ast
@@ -309,31 +313,6 @@ def test_the_fixture_verify_parser_is_defined_once():
     for expected in ("--assets-dir", "--verbose", "--strict",
                      "--allow-unpinned", "--fixtures-dir", "--requirements"):
         assert expected in through_cli, expected
-
-
-def _main():
-    tests = [(n, o) for n, o in sorted(globals().items())
-             if n.startswith("test_") and callable(o)]
-    failed = skipped = 0
-    for name, fn in tests:
-        try:
-            fn()
-            print(f"ok    {name}")
-        # A skip is not an Exception, so without this branch the script mode
-        # stopped on the first one with a traceback (task 022e).
-        except pytest.skip.Exception as e:
-            skipped += 1
-            print(f"skip  {name}: {e}")
-        except Exception as e:
-            failed += 1
-            print(f"FAIL  {name}: {type(e).__name__}: {e}")
-    print(f"\n{len(tests) - failed - skipped} passed, {failed} failed, "
-          f"{skipped} skipped (of {len(tests)} collected)")
-    return 1 if failed else 0
-
-
-if __name__ == "__main__":
-    sys.exit(_main())
 
 
 # ---------------------------------- no machine identifiers (task 014)
@@ -743,3 +722,78 @@ def test_no_release_asset_archive_carries_owner_metadata():
         pytest.skip("no asset directory on this machine (looked for "
                     + ", ".join(env.DEFAULT_ASSET_DIRS) + ")")
     assert found == [], "\n".join("%s!%s  %s  %s" % f for f in found)
+
+
+# ------------------------------------------- the script runner (task 022f)
+# `_main` and its `__main__` block sat between the parser tests and the
+# task-014 section, so running this file as a script collected the 21 tests
+# defined above it, never reached the identifier scan, and printed "21 passed"
+# with nothing saying 22 were missing. The same defect 022e fixed, one level
+# up: a green that covered what it had not looked at. The block is last in the
+# file now, and the test below is what keeps it there.
+
+def test_script_mode_collects_every_test_pytest_does():
+    """Not synthetic: collects this file both ways and compares the lists."""
+    import subprocess
+    here = os.path.abspath(__file__)
+    root = os.path.dirname(os.path.dirname(here))
+
+    def run(*cmd):
+        r = subprocess.run([sys.executable] + list(cmd), cwd=root,
+                           capture_output=True, timeout=300)
+        out = r.stdout.decode("utf-8", "replace")
+        assert r.returncode == 0, "%s: exit %s\n%s%s" % (
+            " ".join(cmd), r.returncode, out,
+            r.stderr.decode("utf-8", "replace"))
+        return out
+
+    # `--list` collects and prints; it runs no test, so this cannot recurse
+    # into itself. The collection is the same code a full script run uses.
+    script = set(run(here, "--list").split())
+    lines = run("-m", "pytest", "--collect-only", "-q",
+                "-p", "no:cacheprovider", here).splitlines()
+    under_pytest = {ln.split("::", 1)[1].strip() for ln in lines if "::" in ln}
+    assert script == under_pytest, (
+        "script mode and pytest disagree about what this file contains; "
+        "only one of them saw: " + ", ".join(sorted(script ^ under_pytest)))
+    assert len(script) > 40, len(script)
+
+
+def _collect():
+    """Every test in this module, in name order, as the runner sees it.
+
+    Reads `globals()`, so it sees only what has been defined by the time it is
+    called -- which is why the `__main__` block below has to stay last.
+    """
+    return [(n, o) for n, o in sorted(globals().items())
+            if n.startswith("test_") and callable(o)]
+
+
+def _main(argv=()):
+    tests = _collect()
+    if "--list" in argv:
+        for name, _fn in tests:
+            print(name)
+        return 0
+    failed = skipped = 0
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"ok    {name}")
+        # A skip is not an Exception, so without this branch the script mode
+        # stopped on the first one with a traceback (task 022e).
+        except pytest.skip.Exception as e:
+            skipped += 1
+            print(f"skip  {name}: {e}")
+        except Exception as e:
+            failed += 1
+            print(f"FAIL  {name}: {type(e).__name__}: {e}")
+    print(f"\n{len(tests) - failed - skipped} passed, {failed} failed, "
+          f"{skipped} skipped (of {len(tests)} collected)")
+    return 1 if failed else 0
+
+
+# Nothing may be defined below this line: `_collect` would not see it, and the
+# script runner would report a green over a file it had only half read.
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv[1:]))
