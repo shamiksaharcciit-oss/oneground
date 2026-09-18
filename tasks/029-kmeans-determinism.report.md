@@ -1,8 +1,9 @@
 # Report: 029-kmeans-determinism
 
-**Status: steps 1 and 2 done; the task reshaped twice on the developer's
-rulings; step 4 needs a pod session and the developer's `y`. Steps 3, 5, 6 and
-7 follow that, because what the fix should be depends on what the pod says.**
+**Status: steps 1, 2, 4 and 5 done. The cause is named and confirmed on a
+second environment: faiss's BLAS path, not SIMD dispatch and not threading.
+Four pod settings reproduce this laptop's centroids bitwise. Steps 3, 6 and 7
+wait on one decision, presented below and not taken.**
 
 ## Repo state expected vs found
 
@@ -200,6 +201,152 @@ That is the behaviour task 012 measured and task 015 fixed for these families;
 it is reachable now only by bypassing the families, which is what the stale
 docstring invited.
 
+## Step 4 — the second environment, and the answer
+
+Session `20260918-201437`, pod `p30fscsf4at179`, RTX PRO 4000 in EU-RO-1.
+Twelve k-means, DONE in 8 minutes, ~$0.07 of a $0.57 cap; fetched and
+terminated by `watch`.
+
+### The host
+
+| | this laptop | the pod |
+|---|---|---|
+| CPU | Intel, 4 cores | **AMD EPYC** (AMD-V, `svm`, `sse4a`), 24 cores / 48 threads |
+| instruction sets | AVX, AVX2, **AVX512** (F, BW, DQ, VL, VNNI, …) | AVX, AVX2, FMA — **no AVX512** |
+| faiss / numpy | 1.15.0 / 2.5.3 | 1.15.0 / 2.5.3 |
+| faiss threads | 4 | 48 |
+
+### The twelve runs
+
+Each cell is the sha256 prefix of the 256 × 768 float32 centroid array.
+
+| dispatch level | BLAS setting | pod digest | this laptop | bitwise equal |
+|---|---|---|---|---|
+| (default) | default (thr 128,000) | `6852d797` | `9ebfeefc` | no |
+| (default) | **no BLAS** (thr 1e9) | `986c1b6b` | `986c1b6b` | **YES** |
+| (default) | always BLAS (thr 1) | `6852d797` | `9ebfeefc` | no |
+| AVX512 | default | `6852d797` | `9ebfeefc` | no |
+| AVX512 | **no BLAS** | `986c1b6b` | `986c1b6b` | **YES** |
+| AVX512 | always BLAS | `6852d797` | `9ebfeefc` | no |
+| AVX2 | default | `6852d797` | `9ebfeefc` | no |
+| AVX2 | **no BLAS** | `986c1b6b` | `986c1b6b` | **YES** |
+| AVX2 | always BLAS | `6852d797` | `9ebfeefc` | no |
+| generic | default | `6852d797` | `9ebfeefc` | no |
+| generic | **no BLAS** | `986c1b6b` | `986c1b6b` | **YES** |
+| generic | always BLAS | `6852d797` | `9ebfeefc` | no |
+
+"Bitwise equal" is `np.array_equal` on the two arrays, not a digest
+comparison.
+
+### Which pod setting reproduces this laptop's centroids
+
+**All four of them with faiss's BLAS path disabled, exactly.** An Intel laptop
+with AVX512 and an AMD EPYC without it produce the *same 256 centroids, bit
+for bit*, when the assignment step runs through faiss's own kernels.
+
+Two further confirmations fall out of the same table:
+
+- **The pod's eight BLAS runs reproduce task 027's emitted state exactly.**
+  027's finding is confirmed by an independent second run on a different pod.
+- **The laptop's four BLAS runs reproduce task 020's emitted state exactly.**
+  Each machine is self-consistent; the two camps are real and stable.
+- **The dispatch level is irrelevant on both machines**, with BLAS on *and*
+  with BLAS off. My step-2 test had a gap — at 150,000 × 768 faiss is above
+  the BLAS threshold, so the dispatched kernels never ran and the test was a
+  no-op rather than a disproof. Re-run with BLAS off
+  (`tasks/scratch/029_simd_noblas.py`), all four levels still agree bitwise on
+  this laptop, and the pod's twelve runs show the same. The disproof stands,
+  now for the right reason.
+
+### The cause, named
+
+**faiss's BLAS path.** Above `distance_compute_blas_threshold` the k-means
+assignment step is a GEMM handed to the bundled BLAS; below it, faiss uses its
+own kernels. faiss's kernels sum in the same order on both machines and give
+bit-identical centroids. The BLAS does not, because OpenBLAS selects a GEMM
+kernel per microarchitecture at run time — an Intel AVX512 kernel here, a Zen
+kernel on the pod — and a different blocking gives a different summation
+order.
+
+Not "faiss is non-deterministic": faiss's own arithmetic is reproducible
+across these two platforms. It is the linear-algebra library underneath, and
+the boundary is exactly one run-time variable.
+
+**What I did not capture.** The BLAS each wheel links, on the pod. This
+laptop's `faiss-cpu` bundles `libopenblas.dll` (in the wheel's `.libs`,
+alongside `vcomp140.dll`), which I read off disk. My session script recorded
+the CPU and not the linked libraries, so the pod's is inferred from faiss-cpu's
+packaging rather than measured — `ldd` on the installed `_swigfaiss*.so` would
+have settled it in one line. That is a gap in my spec, not a conclusion.
+
+### Step 5 — what the deterministic path costs
+
+Five runs each, median with min and max.
+
+| corpus | path | median | min | max |
+|---|---|---|---|---|
+| 20,000 × 768, k=256, laptop | BLAS | 1.39 s | 1.35 | 1.43 |
+| 20,000 × 768, k=256, laptop | no BLAS | **8.45 s** | 5.42 | 8.69 |
+| 150,000 × 768, k=256, laptop | BLAS | 6.82 s | 6.72 | 8.13 |
+| 150,000 × 768, k=256, laptop | no BLAS | **33.50 s** | 29.72 | 41.17 |
+| 150,000 × 768, k=256, **pod** | BLAS | 39.46 s | 29.32 | 42.84 |
+| 150,000 × 768, k=256, **pod** | no BLAS | **6.85 s** | 6.78 | 6.89 |
+
+**The cost inverts between machines.** On this 4-core laptop the deterministic
+path is **4.9× slower** at 150,000 and 6.1× slower at 20,000. On the 48-thread
+pod it is **5.8× faster** — 6.85 s against 39.46 s. BLAS on 48 threads over a
+65,536-point subsample is losing to its own threading; faiss's kernels are
+not.
+
+Beside task 012's HNSW figures (1.8× on 1.18M, faster at 20k), this is the
+same shape of answer: the deterministic path is not uniformly more expensive,
+and on the machine that runs the canonical builds it is cheaper.
+
+## The decision, presented and not taken
+
+Both options are viable on the evidence. **I am not choosing.**
+
+### Option A — make it reproduce
+
+One run-time variable, set before any k-means:
+`faiss.cvar.distance_compute_blas_threshold` raised so the assignment never
+takes the BLAS path. Measured consequence: an Intel AVX512 laptop and an AMD
+Zen pod produce byte-identical centroids, so `simulate.json`,
+`storage_amplification`, `stored_vectors` and the state's assignment columns
+become reproducible across environments.
+
+- **For:** it makes the fixture's byte-identical rebuild claim true across
+  machines rather than within one. It is one line, with a knob
+  (`deterministic=False` keeps the fast path), which is exactly the shape task
+  012 used. On the pod it is *faster*.
+- **Against:** 4.9× slower at 150,000 on the developer's laptop. It couples
+  the project to a faiss run-time global, which is process-wide and would need
+  the same `finally` discipline `single_threaded_faiss` already uses. And it
+  buys byte-identity between *these two* platforms — a third microarchitecture
+  is untested, and faiss's own kernels could in principle dispatch too.
+
+### Option B — state that centroid assignment is per-platform, and bound it
+
+Leave the arithmetic alone; declare the behaviour and put a measured bound on
+it.
+
+- **For:** the effect is already inside every tolerance that governs it. The
+  deltas are ~1.3e-5 on ratios against declared tolerances of **0.02** —
+  three orders of margin — so a rebuild anywhere reports `verified`, which the
+  developer confirmed on 18 September. Nothing published is wrong, and no
+  user-facing claim depends on byte-identity.
+- **Against:** the fixture's three-build receipt is a byte-identity argument,
+  and "byte-identical within a platform" is a weaker claim than the one the
+  docs currently imply. It leaves a real difference undisclosed unless the
+  wording changes with it.
+
+### What I would want to know before deciding, if it were mine
+
+Whether the fixture's rebuild claim is meant to hold across machines or only
+within one. If across, Option A is now cheap and proven. If within, Option B
+is honest and free. That is a product question about what the fixture
+promises, which is why it is yours.
+
 ## Measurements
 
 Every figure above carries its script. The two that matter most:
@@ -219,8 +366,12 @@ Every figure above carries its script. The two that matter most:
 - Suite, guard and identifier scan: **not yet run for this task** — no project
   code has changed yet beyond the docstring correction below.
 
-**Couldn't check.** Which BLAS each wheel links, and whether that is the
-difference that produced 027's 0.00104. Step 4's session.
+**Couldn't check.** Which BLAS the *pod's* wheel links. This laptop's bundles
+`libopenblas.dll`, read off disk; my session script recorded the host CPU and
+not the linked libraries, so the pod's is inferred from packaging rather than
+measured. `ldd` on the installed `_swigfaiss*.so` would have settled it. A gap
+in my spec — it does not change the result, which is established by the twelve
+runs, but it is one line I should have asked for.
 
 ## Observed, not done
 
