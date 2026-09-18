@@ -60,13 +60,22 @@ def recount(dist, near, epsilon, n_regions):
     return within, copies, held
 
 
+# Part of every drawing that places points, never fine print: someone who
+# screenshots the ground must not be able to mistake an illustrative placement
+# for a measured one. `contract.draw` requires it (task 027).
+PLACEMENT = ("Positions are a declared projection, illustrative: nothing on "
+             "this picture was measured from where the points are. Regions, "
+             "distances and copy counts are computed in the full space.")
+
+
 class GroundView(View):
     name = "ground"
     recounts = True
     reads = ("assignment.centroid_dist", "assignment.nearest_region",
              "assignment.home_region", "assignment.copy_count",
              "partition.region_ids", "route.probed_region",
-             "candidates.true_ids", "load.vectors_held")
+             "candidates.true_ids", "load.vectors_held",
+             "assignment.projection", "partition.projection")
 
     def __init__(self, eps=None, k=K_CEILING, render=None):
         """`render` is the `contract.RenderMode` the host measured, when the
@@ -92,13 +101,16 @@ class GroundView(View):
 
         figures = {"n_base": n, "max_assign": cap, "epsilon": want,
                    "simulated_epsilons": list(simulated)}
-        gaps = {
-            "positions": (
-                f"{COULDNT_CHECK}: not simulator state -- the teaser's 2-D "
-                "placement is a UMAP projection the fixture spec declares "
-                "illustrative, so it is not in the state and no position is "
-                "rendered"),
-        }
+        # Positions: declared where the state carries them, and honest about
+        # their standing either way (task 027). This row used to be a
+        # `couldnt_check` because no projection was in the state at all.
+        drawn = state.has("assignment.projection")
+        gaps = {}
+        if not drawn:
+            gaps["positions"] = (
+                f"{COULDNT_CHECK}: this state carries no projection, so the "
+                "ground is laid out by home region -- one cell per region, "
+                "vectors in id order. That is a layout, not a map")
         home = state["assignment.home_region"]
         regions = state["partition.region_ids"]
 
@@ -176,23 +188,50 @@ class GroundView(View):
             figures["true_neighbours_reachable"] = int(reach.sum())
             figures["k"] = self.k
 
-        marks = [
-            Mark("point",
-                 data={"vector_id": np.arange(n), "home_region": home,
-                       "copy_count": copies},
-                 encoding={"id": "vector_id", "color": "copy_count",
-                           "group": "home_region"}),
-            Mark("bar",
-                 data={"region": regions, "vectors_held": held},
-                 encoding={"id": "region", "size": "vectors_held"}),
-        ]
-        caption = self._caption(h, want, simulated, at_simulated, recountable)
+        point_data = {"vector_id": np.arange(n), "home_region": home,
+                      "copy_count": copies}
+        point_encoding = {"id": "vector_id", "color": "copy_count",
+                          "group": "home_region"}
+        marks = []
+        if drawn:
+            # Handed straight through to the mark: read, indexed, listed. The
+            # contract gives these as `Positions`, which refuses arithmetic,
+            # so the only thing this view can do with them is what it does
+            # here -- put them on the drawing.
+            xy = state["assignment.projection"]
+            point_data["x"] = [float(v) for v in xy[:, 0]]
+            point_data["y"] = [float(v) for v in xy[:, 1]]
+            point_encoding.update({"x": "x", "y": "y"})
+            figures["positions"] = "declared"
+            if state.has("partition.projection"):
+                rxy = state["partition.projection"]
+                marks.append(Mark(
+                    "region",
+                    data={"region": regions,
+                          "x": [float(v) for v in rxy[:, 0]],
+                          "y": [float(v) for v in rxy[:, 1]],
+                          "vectors_held": held},
+                    encoding={"id": "region", "x": "x", "y": "y",
+                              "size": "vectors_held"}))
+        marks.append(Mark("point", data=point_data, encoding=point_encoding))
+        marks.append(Mark("bar",
+                          data={"region": regions, "vectors_held": held},
+                          encoding={"id": "region", "size": "vectors_held"}))
+        caption = self._caption(h, want, simulated, at_simulated,
+                                recountable, drawn)
         if self.render_mode is not None:
             caption = f"{caption} {self.render_mode.sentence()}"
         return Drawing(view=self.name, marks=marks, figures=figures,
                        gaps=gaps, caption=caption)
 
-    def _caption(self, h, want, simulated, at_simulated, recountable):
+    def _caption(self, h, want, simulated, at_simulated, recountable,
+                 drawn=False):
+        return (self._epsilon_caption(h, want, simulated,
+                                      at_simulated, recountable)
+                + (' ' + PLACEMENT if drawn else ''))
+
+    def _epsilon_caption(self, h, want, simulated, at_simulated,
+                         recountable):
         if want is None:
             return (f"The ground for {h['family']}, which has no epsilon: "
                     "copy counts as the run emitted them.")

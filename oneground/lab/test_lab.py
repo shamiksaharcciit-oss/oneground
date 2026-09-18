@@ -112,6 +112,28 @@ def _state(eps=0.2):
         return _synthetic(tmp, eps)
 
 
+def _state_with_projection(eps=0.2):
+    """A synthetic state plus a declared placement, as `with_projection`
+    attaches one: positions for every base vector and every region."""
+    head, cols = _state(eps)
+    n = int(head["n_base"])
+    regions = len(cols["partition.region_ids"])
+    rng = np.random.default_rng(27)
+    xy = rng.normal(size=(n, 2)).astype(np.float32)
+    cols = dict(cols)
+    cols["assignment.projection"] = xy
+    cols["partition.projection"] = rng.normal(
+        size=(regions, 2)).astype(np.float32)
+    head = dict(head)
+    head["columns"] = dict(head.get("columns") or {})
+    for name, arr in (("assignment.projection", xy),
+                      ("partition.projection", cols["partition.projection"])):
+        head["columns"][name] = {"dtype": "float32",
+                                 "shape": list(arr.shape),
+                                 "meaning": "DECLARED 2-D placement"}
+    return head, cols
+
+
 # ------------------------------------------------------------------ guard
 def test_every_view_module_passes_the_guard():
     """Not synthetic: the shipped view modules. A view that measures fails
@@ -903,3 +925,94 @@ def _main():
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# ------------------------------------------------- the declared projection
+def test_positions_refuse_arithmetic_synthetic():
+    """The runtime half of task 027's rule.
+
+    A vector column can be withheld; a projection cannot, because drawing the
+    picture is passing these numbers to a mark. So the refusal is on the
+    operations, not the access: anything that could become a distance, a
+    cluster, a neighbour or an average raises where it is written.
+    """
+    p = contract.as_positions(np.array([[1.0, 2.0], [3.0, 4.0]],
+                                       dtype=np.float32))
+    # what drawing needs still works
+    assert float(p[0, 0]) == 1.0
+    assert p.tolist() == [[1.0, 2.0], [3.0, 4.0]]
+    assert len(p) == 2 and p.shape == (2, 2)
+    # a slice does not launder it
+    assert isinstance(p[:, 0], contract.Positions)
+    assert not p.flags.writeable
+
+    for label, call in (
+            ("difference", lambda: p - p),
+            ("scaling", lambda: p * 2),
+            ("a norm", lambda: np.linalg.norm(p, axis=1)),
+            ("a mean", lambda: np.mean(p, axis=0)),
+            ("a column difference", lambda: p[:, 0] - p[:, 1]),
+            ("a matmul", lambda: p @ p.T),
+            ("a square root", lambda: np.sqrt(p)),
+            ("a comparison", lambda: p > 1),
+            ("a stack", lambda: np.stack([p, p])),
+    ):
+        try:
+            call()
+        except contract.MeasuredFromProjection:
+            continue
+        raise AssertionError(f"{label} over a projection was not refused")
+
+
+def test_the_guard_allows_drawing_a_projection_and_refuses_measuring_one():
+    """The static half. Naming the columns alone would be useless: a view that
+    draws them mentions them legitimately."""
+    drawing = (
+        "def render(self, state):\n"
+        "    xy = state['assignment.projection']\n"
+        "    return {'x': xy[:, 0].tolist(), 'y': xy[:, 1].tolist()}\n")
+    assert guard.violations(drawing, "draws.py") == []
+
+    measuring = (
+        "import numpy as np\n"
+        "def render(self, state):\n"
+        "    xy = state['assignment.projection']\n"
+        "    spread = np.mean(xy)\n"
+        "    d = xy[:, 0] - xy[:, 1]\n"
+        "    return spread, d\n")
+    found = guard.violations(measuring, "measures.py")
+    rules = [r for _, r, _ in found]
+    assert rules.count("projection-arithmetic") == 2, found
+    assert any("mean" in detail for _, _, detail in found), found
+    assert any("Sub" in detail for _, _, detail in found), found
+
+
+def test_a_projected_drawing_must_caption_its_positions_synthetic():
+    """A picture is the most convincing form a number can take. `draw` refuses
+    a drawing that placed points from a projection without saying so."""
+
+    class Bare(contract.View):
+        name = "bare"
+        reads = ("assignment.projection",)
+
+        def render(self, state):
+            xy = state["assignment.projection"]
+            return contract.Drawing(
+                view=self.name,
+                marks=[contract.Mark(
+                    "point",
+                    data={"id": list(range(len(xy))),
+                          "x": [float(v) for v in xy[:, 0]],
+                          "y": [float(v) for v in xy[:, 1]]},
+                    encoding={"id": "id", "x": "x", "y": "y"})],
+                figures={}, gaps={},
+                caption="Every vector, placed.")
+
+    head, cols = _state_with_projection()
+    try:
+        contract.draw(Bare(), head, cols)
+    except contract.ContractError as e:
+        assert "declared projection" in str(e), e
+    else:
+        raise AssertionError("a projected drawing without the sentence was "
+                             "not refused")

@@ -571,7 +571,35 @@ def draw(view, header, columns):
         d.epsilon = RECOUNT
     _check_panels(view, d, header)
     _check_caption(view, d)
+    _check_placement(view, d)
     return d
+
+
+# What a drawing that places points must say about those positions. Checked as
+# words, not as a flag, because the words are what a screenshot carries.
+PLACEMENT_WORDS = ("declared projection", "illustrative")
+
+
+def _check_placement(view, d):
+    """A drawing that read a projection says so, in the drawing (task 027).
+
+    A picture is the most convincing form a number can take, and these
+    positions are declared and illustrative. So a view that placed its points
+    from a projection must caption them as such; `couldnt_check` and
+    `not simulated` are already held to the same standard above. Checked on
+    the columns actually read, not on what the view declared, so a view that
+    stops drawing positions stops needing the sentence.
+    """
+    if not (set(d.reads) & PROJECTION_COLUMNS):
+        return
+    caption = d.caption if isinstance(d.caption, str) else ""
+    missing = [w for w in PLACEMENT_WORDS if w not in caption.lower()]
+    if missing:
+        raise ContractError(
+            f"{view.name}: it drew from {sorted(set(d.reads) & PROJECTION_COLUMNS)} "
+            f"and its caption does not say {missing}. A projected drawing "
+            "states that its positions are a declared projection and "
+            "illustrative, in the drawing, so a screenshot carries it.")
 
 
 def _check_caption(view, d):
