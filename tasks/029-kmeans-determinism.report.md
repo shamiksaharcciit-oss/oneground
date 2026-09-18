@@ -30,10 +30,36 @@ of that library is the only route to identity**, which is what
 
 ---
 
-**Status: steps 1, 2, 3, 5, 6 and 7 done. Step 4: the centroid half proved
-across environments; the `simulate.json` half is being run on this host and is
-reported below either as identity, as a measured residual, or as
-couldn't-check on this host. The cause is faiss's BLAS path — not SIMD
+### And through `simulate`, end to end
+
+The laptop's run completed — it did not hit task 027's OOM; that was a
+machine-state fact, not a property of the code. Against the pod's:
+
+```
+masking wall-clock timings and the run name
+  pod    ea80d2b87200b54c263627db
+  laptop ea80d2b87200b54c263627db
+  byte-identical: True
+  every one of 36 measured row fields equal across the two machines
+```
+
+Two things are masked and both are labels rather than measurements: the wall
+clock (`build_seconds`, `query_seconds` — task 020b moved them out of
+`simulate.json` for exactly this reason, though that commit is on task-020),
+and `run`, which I named differently in the two requirements files. Every
+other field — recall at 1/10/100, ceiling, routing and index loss,
+`inv_ratio_at_10`, `storage_amplification`, `stored_vectors`,
+`est_memory_bytes`, `fanout`, the copy percentiles — is identical.
+
+`simulate_info.deterministic` records `true` for both configurations on both
+machines.
+
+**So step 4 holds in full: byte-identity across environments, proved through
+`simulate` and not only through the probe.**
+
+---
+
+**Status: steps 1–7 done. The cause is faiss's BLAS path — not SIMD
 dispatch, not threading — and it is fixed by construction on the developer's
 Option A ruling.**
 
