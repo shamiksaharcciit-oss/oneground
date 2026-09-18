@@ -272,12 +272,36 @@ Not "faiss is non-deterministic": faiss's own arithmetic is reproducible
 across these two platforms. It is the linear-algebra library underneath, and
 the boundary is exactly one run-time variable.
 
-**What I did not capture.** The BLAS each wheel links, on the pod. This
-laptop's `faiss-cpu` bundles `libopenblas.dll` (in the wheel's `.libs`,
-alongside `vcomp140.dll`), which I read off disk. My session script recorded
-the CPU and not the linked libraries, so the pod's is inferred from faiss-cpu's
-packaging rather than measured — `ldd` on the installed `_swigfaiss*.so` would
-have settled it in one line. That is a gap in my spec, not a conclusion.
+**Which BLAS each wheel links — measured, in the second session.** The first
+session recorded the CPU and not the linked libraries, so the pod's was
+inferred from packaging. `ldd` on the installed `_swigfaiss*.so` settled it:
+
+```
+libopenblaso-r0-d77a1985.3.15.so => .../faiss_cpu.libs/libopenblaso-r0-d77a1985.3.15.so
+== bundled libs ==
+  libgfortran-83c28eba.so.5.0.0
+  libgomp-e985bcbb.so.1.0.0
+  libopenblaso-r0-d77a1985.3.15.so
+  libquadmath-2284e583.so.0.0.0
+```
+
+The pod's wheel bundles **OpenBLAS 0.3.15**, the OpenMP-threaded build (the
+`o` in `libopenblaso`). This laptop's bundles `libopenblas.dll`.
+
+**This is a better result than the hypothesis it replaces, and it strengthens
+the case for the fix.** The guess was "a Windows wheel and a Linux wheel link
+*different BLAS*" — which would have made the divergence a packaging accident,
+fixable in principle by aligning the two wheels. It is not that. **Both sides
+bundle the same library family**, and it still diverges, because OpenBLAS
+selects its GEMM kernel by microarchitecture at run time: an AVX512 kernel on
+this Intel laptop, a Zen kernel on the AMD pod. So the difference is not
+something a build could be aligned away — it is one library doing what it is
+designed to do, faster, per CPU.
+
+That removes the last reading under which this might have been someone's
+packaging mistake to fix upstream. The only way to get byte-identity is to
+keep the arithmetic out of that library, which is exactly what
+`deterministic_blas` does.
 
 ### Step 5 — what the deterministic path costs
 
@@ -521,6 +545,31 @@ in my spec — it does not change the result, which is established by the twelve
 runs, but it is one line I should have asked for.
 
 ## Observed, not done
+
+- **A parameter at its default produces a different label from its omission.**
+  Found by making the mistake: I wrote `deterministic: true` into the proof
+  requirements so a reader would not have to know the default to read the
+  receipt. `deterministic` is a declared build parameter, so it went into the
+  label, and the `include` and the `grid` became two distinct rows:
+
+  ```
+  semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]
+  semantic_sharded[M=32,centroids=256,deterministic=True,efSearch=96,epsilon=0.2,probe=2]
+  ```
+
+  Identical work, two rows, on both machines.
+
+  **The rule it implies: a parameter at its default must produce the same
+  label as its omission** — otherwise a sweep can measure identical work twice
+  and present it as two configurations, and a proposal loop reading that table
+  would see two options where there is one. That is task 026's parameter
+  layer, not this task's, and it is left for it.
+
+  Consequences here, all contained: the comparison stays like-for-like because
+  both machines ran the same file; the pod time roughly doubled, inside the
+  cap; and this run's row labels do not match task 020's canonical label, so
+  its `simulate.json` is comparable *across machines* but not directly against
+  the reference run.
 
 - **`models/base.py:52-53`.** Corrected, because 029 is the determinism task
   and the line is the project's own statement of what determinism guarantees
