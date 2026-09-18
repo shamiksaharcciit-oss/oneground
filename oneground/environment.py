@@ -591,30 +591,87 @@ def asset_archive_findings(dirs=None, identifiers=None):
     return out
 
 
+class GitUnavailable(RuntimeError):
+    """There is a checkout to scan, and git could not be asked what is in it.
+
+    Distinct from "not a checkout". Task 022e: both were reported as None, so
+    a tree with a `.git` and no runnable git skipped the identifier scan with
+    "nothing to scan" -- green, having read nothing, which is the failure the
+    scan exists to catch.
+    """
+
+
+def checkout_root(start=None):
+    """The nearest directory at or above `start` holding a `.git`, else None.
+
+    A `.git` is a directory in a checkout and a file in a worktree or a
+    submodule; either answers "there is a tree here that git could describe".
+    Walks upward because a command may run from a subdirectory.
+    """
+    d = os.path.abspath(start or ".")
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+
 def tracked_files(root=None):
-    """Every path `git ls-files` reports, or None when git cannot answer.
+    """Every path `git ls-files` reports, or None when this is not a checkout.
 
     None rather than an empty list: "there are no tracked files" and "this is
     not a checkout" are different answers, and only one of them means the scan
     checked something.
+
+    Raises `GitUnavailable` when a `.git` is there but git could not answer --
+    not on PATH, or failing. The caller must not read that as a clean tree.
     """
     import subprocess
+    cmd = ["git", "ls-files", "-z"]
+    cwd = root or "."
     try:
-        r = subprocess.run(["git", "ls-files", "-z"], cwd=root or ".",
-                           capture_output=True, timeout=120)
-    except (OSError, subprocess.SubprocessError):     # pragma: no cover - env
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        _raise_if_checkout(cmd, cwd, f"{type(e).__name__}: {e}")
         return None
     if r.returncode != 0:
+        _raise_if_checkout(cmd, cwd, "exit %s: %s" % (
+            r.returncode,
+            r.stderr.decode("utf-8", "replace").strip() or "(no stderr)"))
         return None
     return [p for p in r.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
+def _relative(path):
+    """`path` relative to the working directory: an absolute one would put a
+    home directory, and so a user name, into a message people paste around."""
+    try:
+        return os.path.relpath(path)
+    except ValueError:                     # pragma: no cover - another drive
+        return os.path.basename(os.path.normpath(path)) or path
+
+
+def _raise_if_checkout(cmd, cwd, detail):
+    """Raise `GitUnavailable` naming the command and the error, if there is a
+    `.git` at or above `cwd`; otherwise return, so the caller reports None."""
+    found = checkout_root(cwd)
+    if found is None:
+        return
+    raise GitUnavailable(
+        "%s in %r failed, and %r holds a .git: %s. A scan that reads nothing "
+        "is not a clean scan."
+        % (" ".join(cmd), _relative(cwd), _relative(found), detail))
 
 
 def identifier_findings(root=None, allowlist=None):
     """Scan the tracked tree. [(path, line_number, kind, line)], newest rule.
 
     Returns an empty list when the tree is clean and a populated one when it
-    is not; raising is left to the caller so the same function can be used to
-    print a list as to fail a test.
+    is not; a finding is left to the caller so the same function can be used
+    to print a list as to fail a test. None when this is not a checkout, and
+    `GitUnavailable` when it is one and git could not be asked.
     """
     allow = IDENTIFIER_SCAN_ALLOWLIST if allowlist is None else allowlist
     paths = tracked_files(root)

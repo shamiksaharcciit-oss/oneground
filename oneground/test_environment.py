@@ -17,9 +17,10 @@ import os
 import sys
 import tempfile
 
-# Only the not-a-checkout branch uses it, which a git checkout never reaches:
-# from a GitHub archive zip, or any tree without .git, both identifier-scan
-# tests raised NameError here instead of skipping (task 022).
+# The not-a-checkout branches use it -- from a GitHub archive zip, or any tree
+# without .git, both identifier-scan tests raised NameError here instead of
+# skipping (task 022) -- and so does the script runner below, which has to
+# report a skip rather than stop on it (task 022e).
 import pytest
 
 sys.path.insert(0, os.path.normpath(
@@ -313,16 +314,21 @@ def test_the_fixture_verify_parser_is_defined_once():
 def _main():
     tests = [(n, o) for n, o in sorted(globals().items())
              if n.startswith("test_") and callable(o)]
-    failed = 0
+    failed = skipped = 0
     for name, fn in tests:
         try:
             fn()
             print(f"ok    {name}")
+        # A skip is not an Exception, so without this branch the script mode
+        # stopped on the first one with a traceback (task 022e).
+        except pytest.skip.Exception as e:
+            skipped += 1
+            print(f"skip  {name}: {e}")
         except Exception as e:
             failed += 1
             print(f"FAIL  {name}: {type(e).__name__}: {e}")
-    print(f"\n{len(tests) - failed} passed, {failed} failed "
-          f"(of {len(tests)} collected)")
+    print(f"\n{len(tests) - failed - skipped} passed, {failed} failed, "
+          f"{skipped} skipped (of {len(tests)} collected)")
     return 1 if failed else 0
 
 
@@ -449,9 +455,12 @@ def test_no_module_reaches_for_platform_node_for_an_identifier():
 
 def test_no_tracked_file_carries_a_machine_identifier():
     """The guard 015 found missing, against the tree as it stands."""
-    findings = env.identifier_findings()
-    if findings is None:
+    if env.checkout_root() is None:
         pytest.skip("not a git checkout; nothing to scan")
+    # A checkout with no runnable git raises `GitUnavailable` here rather than
+    # skipping: the scan cannot say the tree is clean without reading it.
+    findings = env.identifier_findings()
+    assert findings is not None, "a checkout, and the scan read nothing"
     assert findings == [], "\n".join(
         "%s:%s  %s\n    %s" % f for f in findings)
 
@@ -462,11 +471,97 @@ def test_the_scan_actually_reads_the_tree():
     `identifier_findings` returning `[]` is only meaningful if it looked at
     something, so pin the floor rather than trusting the empty list.
     """
-    paths = env.tracked_files()
-    if paths is None:
+    if env.checkout_root() is None:
         pytest.skip("not a git checkout; nothing to scan")
+    paths = env.tracked_files()
+    assert paths is not None, "a checkout, and git listed nothing"
     assert len(paths) > 100, len(paths)
     assert "oneground/environment.py" in [p.replace("\\", "/") for p in paths]
+
+
+# ------------------------------- git present, git runnable: not the same thing
+# Task 022e. Both tests above skipped on `tracked_files() is None`, which meant
+# "no .git" and "git could not be run" alike -- so on a checkout whose git is
+# missing or broken the identifier scan reported green having read nothing,
+# which is the one outcome it exists to prevent. The empty PATH below is how a
+# stripped container, a cron job, or a hook environment reaches that state.
+
+class _empty_path:
+    """Run a block with nothing on PATH, so launching `git` fails."""
+
+    def __enter__(self):
+        self._old = os.environ.get("PATH")
+        os.environ["PATH"] = ""
+        return self
+
+    def __exit__(self, *exc):
+        if self._old is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = self._old
+        return False
+
+
+def test_a_tree_with_no_git_is_not_a_checkout_synthetic():
+    """The skip that stays a skip: nothing to scan, and nothing claimed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        assert env.checkout_root(tmp) is None
+        assert env.tracked_files(tmp) is None
+        assert env.identifier_findings(root=tmp) is None
+
+
+def test_a_checkout_whose_git_cannot_run_is_an_error_synthetic():
+    """The distinction: `.git` is there, git is not. That is a failure."""
+    with tempfile.TemporaryDirectory() as tmp:
+        os.mkdir(os.path.join(tmp, ".git"))
+        assert env.checkout_root(tmp) == os.path.abspath(tmp)
+        with _empty_path():
+            for call in (lambda: env.tracked_files(tmp),
+                         lambda: env.identifier_findings(root=tmp)):
+                try:
+                    got = call()
+                except env.GitUnavailable as e:
+                    # It names the command tried and the error.
+                    assert "git ls-files" in str(e), e
+                    assert ("FileNotFoundError" in str(e)
+                            or "exit " in str(e)), e
+                else:
+                    raise AssertionError(
+                        "no git, and the scan answered %r" % (got,))
+
+
+def test_a_git_that_answers_from_a_subdirectory_is_still_a_checkout_synthetic():
+    """`checkout_root` walks up, so a test run from `oneground/` does not
+    mistake its own directory for a tree with no `.git`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, ".git"))
+        deep = os.path.join(tmp, "a", "b")
+        os.makedirs(deep)
+        assert env.checkout_root(deep) == os.path.abspath(tmp)
+
+
+def test_the_tree_tests_fail_rather_than_skip_when_git_cannot_run():
+    """Not synthetic: calls the two tree tests above with an empty PATH.
+
+    Asserting on `tracked_files` alone would leave the tests free to go on
+    skipping. This runs them.
+    """
+    if env.checkout_root() is None:
+        pytest.skip("not a git checkout; nothing to scan")
+    with _empty_path():
+        for fn in (test_no_tracked_file_carries_a_machine_identifier,
+                   test_the_scan_actually_reads_the_tree):
+            try:
+                fn()
+            except env.GitUnavailable as e:
+                assert "git ls-files" in str(e), e
+            except BaseException as e:         # a skip is BaseException
+                raise AssertionError(
+                    "%s neither passed nor failed on a checkout with no git: "
+                    "%s: %s" % (fn.__name__, type(e).__name__, e))
+            else:
+                raise AssertionError(
+                    "%s passed with nothing scanned" % fn.__name__)
 
 
 def test_the_scan_catches_an_injected_path_and_hostname():
@@ -599,14 +694,38 @@ def test_the_asset_scan_says_none_when_there_is_nothing_to_scan_synthetic():
         assert {k for _p, _m, k, _d in found} == {"owner id", "owner name"}
 
 
+def _git_or_skip(*args):
+    """Run a git command for a synthetic checkout, or skip saying why.
+
+    Task 022e: these calls were `check=True` with nothing around them, so on a
+    machine with no git the test ended in a bare FileNotFoundError traceback.
+    Git that cannot be launched at all means this test's fixture cannot be
+    built -- a skip, named. Git that runs and fails is a real failure.
+    """
+    import subprocess
+    cmd = ["git"] + list(args)
+    # The temporary directory is under a home directory on this platform, so
+    # the command is named with it redacted: a skip reason gets pasted into
+    # reports, and task 016 published two developer paths that way.
+    tmproot = os.path.abspath(tempfile.gettempdir())
+    shown = " ".join("<tmp>" if os.path.abspath(a).startswith(tmproot) else a
+                     for a in cmd)
+    try:
+        r = subprocess.run(cmd, capture_output=True)
+    except OSError as e:
+        pytest.skip("git could not be run (%s): %s: %s"
+                    % (shown, type(e).__name__, e))
+    assert r.returncode == 0, "%s: exit %s: %s" % (
+        shown, r.returncode, r.stderr.decode("utf-8", "replace").strip())
+
+
 def test_the_tracked_scan_opens_tracked_archives_synthetic():
     """`smoke-small.tgz` is tracked; the walk used to skip every .tgz."""
-    import subprocess
     with tempfile.TemporaryDirectory() as tmp:
         _tgz(os.path.join(tmp, "small.tgz"), {"x.json": b"{}"},
              uid=1000, uname="someuser")
-        subprocess.run(["git", "init", "-q", tmp], check=True)
-        subprocess.run(["git", "-C", tmp, "add", "small.tgz"], check=True)
+        _git_or_skip("init", "-q", tmp)
+        _git_or_skip("-C", tmp, "add", "small.tgz")
         found = env.identifier_findings(root=tmp, allowlist={})
         assert {(p, k) for p, _n, k, _d in found} == {
             ("small.tgz!x.json", "owner id"),
