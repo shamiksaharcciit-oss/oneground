@@ -1,9 +1,41 @@
 # Report: 029-kmeans-determinism
 
-**Status: steps 1, 2, 3, 5, 6 and 7 done; step 4's local half done and its
-cross-environment half prepared and priced, needing a `y`. The cause is faiss's
-BLAS path — not SIMD dispatch, not threading — confirmed on a second
-environment, and fixed by construction on the developer's Option A ruling.**
+## The result
+
+**Byte-identical centroids across two microarchitectures — proved, not
+predicted.**
+
+```
+pod    986c1b6b4772bcdc3b3c6835     AMD EPYC, 24c/48t, AVX2, no AVX512
+laptop 986c1b6b4772bcdc3b3c6835     Intel, 4 cores, AVX512
+BITWISE EQUAL: True
+```
+
+Same corpus, same seed 20260908, `deterministic=True`. Two 256 × 768 float32
+arrays, identical byte for byte, on CPUs that do not share an instruction set.
+Before the fix the same two machines produced centroids differing by 0.00104,
+moving 35 of 150,000 vectors into different home regions and eight published
+values in the sixth decimal.
+
+**Why that needed a fix rather than a tolerance**, and this is the part the
+second session settled. The pod's wheel links
+`libopenblaso-r0-d77a1985.3.15.so` — OpenBLAS 0.3.15, the OpenMP build — read
+off the pod with `ldd`, not inferred. This laptop's links `libopenblas.dll`.
+**It is the same library family on both sides.** The divergence is therefore
+not a packaging accident that aligning two wheels could remove: OpenBLAS picks
+its GEMM kernel by microarchitecture at run time, by design, and sums the same
+floats in a different order on a different CPU. **Keeping the arithmetic out
+of that library is the only route to identity**, which is what
+`deterministic_blas` does.
+
+---
+
+**Status: steps 1, 2, 3, 5, 6 and 7 done. Step 4: the centroid half proved
+across environments; the `simulate.json` half is being run on this host and is
+reported below either as identity, as a measured residual, or as
+couldn't-check on this host. The cause is faiss's BLAS path — not SIMD
+dispatch, not threading — and it is fixed by construction on the developer's
+Option A ruling.**
 
 ## Repo state expected vs found
 
