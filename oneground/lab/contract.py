@@ -18,6 +18,26 @@ COULDNT_CHECK = "couldnt_check"
 # vector in reach, no view can do arithmetic on one, whatever its source says.
 VECTOR_COLUMNS = frozenset({"partition.centroids"})
 
+# State columns that hold a DECLARED 2-D placement (task 027). These are the
+# one kind of column a view must be handed and must not compute with.
+#
+# A vector column can simply be withheld -- a view does not need one. A
+# projection cannot: drawing the picture *is* passing these numbers to a mark.
+# So the refusal moves from "you cannot have it" to "you cannot do arithmetic
+# with it": `Positions` below raises on every ufunc and array function, so a
+# distance between two points, a cluster over them, a nearest neighbour by
+# them or a mean of them fails where it is written rather than producing a
+# number. Indexing and `tolist()` work, because that is what drawing needs.
+#
+# Why it matters more here than anywhere else: a projection is illustrative,
+# and the fixture spec says so. A figure measured from it would be a second
+# measurement, in a space nothing else in the run uses, that can disagree with
+# the table -- and it would arrive wearing a picture, which is the most
+# convincing form a wrong number can take.
+PROJECTION_COLUMNS = frozenset({"assignment.projection",
+                                "route.projection",
+                                "partition.projection"})
+
 MARK_KINDS = frozenset({"point", "region", "link", "bar"})
 
 # A panel's two states (task 021b). Recall, candidates and the true neighbours
@@ -231,12 +251,18 @@ ON_EPSILON = {
     "assignment.home_region": UNCHANGED,
     "assignment.centroid_dist": UNCHANGED,
     "assignment.nearest_region": UNCHANGED,
+    # A declared placement does not move when epsilon does: epsilon decides
+    # which regions hold a copy of a vector, not where it is drawn. The
+    # colour of a point changes with the recount; its position does not.
+    "assignment.projection": UNCHANGED,
+    "partition.projection": UNCHANGED,
     "assignment.copy_count": RECOUNT,
     "assignment.copy_set": RECOUNT,
     "route.scored_region": UNCHANGED,
     "route.scored_dist": UNCHANGED,
     "route.probed_region": UNCHANGED,
     "route.probe_reason": UNCHANGED,
+    "route.projection": UNCHANGED,
     "candidates.true_ids": UNCHANGED,
     "candidates.offsets": REBUILD,
     "candidates.cand_id": REBUILD,
@@ -261,6 +287,52 @@ class VectorColumn(ContractError):
 
 class UndeclaredColumn(ContractError):
     """A view read a column it did not declare in `reads`."""
+
+
+class MeasuredFromProjection(ContractError):
+    """A view tried to compute something from projected coordinates."""
+
+
+class Positions(np.ndarray):
+    """A declared 2-D placement, to draw and to do nothing else with.
+
+    Every ufunc and array function raises `MeasuredFromProjection`. That
+    covers `a - b`, `a * 2`, `np.linalg.norm`, `np.dot`, `np.mean`,
+    comparisons and everything else numpy routes through those two protocols,
+    which is where a distance, a cluster or a neighbour search would have to
+    start.
+
+    What still works is what drawing needs: indexing, slicing, iteration,
+    `len`, `.shape`, `.tolist()`. A slice stays a `Positions`, so taking the
+    x column does not launder the refusal.
+
+    **The stated limit,** as for the guard: `np.asarray(p)` returns a plain
+    array, and a view determined to measure could call it. This makes the
+    mistake impossible to make by accident and obvious to see in review, which
+    is the same standing the vector rule has.
+    """
+
+    _WHY = ("positions are a declared projection, illustrative. A view may "
+            "draw them and may not compute with them: a distance, a cluster, "
+            "a neighbour or an average taken from a projection is a new "
+            "measurement in a space nothing else in the run uses, and it "
+            "would look like a map. What a view needs about where things are "
+            "was measured by simulate, in the full space, and is in the "
+            "state already.")
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        raise MeasuredFromProjection(f"{ufunc.__name__}: {self._WHY}")
+
+    def __array_function__(self, func, types, args, kwargs):
+        raise MeasuredFromProjection(
+            f"{getattr(func, '__name__', func)}: {self._WHY}")
+
+
+def as_positions(array):
+    """A read-only `Positions` over `array`."""
+    out = np.asarray(array).view(Positions)
+    out.flags.writeable = False
+    return out
 
 
 def on_epsilon(columns):
@@ -361,6 +433,11 @@ class StateColumns:
         if name not in self._columns:
             raise KeyError(f"{name} is not in this state; check `has` first")
         self.read.add(name)
+        if name in PROJECTION_COLUMNS:
+            # Handed over, because drawing needs the numbers, but as a
+            # `Positions`: arithmetic on it raises rather than returning a
+            # figure measured from a declared placement.
+            return as_positions(self._columns[name])
         arr = self._columns[name].view()
         arr.flags.writeable = False
         return arr

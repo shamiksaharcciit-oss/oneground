@@ -68,6 +68,10 @@ class Requirements:
         self.text = self.sample.get("text") or {}
         self.metadata = self.sample.get("metadata") or {}
         self.queries = self.sample.get("queries") or {}
+        # A declared 2-D placement for drawing (task 027). Never an input
+        # to a measurement: nothing reads it but the lab, and the state
+        # records it as declared with its digest.
+        self.projection = self.sample.get("projection") or {}
         self.target_sample_size = self.sample.get("target_sample_size")
 
     # -- convenience accessors ---------------------------------------------
@@ -119,7 +123,8 @@ class Requirements:
                        ("metadata", self.metadata.get("path")),
                        ("queries", self.queries.get("path")),
                        ("queries_metadata",
-                        (self.queries.get("metadata") or {}).get("path"))):
+                        (self.queries.get("metadata") or {}).get("path")),
+                       ("projection", self.projection.get("path"))):
             rp = self.resolve(p)
             if rp and os.path.exists(rp):
                 out[key] = rp

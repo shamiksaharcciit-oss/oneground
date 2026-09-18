@@ -391,9 +391,32 @@ def run(requirements_path, log_fn=log, emit_state=False):
 
     # ---- state (task 020), off unless asked for ----
     state_dir, state_entries, state_sink = None, [], None
+    projection_xy, projection_info = None, None
     if emit_state:
+        from ..models import projection as projmod
         from ..models import state as statemod
         from ..receipts import MANIFEST_NAME
+
+        # A declared 2-D placement, if the requirements name one. Read once,
+        # before anything is measured, so a projection that does not fit the
+        # corpus stops the run here rather than after an hour of simulating.
+        # It is never a precondition: a run without one emits states without
+        # the column, and the lab falls back to its cell layout.
+        declared = getattr(req, "projection", {}) or {}
+        proj_path = req.resolve(declared.get("path"))
+        if proj_path:
+            projection_xy = projmod.read(proj_path, len(base))
+            projection_info = projmod.provenance(
+                proj_path, declared, len(base), statemod.QUERY_PLACEMENT_K)
+            log_fn(f"projection: {len(projection_xy):,} declared positions "
+                   f"from {os.path.basename(proj_path)}")
+        else:
+            projection_info = {
+                "kind": "absent",
+                "why": (f"{COULDNT_CHECK}: no corpus.sample.projection.path "
+                        "in the requirements, so the states carry no "
+                        "positions and the lab draws its cell layout"),
+            }
         state_dir = os.path.join(workdir, "state")
         os.makedirs(state_dir, exist_ok=True)
         # This command's own outputs from an earlier emit. Left in place they
@@ -414,6 +437,14 @@ def run(requirements_path, log_fn=log, emit_state=False):
                 return
             t_s = time.time()
             st = model.state(built, q, k, config, gt_ids, seed)
+            if projection_xy is not None:
+                # Attached here, not filled by the family: a projection
+                # belongs to the corpus, not the architecture. Every family
+                # run on one corpus draws the same points in the same places
+                # and only their colours differ, and a model that invented a
+                # position would be measuring where it should be declaring.
+                st = statemod.with_projection(st, projection_xy,
+                                              gt_ids=gt_ids)
             violations = statemod.contract_violations(
                 st, model.footprint(built))
             fn = statemod.state_filename(model.name, config.label)
@@ -528,6 +559,7 @@ def run(requirements_path, log_fn=log, emit_state=False):
                                          for e in state_entries)),
             "state_seconds_total": round(sum(e.get("state_seconds", 0.0)
                                              for e in state_entries), 3),
+            "projection": projection_info,
             "library_versions": versions,
             "note": ("each state is written after its configuration's row is "
                      "measured and before its index is released; "

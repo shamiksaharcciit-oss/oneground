@@ -136,6 +136,12 @@ class PartitionState:
     centroids: Optional[np.ndarray] = None  # float32 (R, dim), kmeans only
     distance: Optional[str] = None
     kmeans_niter: Optional[int] = None
+    # DECLARED (task 027): where to draw each region, as the mean of the
+    # positions of the vectors whose home it is. Not a projection of the
+    # centroid vector -- the fixture's projection was fitted on base vectors,
+    # and a centroid is not one of them. It is the same illustrative placement
+    # the teaser marks regions at.
+    projection: Optional[np.ndarray] = None   # float32 (R, 2), declared
 
 
 @dataclass
@@ -153,6 +159,15 @@ class AssignmentState:
     epsilon, so without this column a recount at a LARGER epsilon has the
     distance to a region it would now copy into and no idea which region that
     is. Task 021 found that; see the module docstring.
+
+    `projection` is (N, 2) float32: a DECLARED 2-D placement, not a
+    measurement. It is the projection the fixture publishes, carried into the
+    state so the lab can draw the picture the teaser draws. Nothing in the run
+    is computed from it, and a view may not compute anything from it either:
+    regions, distances and copy counts are computed in the full space.
+    `state_info.json` records where it came from, by what method and seed, and
+    its digest. A state without it is ordinary -- a projection is never a
+    precondition for anything.
     """
 
     home_region: np.ndarray                # int32 (N,)
@@ -162,6 +177,7 @@ class AssignmentState:
     max_assign: int
     epsilon: Optional[float] = None
     nearest_region: Optional[np.ndarray] = None   # int32 (N, max_assign)
+    projection: Optional[np.ndarray] = None       # float32 (N, 2), declared
 
 
 @dataclass
@@ -173,12 +189,20 @@ class RouteState:
     searched, in probe order, and `probe_reason` says why each was. Every
     probed region is also a scored one, except under fan-out, where nothing is
     scored because nothing is chosen.
+
+    `projection` is (Q, 2) float32 and DECLARED, like the assignment's: where
+    to draw each query. It is not a projection OF the query vector -- the
+    fixture's projection was fitted on base vectors only. It is the mean of
+    the positions of the query's own true neighbours, which is what the teaser
+    draws and what `state_info.json` records it as. A query has no position of
+    its own; this is an illustrative placement among the neighbours it found.
     """
 
     scored_region: np.ndarray              # int32 (Q, S), -1 padded
     scored_dist: np.ndarray                # float32 (Q, S), NaN padded
     probed_region: np.ndarray              # int32 (Q, P), -1 padded
     probe_reason: np.ndarray               # uint8 (Q, P), ROUTE_PAD padded
+    projection: Optional[np.ndarray] = None       # float32 (Q, 2), declared
 
 
 @dataclass
@@ -237,6 +261,87 @@ class ModelState:
     load: LoadState
     notes: List[str] = field(default_factory=list)
     state_version: int = STATE_VERSION
+
+
+# --------------------------------------------------------------------------
+# the declared projection (task 027)
+# --------------------------------------------------------------------------
+
+# How many of a query's true neighbours its drawn position is the mean of.
+# The teaser uses ten, and `state_info.json` records the number, because it is
+# a choice about a picture and not a measurement.
+QUERY_PLACEMENT_K = 10
+
+
+def query_placement(base_xy, gt_ids, k=QUERY_PLACEMENT_K):
+    """Where to draw each query: the mean of its true neighbours' positions.
+
+    A query has no position. The fixture's projection was fitted on base
+    vectors, and projecting a query into it would be a new computation in a
+    space the run does not use. Placing it among the neighbours it actually
+    has is an illustrative choice, declared as one, and it is what the teaser
+    draws.
+
+    This runs in the pipeline, never in a view: it is arithmetic over
+    projected coordinates, which `contract.Positions` refuses precisely so
+    that no view can do it.
+    """
+    rows = np.asarray(gt_ids)[:, :k]
+    return np.asarray(base_xy, dtype=np.float32)[rows].mean(
+        axis=1).astype(np.float32)
+
+
+def region_placement(base_xy, home_region, n_regions):
+    """Where to draw each region: the mean position of the vectors whose home
+    it is.
+
+    Not a projection of the centroid vector. The fixture's projection was
+    fitted on base vectors and a centroid is not one of them, so there is no
+    honest way to put a centroid in that picture except among its own members
+    -- which is what the teaser marks. A region with no home vectors has no
+    position, and gets NaN rather than the origin, which is a real place.
+    """
+    xy = np.asarray(base_xy, dtype=np.float64)
+    home = np.asarray(home_region)
+    sums = np.zeros((n_regions, 2), dtype=np.float64)
+    counts = np.zeros(n_regions, dtype=np.int64)
+    np.add.at(sums, home, xy)
+    np.add.at(counts, home, 1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = sums / counts[:, None]
+    out[counts == 0] = np.nan
+    return out.astype(np.float32)
+
+
+def with_projection(state, base_xy, query_xy=None, k=QUERY_PLACEMENT_K,
+                    gt_ids=None):
+    """`state` with the declared 2-D placement attached.
+
+    Attached by the pipeline rather than filled by a family, because a
+    projection belongs to the corpus and not to the architecture: every family
+    run on one corpus draws the same points in the same places, and only their
+    colours differ. It also keeps the families measuring and the declared
+    column declared -- a model never invents a position.
+    """
+    xy = np.ascontiguousarray(base_xy, dtype=np.float32)
+    if xy.shape != (state.n_base, 2):
+        raise ValueError(
+            f"a projection for this state must be ({state.n_base}, 2); got "
+            f"{xy.shape}")
+    state.partition.projection = region_placement(
+        xy, state.assignment.home_region, len(state.partition.region_ids))
+    if query_xy is None and gt_ids is not None:
+        query_xy = query_placement(xy, gt_ids, k)
+    q = None
+    if query_xy is not None:
+        q = np.ascontiguousarray(query_xy, dtype=np.float32)
+        if q.shape != (state.n_queries, 2):
+            raise ValueError(
+                f"a query placement must be ({state.n_queries}, 2); got "
+                f"{q.shape}")
+    state.assignment.projection = xy
+    state.route.projection = q
+    return state
 
 
 # --------------------------------------------------------------------------
@@ -465,6 +570,35 @@ def contract_violations(state, footprint=None):
     if int(ld.candidates_contributed.sum()) != len(c.cand_id):
         v.append(f"load counts {int(ld.candidates_contributed.sum())} "
                  f"candidates, the candidate state {len(c.cand_id)}")
+
+    # the declared projection, if there is one (task 027). Shape and finiteness
+    # only: there is nothing to check it against, because it is declared and
+    # not measured. A state without it is ordinary.
+    for name, arr, rows, finite in (
+            ("assignment.projection", a.projection, n, True),
+            ("route.projection", r.projection, state.n_queries, True),
+            # A region with no home vectors has no position, and NaN says so.
+            # Putting it at the origin would put it somewhere real.
+            ("partition.projection", p.projection, len(p.region_ids), False)):
+        if arr is None:
+            continue
+        arr = np.asarray(arr)
+        if arr.shape != (rows, 2):
+            v.append(f"{name} is {arr.shape}, not ({rows}, 2)")
+        elif finite and not np.isfinite(arr).all():
+            v.append(f"{name} holds {int((~np.isfinite(arr)).sum())} "
+                     "non-finite coordinate(s); a point with no position "
+                     "cannot be drawn and must not be invented")
+        elif not finite:
+            empty = np.asarray(p.region_sizes) == 0
+            bad = (~np.isfinite(arr).all(axis=1)) & ~empty
+            if bad.any():
+                v.append(f"{name} has no position for {int(bad.sum())} "
+                         "region(s) that do hold vectors")
+    if r.projection is not None and a.projection is None:
+        v.append("route.projection without assignment.projection: the query "
+                 "placement is the mean of base positions, so it cannot exist "
+                 "where those do not")
     return v
 
 
@@ -476,6 +610,9 @@ _MEANINGS = {
     "partition.region_ids": "region / shard id",
     "partition.region_sizes": "home population of each region",
     "partition.centroids": "centroid vector (kmeans partitions only)",
+    "partition.projection": "DECLARED 2-D placement of each region, "
+                            "illustrative: the mean position of its home "
+                            "vectors, NaN for a region with none",
     "assignment.home_region": "each base vector's home region",
     "assignment.copy_count": "regions each base vector is stored in",
     "assignment.copy_set": "regions it is stored in, nearest first; -1 unused",
@@ -485,10 +622,16 @@ _MEANINGS = {
                                  "first, whether or not the vector was copied "
                                  "into them; what a recount at another "
                                  "epsilon needs",
+    "assignment.projection": "DECLARED 2-D placement, illustrative: where "
+                             "to draw each base vector. Not measured, and "
+                             "nothing in the run is computed from it",
     "route.scored_region": "regions the router scored, nearest first",
     "route.scored_dist": "non-squared Euclidean distance to each; NaN pad",
     "route.probed_region": "regions searched, in probe order; -1 pad",
     "route.probe_reason": "why each was probed (ROUTE_*); 255 pad",
+    "route.projection": "DECLARED 2-D placement of each query, "
+                        "illustrative: the mean of its true neighbours' "
+                        "positions, not a projection of the query vector",
     "candidates.offsets": "query q's candidates are rows offsets[q]:"
                           "offsets[q+1]",
     "candidates.cand_id": "base vector id",
@@ -505,11 +648,13 @@ _MEANINGS = {
     "load.candidates_contributed": "candidates it returned before the merge",
 }
 
-_PARTS = (("partition", ("region_ids", "region_sizes", "centroids")),
+_PARTS = (("partition", ("region_ids", "region_sizes", "centroids",
+                         "projection")),
           ("assignment", ("home_region", "copy_count", "copy_set",
-                          "centroid_dist", "nearest_region")),
+                          "centroid_dist", "nearest_region",
+                          "projection")),
           ("route", ("scored_region", "scored_dist", "probed_region",
-                     "probe_reason")),
+                     "probe_reason", "projection")),
           ("candidates", ("offsets", "cand_id", "cand_shard", "cand_score",
                           "survived_dedupe", "true_rank", "true_ids")),
           ("load", ("shard_id", "vectors_held", "queries_served",

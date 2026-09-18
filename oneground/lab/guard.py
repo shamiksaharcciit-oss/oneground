@@ -36,7 +36,7 @@ import ast
 import importlib.util
 import os
 
-from .contract import VECTOR_COLUMNS
+from .contract import PROJECTION_COLUMNS, VECTOR_COLUMNS
 
 VIEWS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "views")
 VIEWS_PACKAGE = "oneground.lab.views"
@@ -65,6 +65,25 @@ _NAME_RULES = ((VECTOR_ARITHMETIC, "vector-arithmetic"),
                (VECTOR_DATA, "vector-data"),
                (FILE_IO, "file-io"),
                (DYNAMIC_CODE, "dynamic-code"))
+
+# Arithmetic and statistics over a declared placement (task 027). A view is
+# handed the projection -- drawing the picture is passing these numbers to a
+# mark -- so the rule cannot be "you may not have it", as it is for vectors.
+# It is "you may not compute with it".
+#
+# Naming the columns here would be useless: a view that draws the projection
+# mentions them, legitimately, in `reads` and in the subscript that reads
+# them. So the guard tracks the NAMES a module binds from a projection column
+# and flags those names in a numeric context. `contract.Positions` refuses the
+# same operations at run time and is the primary guarantee; this catches it at
+# the line where it was written, and catches it in a view module nobody ran.
+PROJECTION_MATH = frozenset({
+    "mean", "average", "median", "std", "var", "sum", "prod", "sqrt",
+    "square", "hypot", "diff", "subtract", "add", "multiply", "divide",
+    "true_divide", "power", "percentile", "quantile", "cumsum", "histogram",
+    "histogram2d", "argmin", "argmax", "amin", "amax", "ptp", "corrcoef",
+    "cov", "interp", "gradient",
+})
 
 
 def _docstrings(tree):
@@ -135,7 +154,70 @@ def violations(source, filename="<view>", package=VIEWS_PACKAGE):
         elif isinstance(node, ast.Constant) and isinstance(node.value, str) \
                 and id(node) not in docs and node.value in VECTOR_COLUMNS:
             add(node, "vector-data", node.value)
+
+    out.extend(_projection_violations(tree))
     return sorted(set(out))
+
+
+def _reads_a_projection(node):
+    """Whether an expression is, or indexes, a read of a projection column."""
+    while isinstance(node, ast.Subscript):
+        index = node.slice
+        if isinstance(index, ast.Constant) \
+                and index.value in PROJECTION_COLUMNS:
+            return True
+        node = node.value
+    return False
+
+
+def _projection_violations(tree):
+    """Names bound from a projection column, used in a numeric context.
+
+    Two passes: bind, then check. A view may hold the positions, index them
+    and hand them to a mark; it may not take a difference, a distance, a mean
+    or a percentile of them, because a projection is declared and illustrative
+    and a figure measured from it would be a new measurement in a space
+    nothing else in the run uses.
+    """
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and _reads_a_projection(node.value):
+            for target in node.targets:
+                for name in ast.walk(target):
+                    if isinstance(name, ast.Name):
+                        bound.add(name.id)
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) \
+                and node.value is not None \
+                and _reads_a_projection(node.value):
+            if isinstance(node.target, ast.Name):
+                bound.add(node.target.id)
+
+    if not bound:
+        return []
+
+    def mentions(node):
+        return any(isinstance(n, ast.Name) and n.id in bound
+                   for n in ast.walk(node))
+
+    out = []
+    for node in ast.walk(tree):
+        detail = None
+        if isinstance(node, (ast.BinOp, ast.AugAssign)) and mentions(node):
+            detail = type(node.op).__name__
+        elif isinstance(node, ast.UnaryOp) and mentions(node) \
+                and not isinstance(node.op, ast.Not):
+            detail = type(node.op).__name__
+        elif isinstance(node, ast.Compare) and mentions(node):
+            detail = "comparison"
+        elif isinstance(node, ast.Call):
+            name = (node.func.attr if isinstance(node.func, ast.Attribute)
+                    else getattr(node.func, "id", ""))
+            if name in PROJECTION_MATH and any(mentions(a) for a in node.args):
+                detail = name
+        if detail:
+            out.append((getattr(node, "lineno", 0), "projection-arithmetic",
+                        f"{detail} over a declared projection"))
+    return out
 
 
 def view_modules():
