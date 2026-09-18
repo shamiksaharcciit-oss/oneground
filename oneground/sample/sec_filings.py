@@ -68,6 +68,44 @@ INDEX_URL = "https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{q}/form.id
 # SEC asks for no more than 10 requests a second. The build stays under.
 MAX_REQUESTS_PER_SECOND = 8
 
+FETCH_WORKERS = 8
+"""Concurrent connections to EDGAR.
+
+Not a speed-up, a correction. A filing is about 2.8 MB and one connection to
+EDGAR carries roughly 2.4 MB/s, so a *serial* fetcher completes about 0.86
+requests a second no matter what rate limit it is given -- the request
+duration, not the limiter, is what binds. Measured on the pod in session
+20260918-233949: 562 filings examined in 657 seconds.
+
+At 10,000 documents that is three and three quarter hours, against a two-hour
+cap, and it fails producing nothing rather than producing less: the sampler
+returns only when the target is met, so no MANIFEST is ever written and the
+receipts-first packaging has nothing to package.
+
+Eight workers keeps the aggregate under SEC's stated 10 requests a second
+while letting the connections overlap, which is what the limit assumes a
+client is doing. `_RateLimiter` enforces the aggregate rate across them, so
+concurrency never becomes a way to exceed a published limit.
+"""
+
+
+class _RateLimiter:
+    """A shared token bucket, so N workers still obey one requests/second cap."""
+
+    def __init__(self, per_second):
+        import threading
+        self._min_gap = 1.0 / float(per_second)
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def take(self):
+        with self._lock:
+            now = time.monotonic()
+            wait = max(0.0, self._next - now)
+            self._next = max(now, self._next) + self._min_gap
+        if wait:
+            time.sleep(wait)
+
 # ------------------------------------------------------------ the rejections
 
 REJECTIONS = {
@@ -596,7 +634,7 @@ def resolve_source(spec, log=None):
     return by_acc, snapshot, selection
 
 
-def fetch_10k(path, tries=4):
+def fetch_10k(path, tries=4, limiter=None):
     """The 10-K <DOCUMENT> of one submission, streamed and cut short.
 
     Stops at the end of the 10-K part and abandons the rest of the response,
@@ -609,6 +647,8 @@ def fetch_10k(path, tries=4):
     url = ARCHIVES + path
     for attempt in range(tries):
         try:
+            if limiter is not None:
+                limiter.take()
             buf, read = b"", 0
             with _get(url) as r:
                 while read < (64 << 20):
@@ -667,7 +707,6 @@ def collect_documents(source, spec, log=None, receipt=None):
     """
     target = spec["sampling"]["target_documents"]
     seed = spec["sampling"]["seed"]
-    pause = 1.0 / MAX_REQUESTS_PER_SECOND
 
     if source:
         local, meta = _local_parts(source)
@@ -689,36 +728,80 @@ def collect_documents(source, spec, log=None, receipt=None):
 
     docs, rejected, examined, bytes_read = [], {}, 0, 0
     t0 = time.time()
-    for acc in order:
-        if len(docs) >= target:
-            break
+
+    def _load(acc):
+        """One filing's bytes, or the exception that stopped it."""
+        if local:
+            with open(local[acc], "rb") as fh:
+                return fh.read(), 0
+        return fetch_10k(by_acc[acc]["path"], limiter=limiter)
+
+    def _consume(acc, result):
+        """Judge one filing. Returns True once the target is met."""
+        nonlocal examined, bytes_read
         examined += 1
-        row = by_acc[acc]
-        try:
-            if local:
-                with open(local[acc], "rb") as fh:
-                    part, read = fh.read(), 0
-            else:
-                part, read = fetch_10k(row["path"])
-                time.sleep(pause)
-        except (SourceError, urllib.error.HTTPError, OSError):
+        if isinstance(result, BaseException):
             rejected["fetch_failed"] = rejected.get("fetch_failed", 0) + 1
-            continue
+            return False
+        part, read = result
         bytes_read += read
         if part is None:
             rejected["no_10k_document"] = rejected.get("no_10k_document", 0) + 1
-            continue
+            return False
         rec, why = extract(part)
         if rec is None:
             rejected[why] = rejected.get(why, 0) + 1
-            continue
+            return False
+        row = by_acc[acc]
         docs.append(dict(accession=acc, cik=row["cik"], company=row["company"],
                          date=row["date"], chars=rec["chars"],
                          sections=rec["sections"], text=rec["text"]))
         if len(docs) % 500 == 0:
-            rate = bytes_read / max(time.time() - t0, 1e-9) / 1e6
+            el = max(time.time() - t0, 1e-9)
             _say(log, f"  {len(docs):>6,} accepted of {examined:>6,} examined"
-                      f"   {bytes_read / 1e9:>5.2f} GB   {rate:>5.1f} MB/s")
+                      f"   {bytes_read / 1e9:>5.2f} GB   {bytes_read / el / 1e6:>5.1f} MB/s"
+                      f"   {examined / el:>4.1f} filings/s")
+        return len(docs) >= target
+
+    if local:
+        limiter = None
+        for acc in order:
+            try:
+                res = _load(acc)
+            except (SourceError, urllib.error.HTTPError, OSError) as e:
+                res = e
+            if _consume(acc, res):
+                break
+    else:
+        # Concurrent fetch, strictly ordered acceptance. Filings are fetched
+        # ahead of the cursor but are JUDGED in the seeded order, and the
+        # target stops the cursor, so `examined` and the accepted set are
+        # exactly what the serial loop produced -- concurrency changes the
+        # wall clock and nothing else. Work fetched beyond the cursor when the
+        # target is met is discarded and never counted as examined.
+        from concurrent.futures import ThreadPoolExecutor
+        limiter = _RateLimiter(MAX_REQUESTS_PER_SECOND)
+        window = FETCH_WORKERS * 3
+        pool = ThreadPoolExecutor(max_workers=FETCH_WORKERS)
+        try:
+            inflight, submitted, cursor = {}, 0, 0
+            while cursor < len(order):
+                while submitted < len(order) and len(inflight) < window:
+                    inflight[submitted] = pool.submit(_load, order[submitted])
+                    submitted += 1
+                fut = inflight.pop(cursor)
+                try:
+                    res = fut.result()
+                except (SourceError, urllib.error.HTTPError, OSError) as e:
+                    res = e
+                done = _consume(order[cursor], res)
+                cursor += 1
+                if done:
+                    break
+        finally:
+            for f in inflight.values():
+                f.cancel()
+            pool.shutdown(wait=False)
 
     seconds = time.time() - t0
     n_rej = sum(rejected.values())
