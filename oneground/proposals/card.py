@@ -72,11 +72,6 @@ FORBIDDEN = (
     "scales to",
 )
 
-# The card's own text, in the order it is read.
-ORDER = ("proposal_outcome", "proposal_change", "proposal_budget",
-         "proposal_metric", "proposal_unchecked", "proposal_baseline",
-         "proposal_calibration", "proposal_limits")
-
 # The sentences that report one judged row each.
 ROW_KINDS = ("proposal_metric", "proposal_budget", "proposal_unchecked")
 
