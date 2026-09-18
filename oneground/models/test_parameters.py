@@ -17,6 +17,7 @@ Synthetic corpora throughout, except the tests named for shipped files.
 
 import ast
 import glob
+import re
 import os
 import sys
 
@@ -29,7 +30,8 @@ sys.path.insert(0, ROOT)
 
 from oneground import models  # noqa: E402
 from oneground.models import Config, ConfigSpace  # noqa: E402
-from oneground.models.base import (CONSTANT, PARAMETER_TABLES,  # noqa: E402
+from oneground.models.base import (CONSTANT, NO_DEFAULT,  # noqa: E402
+                                   PARAMETER, PARAMETER_TABLES,
                                    ParameterError, parameter_table)
 
 FAMILIES = sorted(models.REGISTRY)
@@ -232,3 +234,155 @@ def test_every_fixture_reference_configuration_is_valid():
             if not isinstance(entry, dict) or family not in models.REGISTRY:
                 continue
             Config.make(family, dict(entry.get("params") or {}))
+
+
+# ------------------------------------------------- one label per configuration
+# Task 032. A parameter written at its default and the same parameter left out
+# are the same architecture measured the same way, and used to be two labels:
+# `semantic_sharded[...,probe=2]` and `semantic_sharded[...]` are two rows in
+# `simulate.json`, so a sweep could measure identical work twice and present it
+# as two configurations. `Config.make` fills the declared defaults.
+
+def _full_params(family):
+    """Every declared parameter of `family`, at its declared default."""
+    return {n: p.default for n, p in parameter_table(family).items()
+            if p.role == PARAMETER and p.default is not NO_DEFAULT}
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_default_written_and_a_default_omitted_are_one_config(family):
+    """The wrinkle itself: both spellings, one label and one params dict."""
+    full = _full_params(family)
+    assert full, f"{family} declares no parameter with a default"
+    whole = Config.make(family, dict(full))
+    for key in sorted(full):
+        without = {k: v for k, v in full.items() if k != key}
+        c = Config.make(family, without)
+        assert c.label == whole.label, (family, key, c.label, whole.label)
+        assert c.params == whole.params, (family, key)
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_the_two_spellings_are_indistinguishable_when_measured(family):
+    """Not only the label: the same index, the same ids, the same footprint.
+
+    A label that collapsed two spellings the family measures differently
+    would be worse than the wrinkle -- it would present two results as one.
+    """
+    x, q = _corpus()
+    full = _full_params(family)
+    # Small enough for a 240-vector corpus, and still every parameter named.
+    for key, value in (("centroids", 4), ("shards", 2)):
+        if key in full:
+            full[key] = value
+    model = models.get(family)
+    written = Config.make(family, dict(full))
+
+    # The key to leave out has to be one still *at* its declared default:
+    # omitting a key whose value was changed is a different configuration,
+    # and asserting the two agree would be asserting something false.
+    key = "efSearch"
+    assert full[key] == parameter_table(family)[key].default, family
+    omitted = Config.make(family, {k: v for k, v in full.items() if k != key})
+
+    a = model.build(x, written, seed=3)
+    b = model.build(x, omitted, seed=3)
+    ia = model.search(a, q, 5, written).ids
+    ib = model.search(b, q, 5, omitted).ids
+    assert np.array_equal(ia, ib), (family, key)
+    assert model.footprint(a).as_dict() == model.footprint(b).as_dict()
+
+
+def test_the_label_test_would_catch_the_wrinkle_coming_back_synthetic():
+    """The negative control for the guard itself.
+
+    `canonical_params` is what closes the wrinkle; without it the two
+    spellings are two labels again. A test nobody has seen fail proves
+    nothing, so this is the same comparison against the un-canonicalised
+    form, asserting it *does* differ.
+    """
+    full = _full_params("semantic_sharded")
+    without = {k: v for k, v in full.items() if k != "probe"}
+    raw = "semantic_sharded[%s]" % ",".join(
+        "%s=%s" % (k, without[k]) for k in sorted(without))
+    assert raw != Config.make("semantic_sharded", without).label
+    assert "probe" not in raw
+    # and the canonical form is the one with every parameter in it
+    assert "probe=2" in Config.make("semantic_sharded", without).label
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_non_default_value_is_still_its_own_configuration(family):
+    """The negative control. Canonicalising defaults must not collapse two
+    configurations that differ: a label that did would hide a real change."""
+    full = _full_params(family)
+    whole = Config.make(family, dict(full))
+    moved = 0
+    for key, value in sorted(full.items()):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            continue
+        other = Config.make(family, dict(full, **{key: value + 1}))
+        assert other.label != whole.label, (family, key)
+        assert other.params[key] != whole.params[key]
+        moved += 1
+    assert moved, f"nothing numeric to move in {family}"
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_build_setting_at_its_default_is_not_collapsed(family):
+    """Only `parameter` keys are filled.
+
+    `deterministic=True` is a run someone asked for explicitly and
+    `deterministic=False` is a different build; task 029 compared the two by
+    label. Filling or eliding a build setting would make one of those
+    comparisons impossible.
+    """
+    full = _full_params(family)
+    plain = Config.make(family, dict(full))
+    on = Config.make(family, dict(full, deterministic=True))
+    off = Config.make(family, dict(full, deterministic=False))
+    assert on.label != plain.label, family
+    assert off.label != on.label, family
+    assert "deterministic" not in plain.params, family
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_run_setting_does_not_change_a_label(family):
+    """`simulate` adds `shard_depth` to a config without re-labelling it, so
+    two sweeps of the same grid stay comparable row for row."""
+    from oneground.simulate import _with_shard_depth
+    cfg = Config.make(family, _full_params(family))
+    assert _with_shard_depth(cfg, 100).label == cfg.label, family
+
+
+def test_the_published_labels_are_the_ones_canonicalisation_produces():
+    """Not synthetic: the labels published values are keyed by do not move.
+
+    Canonicalisation would be worth nothing if it renamed the rows the
+    fixtures publish, so this pins the three of them.
+    """
+    assert Config.make("single_node_hnsw", {
+        "M": 32, "efConstruction": 200, "efSearch": 128}).label == (
+        "single_node_hnsw[M=32,efConstruction=200,efSearch=128]")
+    assert Config.make("semantic_sharded", {
+        "centroids": 256, "epsilon": 0.2, "probe": 2, "M": 32,
+        "efSearch": 96}).label == (
+        "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]")
+    assert Config.make("hash_sharded", {
+        "shards": 3, "M": 32, "efSearch": 96}).label == (
+        "hash_sharded[M=32,efSearch=96,shards=3]")
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_the_declared_default_is_the_one_the_family_builds_with(family):
+    """One source of truth, asserted: the source reads the table rather than
+    repeating the literal, so the label and the build cannot disagree."""
+    src = open(os.path.join(HERE, family, "model.py"), encoding="utf-8").read()
+    table = parameter_table(family)
+    for name, param in table.items():
+        if param.default is NO_DEFAULT:
+            continue
+        # Every read of this key falls back to the table, never to a literal.
+        for hit in re.finditer(r'config\.get\("%s",\s*([^,\n]+)' % name, src):
+            assert hit.group(1).strip().startswith('_d("%s"' % name), (
+                family, name, hit.group(1))

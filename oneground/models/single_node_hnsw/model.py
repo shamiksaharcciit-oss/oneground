@@ -33,15 +33,25 @@ EF_CONSTRUCTION = 200
 # -- but the generated grid always builds at EF_CONSTRUCTION, so it is pinned
 # by an `include` entry, never swept.
 PARAMETERS = declare_parameters(NAME, (
-    Param("M", int, minimum=1, swept=True,
+    Param("M", int, minimum=1, swept=True, default=32,
           note="HNSW links per node"),
-    Param("efSearch", int, minimum=1, swept=True,
+    Param("efSearch", int, minimum=1, swept=True, default=128,
           note="search beam width"),
-    Param("efConstruction", int, minimum=1,
+    Param("efConstruction", int, minimum=1, default=EF_CONSTRUCTION,
           note="build beam width; pinned by include, not swept"),
     Param("deterministic", bool, role=BUILD,
           note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
 ))
+
+
+def _d(key):
+    """This family's declared default for `key` (task 032).
+
+    Read from the parameter table rather than repeated at each call site, so
+    the value a config is labelled with and the value the build uses are the
+    same one by construction.
+    """
+    return PARAMETERS[key].default
 
 
 @dataclass
@@ -53,9 +63,9 @@ class SingleNodeHNSW:
         grid = {**DEFAULT_GRID, **space.for_family(NAME)}
         seen, out = set(), []
         for params in space.included_for(NAME):
-            p = {"M": 32, "efConstruction": EF_CONSTRUCTION, "efSearch": 128}
-            p.update(params)
-            c = Config.make(NAME, p)
+            # No seed dict of defaults since task 032: `Config.make` fills
+            # what an include entry leaves out, from the declared table.
+            c = Config.make(NAME, dict(params))
             if c.label not in seen:
                 seen.add(c.label)
                 out.append(c)
@@ -92,10 +102,10 @@ class SingleNodeHNSW:
         import faiss
         t0 = time.time()
         det = resolve_deterministic(config, deterministic)
-        idx = faiss.IndexHNSWFlat(vectors.shape[1], int(config.get("M", 32)),
+        idx = faiss.IndexHNSWFlat(vectors.shape[1], int(config.get("M", _d("M"))),
                                   faiss.METRIC_INNER_PRODUCT)
         idx.hnsw.efConstruction = int(config.get("efConstruction",
-                                                 EF_CONSTRUCTION))
+                                                 _d("efConstruction")))
         with single_threaded_faiss(det):
             if add_chunk:
                 n = vectors.shape[0]
@@ -106,7 +116,7 @@ class SingleNodeHNSW:
                                  time.time() - t0)
             else:
                 idx.add(vectors)
-        idx.hnsw.efSearch = int(config.get("efSearch", 128))
+        idx.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
         return BuiltIndex(family=NAME, config=config, n_base=len(vectors),
                           dim=vectors.shape[1],
                           state={"index": idx, "vectors": vectors,
@@ -116,7 +126,7 @@ class SingleNodeHNSW:
     # -- search ------------------------------------------------------------
     def search(self, built, queries, k, config):
         idx = built.state["index"]
-        idx.hnsw.efSearch = int(config.get("efSearch", 128))
+        idx.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
         scores, ids = idx.search(queries, k)
         return Candidates(ids=ids.astype(np.int64),
                           scores=scores.astype(np.float32))
@@ -131,7 +141,7 @@ class SingleNodeHNSW:
 
     # -- footprint ---------------------------------------------------------
     def footprint(self, built):
-        M = int(built.config.get("M", 32))
+        M = int(built.config.get("M", _d("M")))
         return Footprint(
             stored_vectors=built.n_base,
             amplification=1.0,
@@ -170,7 +180,7 @@ class SingleNodeHNSW:
             probed_region=np.zeros((nq, 1), dtype=np.int32),
             probe_reason=np.full((nq, 1), S.ROUTE_FANOUT, dtype=np.uint8))
 
-        idx.hnsw.efSearch = int(config.get("efSearch", 128))
+        idx.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
         scores, ids = idx.search(queries, k)
         per_query = [(ids[q], np.zeros(len(ids[q]), dtype=np.int32),
                       scores[q]) for q in range(nq)]

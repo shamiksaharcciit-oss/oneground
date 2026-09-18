@@ -234,6 +234,16 @@ class ParameterError(ValueError):
     """A configuration names or sets a key its family does not accept."""
 
 
+class _NoDefault:
+    """A declared key the family has no default for: it must be named."""
+
+    def __repr__(self):                               # pragma: no cover
+        return "<no default>"
+
+
+NO_DEFAULT = _NoDefault()
+
+
 @dataclass(frozen=True)
 class Param:
     """One declared key.
@@ -252,6 +262,12 @@ class Param:
     maximum: Optional[float] = None
     swept: bool = False
     fixed: Any = None
+    # What the family uses when a config does not name this key. Declared
+    # here so there is one of it: before task 032 the same number appeared in
+    # the family's `config.get(key, X)` calls, again in the dict `configs()`
+    # seeds an `include` entry from, and nowhere a reader could look it up.
+    # `NO_DEFAULT` means the key must be named.
+    default: Any = NO_DEFAULT
     note: str = ""
 
 
@@ -279,6 +295,33 @@ def parameter_table(family):
         raise ParameterError(
             f"no parameter table for family {family!r}; declared: "
             f"{', '.join(sorted(PARAMETER_TABLES)) or 'none'}") from None
+
+
+def default_of(family, key):
+    """A family's declared default for `key`, or `NO_DEFAULT`.
+
+    The one place a default is written down. A family reads its own through
+    this rather than repeating the literal at every `config.get` call, so the
+    number in the label and the number the build uses cannot drift apart.
+    """
+    param = parameter_table(family).get(key)
+    return NO_DEFAULT if param is None else param.default
+
+
+def canonical_params(family, params):
+    """`params` with every declared parameter that has a default present.
+
+    The canonical form of a configuration: what is measured does not depend on
+    whether a parameter was written at its default or left out, so neither
+    does the label. Keys of other roles, and keys of an unregistered family,
+    are passed through exactly as given -- see `Config.make` for why.
+    """
+    out = dict(params)
+    for name, param in (PARAMETER_TABLES.get(family) or {}).items():
+        if (param.role == PARAMETER and name not in out
+                and param.default is not NO_DEFAULT):
+            out[name] = param.default
+    return out
 
 
 def _describe_table(family, table, roles=None):
@@ -364,6 +407,21 @@ class Config:
 
     @staticmethod
     def make(family, params):
+        """A config, with every declared parameter present at its value.
+
+        Task 032. A parameter left out and the same parameter written at its
+        declared default are the same architecture, and used to be two labels
+        and therefore two rows: a sweep could measure identical work twice and
+        present it as two configurations. `canonical_params` fills what was
+        left out, so the two spellings produce one label and one row.
+
+        Only keys whose role is `parameter` are filled. A build setting is not
+        filled, because `deterministic=False` is a different build and must
+        stay a different label, and one written at its default is a run
+        someone asked for explicitly; a run-level setting is not filled
+        because the simulator adds it without changing the label.
+        """
+        params = canonical_params(family, params)
         bits = ",".join(f"{k}={params[k]}" for k in sorted(params))
         return Config(family=family, params=dict(params),
                       label=f"{family}[{bits}]")

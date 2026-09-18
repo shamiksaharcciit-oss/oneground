@@ -75,23 +75,33 @@ DEFAULT_GRID = {
 # "a constant" rather than "no such parameter", and refused in any config,
 # since a config carrying it would be labelled as if it varied.
 PARAMETERS = declare_parameters(NAME, (
-    Param("centroids", int, minimum=1, swept=True,
+    Param("centroids", int, minimum=1, swept=True, default=256,
           note="k-means regions"),
-    Param("epsilon", float, minimum=0.0, swept=True,
+    Param("epsilon", float, minimum=0.0, swept=True, default=0.2,
           note="closure: copy a vector into every region within (1+eps)"),
-    Param("probe", int, minimum=1, swept=True,
+    Param("probe", int, minimum=1, swept=True, default=2,
           note="regions searched per query"),
-    Param("M", int, minimum=1, swept=True,
+    Param("M", int, minimum=1, swept=True, default=32,
           note="HNSW links per node, per shard"),
-    Param("efSearch", int, minimum=1, swept=True,
+    Param("efSearch", int, minimum=1, swept=True, default=96,
           note="search beam width, per shard"),
-    Param("shard_depth", int, role=RUN, minimum=1,
+    Param("shard_depth", int, role=RUN, minimum=1, default=SHARD_DEPTH,
           note="candidates taken from each probed shard; set by simulate"),
     Param("efConstruction", int, role=CONSTANT, fixed=EF_CONSTRUCTION,
           note="every shard is built at EF_CONSTRUCTION"),
     Param("deterministic", bool, role=BUILD,
           note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
 ))
+
+
+def _d(key):
+    """This family's declared default for `key` (task 032).
+
+    Read from the parameter table rather than repeated at each call site, so
+    the value a config is labelled with and the value the build uses are the
+    same one by construction.
+    """
+    return PARAMETERS[key].default
 
 
 @dataclass
@@ -103,10 +113,10 @@ class SemanticSharded:
         grid = {**DEFAULT_GRID, **space.for_family(NAME)}
         seen, out = set(), []
         for params in space.included_for(NAME):
-            p = {"centroids": 256, "epsilon": 0.2, "probe": 2, "M": 32,
-                 "efSearch": 96}
-            p.update(params)
-            c = Config.make(NAME, p)
+            # No seed dict of defaults here since task 032: `Config.make`
+            # fills what an include entry leaves out, from the declared table,
+            # so the defaults are written down once rather than three times.
+            c = Config.make(NAME, dict(params))
             if c.label not in seen:
                 seen.add(c.label)
                 out.append(c)
@@ -146,8 +156,8 @@ class SemanticSharded:
 
         t0 = time.time()
         det = resolve_deterministic(config, deterministic)
-        n_cent = int(config.get("centroids", 256))
-        eps = float(config.get("epsilon", 0.2))
+        n_cent = int(config.get("centroids", _d("centroids")))
+        eps = float(config.get("epsilon", _d("epsilon")))
 
         with deterministic_faiss(det):
             cents = (context or {}).get("centroids")
@@ -173,11 +183,11 @@ class SemanticSharded:
             for r in sorted(members):
                 ids = np.asarray(members[r], dtype=np.int64)
                 s = faiss.IndexHNSWFlat(vectors.shape[1],
-                                        int(config.get("M", 32)),
+                                        int(config.get("M", _d("M"))),
                                         faiss.METRIC_INNER_PRODUCT)
                 s.hnsw.efConstruction = EF_CONSTRUCTION
                 s.add(vectors[ids])
-                s.hnsw.efSearch = int(config.get("efSearch", 96))
+                s.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
                 shards[r], ids_of[r] = s, ids
 
         return BuiltIndex(
@@ -191,7 +201,7 @@ class SemanticSharded:
     # -- routing -----------------------------------------------------------
     def _probed(self, built, queries, config):
         from ...measures.crispness import centroid_dists
-        probe = int(config.get("probe", 2))
+        probe = int(config.get("probe", _d("probe")))
         _, q_r = centroid_dists(queries, built.state["centroids"], probe)
         return q_r
 
@@ -199,7 +209,7 @@ class SemanticSharded:
     def search(self, built, queries, k, config):
         shards, ids_of = built.state["shards"], built.state["ids_of"]
         for s in shards.values():
-            s.hnsw.efSearch = int(config.get("efSearch", 96))
+            s.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
         q_r = self._probed(built, queries, config)
 
         ids = np.full((len(queries), k), -1, dtype=np.int64)
@@ -210,7 +220,7 @@ class SemanticSharded:
                 r = int(r)
                 if r not in shards:
                     continue
-                n = min(int(config.get("shard_depth", SHARD_DEPTH)),
+                n = min(int(config.get("shard_depth", _d("shard_depth"))),
                         shards[r].ntotal)
                 sc, loc = shards[r].search(queries[qi:qi + 1], n)
                 cid.append(ids_of[r][loc[0]])
@@ -242,12 +252,12 @@ class SemanticSharded:
     def footprint(self, built):
         copies = built.state["copies"]
         stored = int(copies.sum())
-        M = int(built.config.get("M", 32))
+        M = int(built.config.get("M", _d("M")))
         return Footprint(
             stored_vectors=stored,
             amplification=float(stored / built.n_base),
             memory_bytes=estimate_memory_bytes(stored, built.dim, M),
-            fanout=float(built.config.get("probe", 2)),
+            fanout=float(built.config.get("probe", _d("probe"))),
             shards=len(built.state["shards"]),
             copies_p50=int(np.percentile(copies, 50)),
             copies_p95=int(np.percentile(copies, 95)),
@@ -277,8 +287,8 @@ class SemanticSharded:
         n, dim = vectors.shape
         nq = len(queries)
         n_cent = int(len(cents))
-        eps = float(config.get("epsilon", 0.2))
-        probe = int(config.get("probe", 2))
+        eps = float(config.get("epsilon", _d("epsilon")))
+        probe = int(config.get("probe", _d("probe")))
 
         # `deterministic_faiss`, not `single_threaded_faiss`: this recomputes
         # the closure and asserts it equals what `build` produced, a few lines
@@ -331,10 +341,10 @@ class SemanticSharded:
 
         shards, ids_of = st["shards"], st["ids_of"]
         for s in shards.values():
-            s.hnsw.efSearch = int(config.get("efSearch", 96))
+            s.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
         per_query, padded = S.collect_candidates(
             shards, ids_of, queries, q_r,
-            int(config.get("shard_depth", SHARD_DEPTH)))
+            int(config.get("shard_depth", _d("shard_depth"))))
         candidates = S.build_candidates(per_query, gt_ids,
                                         int(np.shape(gt_ids)[1]))
         return S.ModelState(
