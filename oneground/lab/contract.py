@@ -114,7 +114,9 @@ class RenderMode:
     `readings_ms` is each reading's p95, in order; `p95_ms` is the highest of
     them, the value the decision turned on. `verdict` says where the readings
     fell against `threshold_ms`. `measured` is what measurement alone chose,
-    kept when `--mode` overrides.
+    kept when `--mode` overrides. `planned` is how many readings would have
+    been taken had none settled it early, so the wording can tell "it stopped
+    at the first reading" from "it took one reading and that was the plan".
     """
 
     mode: str
@@ -128,8 +130,19 @@ class RenderMode:
     margin: float = MARGIN
     pooled_p95_ms: Optional[float] = None
     verdict: str = ""
+    planned: int = 0
+
+    @property
+    def stopped_early(self):
+        """Whether a reading above the threshold ended the measurement before
+        the planned readings were taken."""
+        return bool(self.planned) and len(self.readings_ms) < self.planned
 
     def as_dict(self):
+        # `evidence` and `sentence` travel with the numbers so the interface
+        # shows the words this class writes rather than composing its own from
+        # the parts. Two renderings of one measurement can drift apart, and
+        # the caption in a screenshot has to be the caption in the log.
         return {"mode": self.mode, "p95_ms": self.p95_ms,
                 "frame_ms": round(self.frame_ms, 1),
                 "threshold_ms": round(self.threshold_ms, 1),
@@ -137,16 +150,38 @@ class RenderMode:
                 "readings_ms": list(self.readings_ms),
                 "pooled_p95_ms": self.pooled_p95_ms,
                 "verdict": self.verdict, "chosen_by": self.chosen_by,
-                "measured_mode": self.measured}
+                "measured_mode": self.measured,
+                "planned_readings": self.planned,
+                "stopped_early": self.stopped_early,
+                "evidence": None if self.p95_ms is None else self.evidence(),
+                "sentence": self.sentence()}
 
     def evidence(self):
-        """The measurement in words, the same wherever it is shown."""
+        """The measurement in words, the same wherever it is shown.
+
+        An early stop is said as one. "1 reading of 20 draws" was true and
+        read as a choice of sample size, when what happened was that the
+        first reading came in over the threshold and nothing later could
+        change the answer, so measuring stopped.
+        """
+        against = (f"the {self.threshold_ms:.1f} ms threshold "
+                   f"({self.margin:.0%} inside the {self.frame_ms:.1f} ms "
+                   f"frame)")
         readings = ", ".join(f"{x:.1f}" for x in self.readings_ms)
         n = len(self.readings_ms)
+        if self.stopped_early:
+            where = ("at the first reading" if n == 1
+                     else f"after {n} readings")
+            # Only the last reading was necessarily over the threshold; with
+            # earlier ones inside it the verdict is straddled, and saying
+            # "above" of the whole set would be false.
+            how = ("above" if self.verdict == ABOVE
+                   else "the last of them above")
+            return (f"stopped {where}, {readings} ms, {how} {against} -- no "
+                    f"later reading could change the answer, so the other "
+                    f"{self.planned - n} were not taken")
         return (f"{n} reading{'' if n == 1 else 's'} of {self.draws} ground "
-                f"draws on this host, p95 {readings} ms, against a "
-                f"{self.threshold_ms:.1f} ms threshold ({self.margin:.0%} "
-                f"inside the {self.frame_ms:.1f} ms frame)")
+                f"draws on this host, p95 {readings} ms, against {against}")
 
     def sentence(self):
         if self.p95_ms is None:
@@ -158,6 +193,11 @@ class RenderMode:
         if self.mode == MOVE:
             return (f"Rendering: {self.mode} -- every reading within the "
                     f"threshold: {self.evidence()}.")
+        if self.stopped_early:
+            # `evidence` already says it stopped and why; prefixing "the
+            # readings were above the threshold" would say it twice.
+            return (f"Rendering: {self.mode} -- measurement {self.evidence()}."
+                    " The ground redraws when the control is released.")
         why = ("the readings straddled the threshold"
                if self.verdict == STRADDLED else
                "the readings were above the threshold")

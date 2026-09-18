@@ -313,22 +313,13 @@
   }
 
   // ------------------------------------------------------ render verdicts
-  const VERDICT_WORDS = {
-    within: 'every reading within the threshold',
-    straddled: 'the readings straddled the threshold',
-    above: 'above the threshold',
-  };
-
-  function readingsPhrase(r) {
-    const n = r.readings_ms.length;
-    return `${n} reading${n === 1 ? '' : 's'} of ${r.draws} draws`;
-  }
-
+  /* The words come from the server: `contract.RenderMode` writes them once,
+   * and the startup line, the ground's caption and this page all show the
+   * same string. Composing a second version here from the parts is how the
+   * page and the log come to disagree about one measurement. */
   function modeSentence(r) {
-    if (r.p95_ms === null || r.p95_ms === undefined) return r.mode;
-    return `${r.mode} — ${VERDICT_WORDS[r.verdict] || r.verdict}: ground draw p95 `
-      + `${r.readings_ms.join(' / ')} ms over ${readingsPhrase(r)} on this host against `
-      + `${r.threshold_ms} ms (${Math.round(r.margin * 100)}% inside the ${r.frame_ms} ms frame)`
+    if (!r.evidence) return r.mode;
+    return `${r.mode} — ${r.evidence}`
       + (r.chosen_by === '--mode' ? ` — chosen by --mode; measurement alone chose ${r.measured_mode}` : '');
   }
 
@@ -654,8 +645,26 @@
 
     const total = rows.length;
     const cap = limit || QLIST_MAX;
-    text(need('q-count'), `${fmtInt(total)} of ${fmtInt(run.n_queries)} queries`
-      + (total > cap ? `, showing the first ${fmtInt(cap)}` : ''));
+
+    /* The count line carries the way to the rest. It used to say "showing the
+     * first 250" with the only control at the bottom of a list 250 rows deep,
+     * inside its own scroll box — true, and unreachable without knowing it was
+     * there. */
+    const count = need('q-count');
+    count.replaceChildren(make('span', null,
+      `${fmtInt(total)} of ${fmtInt(run.n_queries)} queries`
+      + (total > cap ? `, showing the first ${fmtInt(cap)}` : '')));
+    if (total > cap) {
+      const all = make('button', 'linky', `show all ${fmtInt(total)}`);
+      all.type = 'button';
+      all.addEventListener('click', () => buildQueryList(total));
+      count.append(all);
+    } else if (total > QLIST_MAX) {
+      const fewer = make('button', 'linky', 'show fewer');
+      fewer.type = 'button';
+      fewer.addEventListener('click', () => buildQueryList(QLIST_MAX));
+      count.append(fewer);
+    }
 
     list.replaceChildren();
     if (!total) {

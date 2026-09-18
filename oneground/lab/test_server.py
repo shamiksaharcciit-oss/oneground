@@ -543,10 +543,18 @@ def test_the_measured_mode_is_printed_and_in_the_ground_caption_synthetic():
                 else contract.RELEASE)
             line = lab.startup_line(1.0, "run")
             assert lab.url in line and r.mode in line
-            assert f"p95 {r.p95_ms:.1f} ms" in line
-            assert r.verdict in line and "threshold 12.5 ms" in line
+            # Every reading is in the line, not only the decisive one, and
+            # the decisive one is among them.
+            for reading in r.readings_ms:
+                assert f"{reading:.1f}" in line, (reading, line)
+            assert f"{r.p95_ms:.1f}" in line
+            assert "12.5 ms threshold" in line
+            assert f"{contract.MARGIN:.0%} inside" in line
             run = json.loads(_get(lab, "/api/run")[2])
             assert run["render"]["mode"] == r.mode
+            # The line, the page and the caption show one set of words.
+            assert run["render"]["evidence"] == r.evidence()
+            assert run["render"]["evidence"] in line
             caption = json.loads(_get(lab, "/api/ground?epsilon=0.15")[2]
                                  )["caption"]
             assert "Rendering:" in caption and r.mode in caption
@@ -782,3 +790,54 @@ def test_a_failure_while_loading_is_shown_in_the_page():
             assert shown or not labpage, (
                 "the lab page loaded but said nothing about being unable to "
                 "reach its server")
+
+
+def test_an_early_stop_is_said_as_one_synthetic():
+    """"1 reading of 20 draws" was true and read as a choice of sample size.
+
+    What happened was that the first reading came in over the threshold and no
+    later one could change the answer, so measuring stopped. The words now say
+    that, and say it the same way in the startup line, in `/api/run` and in the
+    ground's caption, because `RenderMode` writes them once.
+    """
+    slow = server.choose_mode([37.2], draws=20, planned=5)
+    assert slow.stopped_early
+    words = slow.evidence()
+    assert "stopped at the first reading" in words
+    assert "37.2 ms" in words and "above" in words
+    assert "the other 4 were not taken" in words
+    assert "1 reading of" not in words
+    # and it is not said twice in the sentence
+    assert slow.sentence().count("above the") == 1, slow.sentence()
+
+    # Two readings, the second over: the set straddles, so "above" of all of
+    # them would be false.
+    straddle = server.choose_mode([11.0, 14.2], draws=20, planned=5)
+    assert straddle.stopped_early and straddle.verdict == contract.STRADDLED
+    assert "stopped after 2 readings" in straddle.evidence()
+    assert "the last of them above" in straddle.evidence()
+
+    # Every planned reading taken: no early-stop wording.
+    full = server.choose_mode([0.4, 0.7, 0.4, 0.5, 0.4], draws=20, planned=5)
+    assert not full.stopped_early
+    assert "stopped" not in full.evidence()
+    assert "5 readings of 20 ground draws" in full.evidence()
+
+    # One reading because one was planned: also not an early stop.
+    single = server.choose_mode([17.1], draws=20, planned=1)
+    assert not single.stopped_early
+    assert "1 reading of 20 ground draws" in single.evidence()
+
+
+def test_the_count_line_offers_the_rest_of_a_capped_list():
+    """The picker showed "the first 250 of 2,000" with the only control at the
+    bottom of a list 250 rows deep inside its own scroll box. The way to the
+    rest belongs beside the count, where it can be seen."""
+    with open(os.path.join(server.STATIC_DIR, "lab.js"), encoding="utf-8") as f:
+        source = f.read()
+    marker = source[source.index("const count = need('q-count')"):]
+    marker = marker[:marker.index("list.replaceChildren()")]
+    assert "show all" in marker, \
+        "the count line does not offer the whole list"
+    assert "buildQueryList(total)" in marker, \
+        "the control does not actually widen the list"

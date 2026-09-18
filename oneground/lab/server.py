@@ -165,10 +165,10 @@ def measure_render_mode(run, draws=MODE_DRAWS, override=None,
         if per_reading[-1] > contract.THRESHOLD_MS:
             break
     return choose_mode(per_reading, draws, override,
-                       pooled=round(p95(everything), 1))
+                       pooled=round(p95(everything), 1), planned=readings)
 
 
-def choose_mode(readings_ms, draws, override=None, pooled=None):
+def choose_mode(readings_ms, draws, override=None, pooled=None, planned=0):
     """The rule, and nothing else: redraw on move only when every reading's
     p95 is within `contract.THRESHOLD_MS`; render on release when the
     readings straddle it or sit above it. An override wins and keeps the
@@ -188,7 +188,8 @@ def choose_mode(readings_ms, draws, override=None, pooled=None):
     return contract.RenderMode(
         mode=override or measured, p95_ms=max(readings), draws=draws,
         chosen_by="--mode" if override else "measurement", measured=measured,
-        readings_ms=readings, pooled_p95_ms=pooled, verdict=verdict)
+        readings_ms=readings, pooled_p95_ms=pooled, verdict=verdict,
+        planned=int(planned or len(readings)))
 
 
 def _sha256(path):
@@ -424,13 +425,11 @@ class LabServer:
         if r.p95_ms is None:
             why = r.mode
         else:
-            readings = "/".join(f"{x:.1f}" for x in r.readings_ms)
-            n = len(r.readings_ms)
-            why = (f"{r.mode}: ground draw p95 {r.p95_ms:.1f} ms, the "
-                   f"highest of {n} reading{'' if n == 1 else 's'} of "
-                   f"{r.draws} draws ({readings} ms: {r.verdict}), threshold "
-                   f"{r.threshold_ms:.1f} ms = {r.margin:.0%} inside the "
-                   f"{r.frame_ms:.1f} ms frame")
+            # The same words the page and the ground's caption show:
+            # `RenderMode.evidence` writes them once. This line used to
+            # compose its own, which is how a log and a screenshot of one
+            # measurement come to read differently.
+            why = f"{r.mode}: {r.evidence()}"
             if r.chosen_by == "--mode":
                 why += f" (chosen by --mode; measured: {r.measured})"
         return (f"oneground lab: {self.url}  |  {why}  |  "

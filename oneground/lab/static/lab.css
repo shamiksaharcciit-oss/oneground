@@ -390,6 +390,14 @@ main { padding: 0 var(--gutter) 3rem; }
 .qlist .qmeta { grid-column: 1 / -1; color: var(--muted); font-size: 0.74rem; }
 .qlist .more { color: var(--muted); font-size: 0.8rem; padding: 0.5rem 0.4rem; }
 
+/* The control that reaches the rest of a capped list, beside its count. */
+.linky {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.78rem;
+  border-radius: 4px;
+}
+
 .trace-main { min-width: 0; }
 .trace-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem 1rem; }
 .trace-head h2 { margin: 0; font-family: var(--font-mono); font-size: 1.2rem; }
