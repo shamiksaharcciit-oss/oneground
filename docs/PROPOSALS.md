@@ -43,10 +43,14 @@ No model is involved, no network is touched, and nothing about the corpus
 leaves the machine. This is what tier 1 built and what runs today. The card
 records `authored_by: user`.
 
-**Path 2 — describe it.**
+**Path 2 — describe it.** Two phases, and the translation is written down
+between them:
 
-    oneground propose <workdir> --describe "probe a second region for the
-      ambiguous queries" --model <provider:name> --prediction pred.yaml
+    oneground propose translate <workdir> \
+        --describe "probe a second region for the ambiguous queries" \
+        --model <provider:name>            # writes policy.yaml, and stops
+
+    oneground propose <workdir> --policy policy.yaml --prediction pred.yaml
 
 A model translates the sentence into a policy. The command **refuses
 without an explicit `--model`**: no model is bundled, none is default, and
@@ -54,10 +58,23 @@ a local endpoint (`ollama:<name>`, or any OpenAI-compatible URL) is as
 first class as a hosted one. A user who has not chosen gets a refusal,
 never a surprise.
 
-**The user approves the policy, not the sentence.** The translation is
-shown in full, beside a plain-English rendering of what it will do, and
-nothing runs until it is approved. A translation the user would not have
-approved must not run because the sentence sounded reasonable.
+**The user approves the policy, not the sentence.** `translate` writes the
+policy to a file and stops; the second phase runs a policy the user has
+read. Approval is that act — reading what was written and choosing to run
+it — not a prompt to click through, and a translation the user would not
+have approved cannot run because the sentence sounded reasonable.
+
+**After translation, path 2 *is* path 1.** The second phase is the command
+tier 1 built: it takes a policy file and a prediction file, and contains no
+model, no network and no sentence. The model's involvement is recorded in
+the artifact, not carried in the mechanism — which is why the disclosure
+below travels on the card rather than being inferable from how the run was
+invoked.
+
+**`--dry-run` is not the approval step.** It keeps the meaning it has:
+validate everything, print what would run, write nothing. A step that
+writes nothing cannot be the one that persists a translation for a user to
+approve, and a flag is not an approval in any case.
 
 #### What path 2 must disclose, and where
 
@@ -72,6 +89,21 @@ card that leaves this machine carries, on its face:
   receipts in the proposal's directory — a model's output is not
   re-derivable, so it is declared, not a receipt;
 - the fact that the user approved this policy before it ran.
+
+**An unreported version is `null` with a stated reason, not a refusal.**
+Providers report versions inconsistently and a local endpoint may report
+none at all. The couldn't-check habit applies to provenance exactly as it
+applies to a measurement: the card says the version was not reported and
+by whom, rather than refusing a run over it or printing something that
+looks like a version and is not.
+
+**The sampling parameters are a closed list**: temperature, top-p, seed,
+max tokens, and a digest of the system prompt. Each is recorded, `null`
+where the provider has no such control, and adding to the list is a
+deliberate change to this document — not whatever an implementation
+happens to have logged. The point of the list is that two cards from the
+same model are comparable, which an open-ended bag of provider fields
+would not give.
 
 A reader must never have to wonder how a policy came to exist. This is the
 same rule as the lab's projection caption: the disclosure is part of the
@@ -216,7 +248,19 @@ under the same claim invariant.
 
 **And how the policy came to exist** (ruled 19 September 2026, with §2.1's
 two paths). Every card carries `authored_by`: `user` for a policy its user
-wrote, `model` for one a model translated. A model-authored card carries,
+wrote, `model` for one a model translated.
+
+**It is a checked claim, not a field beside the claims.** A card's
+sentences are `Claim`s rendered from what they cite and checked against it
+before the card is written (`docs/CLAIMS.md`), and provenance is a sentence
+like any other: a `proposal_provenance` claim, citing the run's own
+`propose_info` record — the model named, the version or its absence, the
+sampling parameters, the approval. The invariant asks that a sentence be
+reconstructible from what it cites, not that what it cites be a
+measurement, so a record of how the policy was produced is a legitimate
+source for one. Metadata sitting beside the prose would be exactly what a
+screenshot drops, which is the failure §2.1's disclosure rule exists to
+prevent. A model-authored card carries,
 on its face, the provider, the model name and version, the sampling
 parameters used, the sentence as typed, the policy as produced verbatim,
 and the fact that the user approved that policy before it ran; the prompt
@@ -255,10 +299,13 @@ corpora like yours.
 - The model's output is never executed. It selects among shipped
   behaviours or it is rejected.
 - No translation runs without the user approving the **policy** it
-  produced: no `--yes`, and no non-interactive translation path (§2.1).
-- No card without `authored_by`, and none from a model without the
-  provider, the model and version, the sampling parameters, the sentence,
-  the policy verbatim, and the prompt and response as declared records.
+  produced: `translate` writes it and stops, no `--yes`, no
+  non-interactive translation path, and `--dry-run` is not the approval
+  step (§2.1).
+- No card without `authored_by` as a checked claim, and none from a model
+  without the provider, the model and version (or a stated reason there is
+  none), the five sampling parameters, the sentence, the policy verbatim,
+  and the prompt and response as declared records.
 - No scopes: a policy changes a whole configuration.
 - No prediction without a metric, a direction and a threshold, and none
   below the calibration tolerance.
@@ -270,9 +317,13 @@ corpora like yours.
 
 ## 4. The honest limits, stated before anyone asks
 
-- **The translation is a model's guess.** A sentence can be translated
-  into a policy the user did not mean. That is why the policy is approved
-  rather than the sentence, and why the policy appears in the card.
+- **A translation would be a model's guess.** Path 2 is not built, so
+  nothing translates anything today; the limit is stated because it is the
+  one the design is arranged around. A sentence can be turned into a policy
+  the user did not mean, which is why §2.1 has the user approve the
+  *policy* rather than the sentence, why the translation is written to a
+  file and read before it runs, and why the policy appears on the card
+  verbatim. How often a translation would be wrong is unmeasured — §5.
 - **A held prediction is not a good decision.** It says one change moved
   one metric as predicted on one sample. Whether to deploy is still a
   judgement, and oneground does not make it.
