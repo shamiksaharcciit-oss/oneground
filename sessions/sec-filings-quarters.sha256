@@ -1,0 +1,20 @@
+# sec-filings-10k source indexes -- EDGAR quarterly full-index form.idx
+# https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{q}/form.idx
+# Twelve quarters, 2022-01-01 to 2024-12-31, streamed and digested
+# 2026-09-19 without being stored. These twelve files are the declared
+# source: everything the build fetches is named by them.
+# snapshot_sha256 = oneground.receipts.manifest_digest over these lines
+#   114f40559fb7354ec0eb0d14aa3015dbc796a312cb69ef74aa34c0bb35ada159
+
+0f11bf75dd8c43d66a9bb9dd7498fab0cd18316d468f6a941418358efc84d895  2023/QTR1/form.idx
+37fe14a468cc65367150abf15854f1861fed89192111bc2ec3990393fe39d2aa  2022/QTR1/form.idx
+3ac30ccfaf6fdfb613aa0d59b92eb915bc8b216001651725d4fe0a5ef37cff98  2024/QTR1/form.idx
+6e7f9f2727eeb3a306197dc65c0ed8fb20282f75731a503ff716dc7a9677b3a7  2024/QTR2/form.idx
+7a1ea6290e6961561811ee9bc87b7f9073b9808f072a600eb0b2f53c7ed62a7b  2023/QTR3/form.idx
+ac1252749d4db1f6c88b0932630251e249cd66f9b0ba021eb0586e79ca90b9b7  2024/QTR3/form.idx
+bce3e54373776e8038aa0007a37cc1680e12c98ca405d8318a2ae12d194ef7a9  2022/QTR3/form.idx
+c5d154d487d70ce49fc38c9fd049d810126e85965c9849d157e24c7b4efe1cee  2024/QTR4/form.idx
+d157d004751bc5947eecf9b7ac62c926eca8f34bd44084478c607fb7e082a9ca  2023/QTR4/form.idx
+de6bea77f33fd87c9489ae0cf5936d902159797aeaf733d851eea006737894c1  2023/QTR2/form.idx
+e4fa292fcd6e15eb9d0f4552613ebc189ea3b166a8a3b5b550641785f69ec1c2  2022/QTR4/form.idx
+ff3985ef4a9c775ebb12b0a59738912477b929fc31539ae37b7716f9f95053c4  2022/QTR2/form.idx
