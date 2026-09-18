@@ -4,6 +4,10 @@
     oneground simulate <requirements.yaml>       sweep architectures on them
     oneground verify <requirements.yaml>         measure a real engine
     oneground report <requirements.yaml>         judge them against constraints
+    oneground propose <workdir> --policy ... --prediction ...
+                                                 measure one change you wrote,
+                                                 against a prediction you wrote
+                                                 first (tier 1: no model)
     oneground calibrate <curve|engine|show>      measure our own error
     oneground fixture verify <id>                check a fixture's digests
     oneground fixture build --spec ... --source ...
@@ -112,6 +116,24 @@ def _cmd_verify(args, rest):
     verify.run(args.requirements, up=args.up, down=args.down,
                on_pod=args.on_pod)
     return 0
+
+
+@envmod.guarded("oneground propose")
+def _cmd_propose(args, rest, env_stamp=None):
+    from .proposals import propose
+    if rest:
+        raise SystemExit(f"oneground propose: unexpected arguments: "
+                         f"{' '.join(rest)}")
+    try:
+        return propose.run(args.workdir, args.policy, args.prediction,
+                           name=args.name, dry_run=args.dry_run,
+                           requirements_path=args.requirements,
+                           env_stamp=env_stamp)
+    except propose.ProposeError as e:
+        # Every problem at once, and a non-zero exit: a refusal is not a
+        # crash, and the 022 rule is that one run tells you everything wrong.
+        print(str(e))
+        return 2
 
 
 @envmod.guarded("oneground report")
@@ -258,6 +280,30 @@ def build_parser():
     r_.add_argument("requirements")
     envmod.add_argument(r_)
 
+    p_ = sub.add_parser("propose",
+                        help="measure a parameter change you wrote yourself "
+                             "against a prediction you wrote first")
+    p_.add_argument("workdir",
+                    help="a workdir `characterize` and `simulate` have "
+                         "already written")
+    p_.add_argument("--policy", required=True,
+                    help="the policy file: which family, which configuration, "
+                         "which parameter changes (see docs/PROPOSALS.md)")
+    p_.add_argument("--prediction", required=True,
+                    help="what the change is expected to do, and what it must "
+                         "not do -- written before the run, and judged as "
+                         "written")
+    p_.add_argument("--name", default=None,
+                    help="the proposal's directory under <workdir>/proposals; "
+                         "defaults to what the policy changes")
+    p_.add_argument("--requirements", default=None,
+                    help="the requirements file the baseline run used; "
+                         "defaults to the one simulate_info.json recorded")
+    p_.add_argument("--dry-run", action="store_true",
+                    help="validate both files and print what would run, "
+                         "measuring nothing and writing nothing")
+    envmod.add_argument(p_)
+
     sub.add_parser("fixture",
                    help="build or verify a public fixture",
                    add_help=False)
@@ -292,6 +338,8 @@ def main(argv=None):
         return _cmd_verify(args, rest)
     if args.command == "report":
         return _cmd_report(args, rest)
+    if args.command == "propose":
+        return _cmd_propose(args, rest)
     build_parser().print_help()
     return 1
 

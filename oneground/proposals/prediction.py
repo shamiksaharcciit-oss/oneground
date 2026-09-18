@@ -19,8 +19,9 @@ Refused before anything runs, with every reason at once:
     tolerance is named in the refusal;
   - a metric this command does not measure.
 
-`write_prediction` puts `prediction.json` in the workdir, declared -- it is a
-statement, not re-derivable -- and refuses to overwrite one. The digest is
+`write_prediction` puts `prediction.json` in the workdir (or, task 028, in a
+proposal's own directory under it), declared -- it is a statement, not
+re-derivable -- and refuses to overwrite one. The digest is
 not what proves the prediction came first: `simulate` reads the file's sha256
 at the start of its run and records it in `simulate_info.json`, so the run's
 own inputs cite it. A prediction written or edited after the run does not
@@ -165,10 +166,23 @@ def simulate_include(policy):
 
 
 def write_prediction(workdir, policy, spec, seed,
-                     tolerance=CALIBRATION_TOLERANCE):
-    """Write `prediction.json` once. Returns (path, sha256)."""
+                     tolerance=CALIBRATION_TOLERANCE, out_dir=None,
+                     baseline=None):
+    """Write `prediction.json` once. Returns (path, sha256).
+
+    `out_dir` is where the file goes; `workdir` stays the run whose corpus
+    receipts identify the sample. Task 028 separates them so a workdir can
+    hold more than one proposal, each in its own directory with its own
+    prediction, without any of them overwriting another.
+
+    `baseline`, when given, is the already-measured row this prediction will
+    be judged against: `{"file", "sha256", "config", "row_sha256"}`. A
+    proposal does not re-run the baseline, so the row it compares against is
+    part of what the prediction pre-registers -- a different baseline row is a
+    different prediction.
+    """
     checked = validate_prediction(spec, tolerance)
-    path = os.path.join(workdir, PREDICTION_NAME)
+    path = os.path.join(out_dir or workdir, PREDICTION_NAME)
     if os.path.exists(path):
         raise PredictionError([
             f"{path} already exists. A prediction is written once, before the "
@@ -194,5 +208,7 @@ def write_prediction(workdir, policy, spec, seed,
         "calibration_tolerance": tolerance,
         "run": {"seed": int(seed), "corpus": corpus},
     }
+    if baseline is not None:
+        doc["baseline"] = dict(baseline)
     write_json_stable(path, doc)
     return path, sha256_file(path)

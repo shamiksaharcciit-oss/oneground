@@ -818,7 +818,110 @@ def _r_qps_max(c):
                c.extra.get("p99") or 0.0, c.extra.get("stopped", ""), c.detail))
 
 
+# --------------------------------------------------------------------------
+# the proposal card (task 028)
+# --------------------------------------------------------------------------
+# A card's sentences are about rows exactly as a report's are -- the same
+# invariant, the same renderer, the same oracle. They live here because this
+# is the one module allowed to interpolate an outcome or a measured value into
+# a string, and a card that rendered its own prose would be the presentation
+# layer without an oracle all over again.
+#
+# The verdict words differ from the report's: a prediction held or did not
+# hold, where a configuration meets or fails a constraint. They are kept
+# apart deliberately -- a proposal is judged on a difference between two
+# configurations, never against the report's absolute thresholds.
+
+def _r_proposal_change(c):
+    return ("Policy: %s. Measured as %s on %s vectors and %s queries of %s, "
+            "seed %s, against exact k-NN ground truth for that sample."
+            % (c.extra.get("changes"), c.subject,
+               c.extra.get("n_base"), c.extra.get("n_queries"),
+               c.extra.get("run"), c.extra.get("seed")))
+
+
+def _r_proposal_outcome(c):
+    head = {"held": "The prediction held for %s.",
+            "did_not_hold": "The prediction did not hold for %s.",
+            "couldnt_check": "The prediction could not be checked for %s."}
+    line = head.get(c.asserts_outcome or "", "%s")  % c.subject
+    return (line + " " + c.detail).strip() if c.detail else line
+
+
+# `rises` is how a prediction names a direction; `rise` is how a sentence
+# says it after "predicted to".
+DIRECTION_VERB = {"rises": "rise", "falls": "fall"}
+
+
+def _r_proposal_metric(c):
+    direction = c.extra.get("direction")
+    return ("%s %s by %s, from %s to %s; predicted to %s by at least %s. "
+            "This one %s."
+            % (c.constraint, direction, c.extra.get("delta"),
+               c.extra.get("before"), c.extra.get("after"),
+               DIRECTION_VERB.get(direction, direction),
+               c.extra.get("threshold"), outcome_label(c.asserts_outcome)))
+
+
+def _r_proposal_budget(c):
+    return ("Side-effect budget: %s is %s on the changed configuration, "
+            "bounded to %s %s. This one %s."
+            % (c.constraint, c.extra.get("after"), c.extra.get("bound_phrase"),
+               c.extra.get("bound"), outcome_label(c.asserts_outcome)))
+
+
+def _r_proposal_unchecked(c):
+    """A predicted metric with no measurement behind it.
+
+    Its own sentence rather than the metric sentence with blanks in it: a row
+    that reads "rises by no measurement" is a sentence pretending to be a
+    result. `detail` is the run's own account of why, and what would settle it.
+    """
+    return ("%s: %s. %s" % (c.constraint, outcome_label(c.asserts_outcome),
+                            c.detail)).strip()
+
+
+def _r_proposal_baseline(c):
+    return ("The baseline was not re-run: %s is the row %s already held "
+            "(file %s, row %s), measured %s."
+            % (c.subject, c.extra.get("file"), c.extra.get("file_sha256"),
+               c.extra.get("row_sha256"), c.extra.get("measured_at")))
+
+
+def _r_proposal_calibration(c):
+    return ("Judged at calibration tolerance %s. %s"
+            % (c.extra.get("tolerance"), c.detail)).strip()
+
+
+def _r_proposal_limits(c):
+    """The card's limits, in the plainest words there are.
+
+    Those words are the ones a card may never use about itself -- good,
+    recommended, deployed, at full scale -- which is why `card.forbidden_in`
+    exempts this one sentence and nothing else. A rule that punished the
+    caveat for naming what it rules out would be answered by deleting the
+    caveat.
+    """
+    return ("This card reports one run of one policy on one sample: %s "
+            "vectors and %s queries drawn from %s, judged against exact k-NN "
+            "ground truth for that sample. It says what the measured "
+            "difference was. It does not say the change is good, or "
+            "recommended, or that it should be deployed; it says nothing "
+            "about any other corpus; and it does not say this result would "
+            "hold at full scale."
+            % (c.extra.get("n_base"), c.extra.get("n_queries"),
+               c.extra.get("run")))
+
+
 _RENDERERS = {
+    "proposal_change": _r_proposal_change,
+    "proposal_outcome": _r_proposal_outcome,
+    "proposal_metric": _r_proposal_metric,
+    "proposal_budget": _r_proposal_budget,
+    "proposal_unchecked": _r_proposal_unchecked,
+    "proposal_baseline": _r_proposal_baseline,
+    "proposal_calibration": _r_proposal_calibration,
+    "proposal_limits": _r_proposal_limits,
     "scope": _r_scope,
     "not_run": _r_not_run,
     "fails": _r_fails,
@@ -845,7 +948,10 @@ RENDERED_KINDS = tuple(sorted(_RENDERERS))
 # does -- 017e's defect was a cell -- so they are rendered here too, and the
 # HTML and the console receive strings rather than verdicts.
 
-OUTCOME_LABELS = {"couldnt_check": "couldn't-check"}
+# `did_not_hold` is a proposal card's outcome (task 028); the report has no
+# such verdict and never reads this entry.
+OUTCOME_LABELS = {"couldnt_check": "couldn't-check",
+                  "did_not_hold": "did not hold"}
 
 
 def outcome_label(outcome, html=False):
