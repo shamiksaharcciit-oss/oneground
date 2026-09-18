@@ -51,7 +51,7 @@ import numpy as np
 
 from .. import intake
 from ..models import Config, ConfigSpace, UnknownFamily, get as get_model
-from ..models.base import ParameterError
+from ..models.base import ParameterError, resolve_deterministic
 from ..receipts import (library_versions, round_floats, sha256_file,
                         write_json_stable, write_manifest)
 from ..sample import loaders
@@ -418,6 +418,24 @@ def run(requirements_path, log_fn=log):
         "torch_cuda": torch_info["torch_cuda"],
         "cuda_device_name": torch_info["cuda_device_name"],
         "elapsed_seconds": time.time() - t0,
+        # Task 029. Which arithmetic path each configuration was built on --
+        # declared, because it decides whether this run's bytes are
+        # reproducible on another machine and nothing else in the run records
+        # it. `deterministic` pins faiss to one thread (task 012) and keeps
+        # its distance computations off the BLAS path (task 029); the second
+        # is what makes centroids reproduce across microarchitectures.
+        "deterministic": {
+            c.label: resolve_deterministic(c) for _, c in kept
+        },
+        "deterministic_note": (
+            "true: faiss pinned to one OpenMP thread and its distance "
+            "computations kept off the BLAS path, so the build reproduces "
+            "byte for byte on another machine (task 029 proved this across an "
+            "Intel AVX512 laptop and an AMD EPYC pod). false: the fast path, "
+            "reproducible only on the machine that ran it. "
+            "single_node_hnsw takes the thread half only; hash_sharded has no "
+            "k-means, so for it the BLAS half affects its index and not a "
+            "partition."),
         "shard_depth": shard_depth_for((1, 10, 100)),
         # Task 026b: this used to say "used by every sharded family", which
         # was never true of hash_sharded -- it does not read the setting.
@@ -503,8 +521,20 @@ def _centroid_cache(base, seed, log_fn):
     The model computes exactly this call when no context is given, so a cached
     run and an uncached one produce the same result; the cache is a speed
     concession, not a behaviour switch.
+
+    **It must run under the same determinism the family would have used**
+    (task 029). This is the k-means that actually runs in a sweep -- the
+    family's own call is only the fallback for when no context is given -- and
+    until 029 it ran outside every determinism context, so the one clustering
+    every semantic row depends on was computed on whatever path faiss chose.
+    That is where task 027's cross-machine divergence came from.
+
+    The cache is keyed by `(centroids, deterministic)`, not by count alone: two
+    configs that disagree about determinism must not silently share one
+    clustering computed under whichever of them ran first.
     """
     from ..measures.crispness import kmeans
+    from ..models.base import deterministic_faiss, resolve_deterministic
     cache = {}
 
     def context_for(config):
@@ -514,10 +544,15 @@ def _centroid_cache(base, seed, log_fn):
         if n is None:
             return None
         n = int(n)
-        if n not in cache:
-            log_fn(f"k-means {n} centroids (shared across this family's sweep)")
-            cache[n] = kmeans(base, n, seed)
-        return {"centroids": cache[n]}
+        det = resolve_deterministic(config)
+        key = (n, det)
+        if key not in cache:
+            log_fn(f"k-means {n} centroids "
+                   f"({'deterministic' if det else 'fast path'}, "
+                   f"shared across this family's sweep)")
+            with deterministic_faiss(det):
+                cache[key] = kmeans(base, n, seed)
+        return {"centroids": cache[key]}
 
     return context_for
 

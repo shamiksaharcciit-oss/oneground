@@ -117,6 +117,70 @@ def single_threaded_faiss(enabled=True):
         faiss.omp_set_num_threads(prev)
 
 
+# The threshold above which faiss hands a distance computation to the bundled
+# BLAS as a GEMM. Raising it past any batch this project will ever pass keeps
+# the arithmetic in faiss's own kernels.
+#
+# It is a C `int` on the faiss side, so it has to fit in one: 1 << 40 raises
+# OverflowError. 2**30 is ~1.07e9, against the largest batch here of 150,000
+# vectors x 256 centroids = 3.84e7 -- two orders of headroom, inside int32.
+_NO_BLAS_THRESHOLD = 2 ** 30
+
+
+@contextlib.contextmanager
+def deterministic_blas(enabled=True):
+    """Keep faiss's distance computations off the BLAS path, then restore.
+
+    This is the half task 029 found, and it is the half that crosses machines.
+    One thread fixes the order of work *within* a process; it says nothing
+    about which kernel does the arithmetic. Above
+    `distance_compute_blas_threshold` faiss hands the k-means assignment step
+    to the bundled BLAS as a GEMM, and OpenBLAS picks its kernel by
+    microarchitecture at run time -- an AVX512 kernel on one machine, a Zen
+    kernel on another -- so the same floats are summed in a different order
+    and the centroids differ.
+
+    Measured (task 029, 12 runs on two machines, same faiss-cpu 1.15.0 and
+    numpy 2.5.3): with BLAS in play, an Intel AVX512 laptop and an AMD EPYC
+    pod produced centroids differing by 0.00104, each machine reproducing
+    itself exactly. With BLAS off, the two produced **bitwise identical**
+    centroids. The faiss dispatch level (`FAISS_OPT_LEVEL`) changed nothing on
+    either machine, with BLAS on or off: faiss's own kernels agree across
+    these two instruction sets and the BLAS does not.
+
+    The cost is real and it is not one-signed -- see `docs/MODELS.md`. On a
+    4-core laptop this path is ~4.9x slower at 150,000 vectors; on a 48-thread
+    pod it is ~5.8x *faster*, because BLAS loses to its own threading over a
+    65,536-point subsample.
+
+    `distance_compute_blas_threshold` is a process-wide faiss global, so the
+    restore is in a `finally` for the same reason the thread count's is.
+    """
+    if not enabled:
+        yield
+        return
+    import faiss
+    prev = faiss.cvar.distance_compute_blas_threshold
+    faiss.cvar.distance_compute_blas_threshold = _NO_BLAS_THRESHOLD
+    try:
+        yield
+    finally:
+        faiss.cvar.distance_compute_blas_threshold = prev
+
+
+@contextlib.contextmanager
+def deterministic_faiss(enabled=True):
+    """Both halves of a reproducible build: one thread, and no BLAS.
+
+    One thread (task 012) makes a build reproduce on the machine that ran it.
+    No BLAS (task 029) makes it reproduce on a different machine as well.
+    A family that wants byte-identity wants both; `deterministic=False` keeps
+    the fast path for a sweep that does not.
+    """
+    with single_threaded_faiss(enabled), deterministic_blas(enabled):
+        yield
+
+
 # --------------------------------------------------------------------------
 # parameter tables (task 026)
 # --------------------------------------------------------------------------

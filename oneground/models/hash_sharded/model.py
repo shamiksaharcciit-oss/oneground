@@ -49,7 +49,7 @@ import numpy as np
 from ..base import (BUILD, CONSTANT, BuiltIndex, Candidates, Config,
                     Footprint, Param, declare_parameters,
                     estimate_memory_bytes, exact_over, merge_candidates,
-                    resolve_deterministic, single_threaded_faiss)
+                    resolve_deterministic, deterministic_faiss)
 
 NAME = "hash_sharded"
 
@@ -144,7 +144,7 @@ class HashSharded:
         assign = assign_shards(len(vectors), n_shards, seed, ids)
 
         shards, ids_of = {}, {}
-        with single_threaded_faiss(det):
+        with deterministic_faiss(det):
             for r in range(n_shards):
                 member = np.where(assign == r)[0].astype(np.int64)
                 if len(member) == 0:
