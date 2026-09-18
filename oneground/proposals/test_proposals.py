@@ -116,16 +116,33 @@ def test_every_problem_is_reported_at_once_synthetic():
     assert len(problems) >= 5, problems
 
 
-def test_the_example_in_docs_proposals_md_is_a_valid_policy():
-    """Not synthetic: the position paper's own example, run through the
-    validator, so the document cannot describe a policy the code refuses."""
+def test_every_policy_example_in_docs_proposals_md_is_valid():
+    """Not synthetic: the document's own examples, run through the validator,
+    so it cannot describe a policy the code refuses.
+
+    Every block, not the only one there used to be: task 028's tier-1 section
+    added a second, and a test pinned to a count would have been relaxed into
+    a test of the count rather than of the examples.
+    """
     text = open(os.path.join(ROOT, "docs", "PROPOSALS.md"),
                 encoding="utf-8").read()
     blocks = re.findall(r"```yaml\n(policy:.*?)```", text, re.S)
-    assert len(blocks) == 1, blocks
-    doc = yaml.safe_load(blocks[0])
-    pol = validate_policy(doc)
-    assert pol.changes == (("probe", 2, 3),)
+    assert len(blocks) >= 2, blocks
+    first_changes = [validate_policy(yaml.safe_load(b)).changes[0]
+                     for b in blocks]
+    assert ("probe", 2, 3) in first_changes, first_changes      # §2.2
+    assert ("probe", 1, 2) in first_changes, first_changes      # §5a
+
+
+def test_every_prediction_example_in_docs_proposals_md_is_valid():
+    """The other half of the tier-1 section: what a reader would write next."""
+    text = open(os.path.join(ROOT, "docs", "PROPOSALS.md"),
+                encoding="utf-8").read()
+    blocks = re.findall(r"```yaml\n(expects:.*?)```", text, re.S)
+    assert len(blocks) >= 1, blocks
+    for b in blocks:
+        checked = validate_prediction(yaml.safe_load(b))
+        assert checked["expects"] and checked["side_effects"]
 
 
 # -------------------------------------------------------------- prediction
