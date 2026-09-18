@@ -1,0 +1,118 @@
+# Task 027 on a pod: `simulate --emit-state` on arxiv-150k with the declared
+# projection. The one path task 027 could not prove.
+#
+# WHAT THIS RESOLVES. Task 027 made the 2-D projection a declared state column
+# and proved the DRAWING path exactly: the lab's ground places all 150,000
+# vectors where site/teaser/data/base.bin places them, with the same copy
+# counts -- 0 and 0. It could not prove the EMIT path, because a fresh
+# `simulate --emit-state` at 150,000 vectors dies on the developer's laptop:
+# semantic_sharded builds 256 HNSW shards and faiss raises
+# `MemoryError: std::bad_alloc` with under a gigabyte free of 7.6 GB. The
+# state 027 checked was task 020's own, with the columns attached by
+# `state.with_projection` -- the same function `simulate` calls, and the only
+# step the OOM prevented.
+#
+# This session runs the real command on a machine that can hold it, and puts
+# the result through the same answer key. The acceptance script reads the
+# state's OWN emitted columns when they are there rather than re-attaching
+# them, so this run tests the emit path instead of repeating the drawing one.
+#
+# It creates nothing. `oneground pod up` is the only billable subcommand and
+# it still requires a typed 'y' at a terminal.
+
+# CPU work, not GPU: `simulate` is faiss-cpu and numpy throughout, and nothing
+# in this session touches torch or an embedding model. The cheapest offered
+# card in the volume's datacenter is taken because a pod still has to have
+# one; it will sit idle, and the 16 vCPU / 40 GB host is what the run needs.
+gpu:
+  - RTX A4000
+  - RTX PRO 4000
+  - L4
+  - RTX PRO 4500
+
+volume: vecbench                 # datacenter derived from the name
+volume_mount_path: /workspace
+
+# The same image the canonical build used, so the interpreter and the wheels
+# resolve as they did there. Setup builds a fresh venv from requirements.txt
+# without --system-site-packages, which is what task 003b found had gone wrong
+# in build 1.
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+
+disk_gb: 20
+
+env:
+  ONEGROUND_REQUIREMENTS: requirements.arxiv-150k.projection.pod.yaml
+  ONEGROUND_WORKDIR: runs/027-arxiv-projection
+  ONEGROUND_OUT: /workspace/027-emit-state.tgz
+
+setup: corpora/POD_SETUP.md
+run: bash corpora/run_027_emit_state.sh
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-027.log
+done_marker: DONE                # printed only after the acceptance passes
+
+# The run logs steadily -- k-means, then one line per shard build, then the
+# acceptance. Ten minutes of silence would already be abnormal; fifteen is the
+# margin the other sessions use.
+stall_minutes: 15
+
+# UPLOADED. Everything here is small; the 460 MB corpus is NOT here, and must
+# already be on the volume at /workspace/arxiv-150k/ where task 002's build
+# left it. `run_027_emit_state.sh` checks for it in the first seconds and
+# fails with the path rather than after twenty minutes of k-means.
+#
+# Total 8.3 MB, against the 50 MB `input_size_cap_mb` default that task 011
+# added after six inputs timed out. The cap is left at its default on purpose.
+inputs:
+  # the declared projection itself
+  - local: fixtures/arxiv-150k/ground_view_base.parquet
+    remote: /workspace/oneground/fixtures/arxiv-150k/ground_view_base.parquet
+    optional: false
+  # the characterization this run simulates against. Copied from the reference
+  # run so the emitted state is comparable with task 020's: same corpus, same
+  # seed, same sample. Without these `simulate` refuses, and running
+  # `characterize` on the pod instead would produce a different receipt for no
+  # gain.
+  - local: runs/020-ref-arxiv/characterization.json
+    remote: /workspace/oneground/runs/027-arxiv-projection/characterization.json
+    optional: false
+  - local: runs/020-ref-arxiv/ground_truth.npy
+    remote: /workspace/oneground/runs/027-arxiv-projection/ground_truth.npy
+    optional: false
+  - local: runs/020-ref-arxiv/ground_truth_scores.npy
+    remote: /workspace/oneground/runs/027-arxiv-projection/ground_truth_scores.npy
+    optional: true
+  - local: runs/020-ref-arxiv/sample_ids.json
+    remote: /workspace/oneground/runs/027-arxiv-projection/sample_ids.json
+    optional: true
+  - local: runs/020-ref-arxiv/queries_ids.json
+    remote: /workspace/oneground/runs/027-arxiv-projection/queries_ids.json
+    optional: true
+  - local: runs/020-ref-arxiv/build_info.json
+    remote: /workspace/oneground/runs/027-arxiv-projection/build_info.json
+    optional: true
+  # the acceptance script: it lives in tasks/scratch/, which is gitignored, so
+  # it is not in the repo the pod clones.
+  - local: tasks/scratch/027_acceptance.py
+    remote: /workspace/oneground/tasks/scratch/027_acceptance.py
+    optional: false
+
+outputs:
+  # The state, and the two tables beside it. ~20 MB: the semantic state was
+  # 18.0 MB before the projection and 19.2 MB after, measured locally.
+  - remote: /workspace/027-emit-state.tgz
+    local: runs/027-arxiv-projection-pod/
+    extract: true
+
+caps:
+  # One configuration at 150,000 vectors: task 021's last completed emit of
+  # this configuration took 360 s of simulate time on the laptop, plus
+  # k-means and the exact ceiling over 2,000 queries. On 16 vCPU it should be
+  # faster; setup (venv + pins) is the other ten minutes. An hour is generous
+  # and is budgeted at the TOP of the live price range rather than its floor,
+  # which is the mistake task 006b's cap survived by luck.
+  max_hours: 1.0
+  max_concurrent: 1
+  max_usd: 2.0
