@@ -164,7 +164,9 @@ this configuration — and 029's step 5 is where it gets measured properly.
    would need a few lines.
 3. **Two branches now add the same 029 brief file.** `7c13582` on `task-028`
    and `e610275` on `task-029`. Identical today; if either is edited before
-   both merge, the merge conflicts.
+   both merge, the merge conflicts. *(Closed in 028d: the file was removed
+   from `task-028`, which is not where it belongs, before the developer
+   revises the copy on `task-029`.)*
 
 ## Repo now contains
 

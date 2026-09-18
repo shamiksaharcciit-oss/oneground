@@ -273,11 +273,11 @@ does not reproduce". The first two are minutes of compute on this machine;
 the third is one sweep row.
 
 **Task 029's brief cites this sighting as the k-means defect, and the
-decomposition says it is not.** `tasks/029-kmeans-determinism.md` (`7c13582`,
-committed onto this branch while 028 was being written) lists under *Why*:
-*"The proposals stream, on one machine: `epsilon=0.2,probe=2` measured twice
-differed by 0.00005 of recall@10 … under a seeded k-means and a deterministic
-build."* That is the sighting, and the attribution is the part the table
+decomposition says it is not.** The brief — which lives on the `task-029`
+branch, not this one — lists under *Why*: *"The proposals stream, on one
+machine: `epsilon=0.2,probe=2` measured twice differed by 0.00005 of
+recall@10 … under a seeded k-means and a deterministic build."* That is the
+sighting, and the attribution is the part the table
 above contradicts — the four routing values a k-means difference moves first
 are identical here, in both configurations. The pod's own numbers separate
 the two the same way: there `ceiling_at_10` moved, 0.9324 against 0.9323,
