@@ -328,7 +328,7 @@ class SemanticSharded:
                                         int(np.shape(gt_ids)[1]))
         return S.ModelState(
             family=NAME, config_label=config.label,
-            params=dict(config.params), seed=int(seed), n_base=int(n),
+            params=config.declared(), seed=int(seed), n_base=int(n),
             n_queries=int(nq), dim=int(dim), partition=partition,
             assignment=assignment, route=route, candidates=candidates,
             load=S.build_load(partition.region_ids, assignment, route,

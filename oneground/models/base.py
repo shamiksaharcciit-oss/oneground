@@ -262,6 +262,19 @@ class Config:
         param = parameter_table(self.family).get(key)
         return param is not None and param.role != CONSTANT
 
+    def declared(self):
+        """Every parameter this configuration carries, as a mapping.
+
+        For recording the configuration's identity, not for reading a setting:
+        a state header (task 021) has to write down the whole parameter set,
+        and a family reaching into `.params` to do it would be going around
+        the table that task 026 put in front of every read. `__post_init__`
+        has already validated these keys against the family's table, so what
+        comes back is declared by construction. Reading one key still goes
+        through `get`.
+        """
+        return dict(self.params)
+
     def get(self, key, default=None):
         """A declared key's value. An undeclared key is refused, naming the
         declared ones: reading a key the table does not list is how a family
