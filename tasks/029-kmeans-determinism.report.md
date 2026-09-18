@@ -91,7 +91,45 @@ accumulation order, **not** thread-count-dependent initialisation, and **not**
 scheduling — those would all show up in 1a or 1b and none did. Those three
 candidates from the brief are ruled **out** on this machine.
 
-**The leading explanation: per-platform SIMD dispatch.** Both environments pin
+**Superseded: SIMD dispatch, disproved on this machine.** It was the leading
+explanation and it is wrong. faiss picks kernels by instruction set and exposes
+the choice through `FAISS_OPT_LEVEL`; this laptop supports AVX512, so it can be
+made to run AVX2 or the generic path as well. All four
+(`tasks/scratch/029_simd.py`, each level in its own process because the level
+is read at import):
+
+| `FAISS_OPT_LEVEL` | vs the pod's centroids | vs this laptop's emitted state |
+|---|---|---|
+| (default) | differs, 0.00103923 | **identical** |
+| AVX512 | differs, 0.00103923 | **identical** |
+| AVX2 | differs, 0.00103923 | **identical** |
+| generic | differs, 0.00103923 | **identical** |
+
+Every level agrees with every other, bitwise. The kernel dispatch does not
+change this result, so it cannot be what separates the two machines.
+
+**What does change it: the reduction order of the assignment step** — and that
+is a local reproduction of the divergence, which step 1 asked for. faiss
+computes k-means assignment through BLAS above
+`distance_compute_blas_threshold` and through its own kernels below it. Both
+are reachable on one machine (`tasks/scratch/029_blas.py`):
+
+| path | vs the pod | vs the default path |
+|---|---|---|
+| default (threshold 128,000) | differs, 0.00103923 | — |
+| **BLAS disabled** (threshold 1e9) | differs, 0.00366427 | **differs, 0.00366427** |
+| BLAS always (threshold 1) | differs, 0.00103923 | identical |
+| BLAS, `query_bs` 1024 | differs, 0.00103923 | identical |
+| BLAS, `database_bs` 4096 | differs, 0.00103923 | identical |
+
+Turning BLAS off moves the centroids by **0.00366** on one machine, with one
+wheel, one CPU and one seed — **larger than the 0.00104 that separates this
+laptop from the pod.** Block sizes change nothing. So the mechanism is
+established: *the k-means result depends on the order in which the assignment
+step sums floats, and which implementation performs that step decides the
+order.*
+
+**The leading explanation is now the BLAS the wheel links.** Both environments pin
 the *same versions* — `faiss-cpu 1.15.0` and `numpy 2.5.3`, read from each
 run's own `state_info.json`. What differs is the **wheel** (a Windows build
 against a Linux one) and the **CPU** (this laptop against the pod's host).
@@ -102,14 +140,22 @@ is exactly the shape task 027 measured: four computations falling into two
 camps that agree perfectly inside each, {laptop, `base.bin`} and {pod,
 `ground_view_base.parquet`}.
 
-**Not established, and I am not claiming it.** I have not shown that SIMD
-dispatch *is* the cause. Two environments differing in both wheel and CPU
-cannot separate the two, and I have one machine.
+Both environments pin `faiss-cpu 1.15.0` and `numpy 2.5.3` — read from each
+run's own `state_info.json` — so the *version* is not the variable. A Windows
+wheel and a Linux wheel of the same faiss link different BLAS builds, and a
+different BLAS sums a dot product in a different order.
 
-**What would confirm it:** the same wheel on two different CPU generations. If
-the centroids differ there, the CPU's instruction set is the variable and the
-wheel is not; if they agree, the wheel is implicated instead. That is a pod
-session, and it is cheap.
+**Established:** the assignment step's reduction order changes the centroids,
+by more than the observed cross-machine difference, on one machine.
+**Not established:** that the two wheels' BLAS is *the* difference that
+produced 027's 0.00104. Magnitudes differ (0.00366 for BLAS-off here against
+0.00104 pod-to-laptop), which is expected if the pod also used BLAS but a
+different one — but I have not shown it.
+
+**What would confirm it:** the same k-means on a pod under the same knobs,
+with the centroids brought back. If the pod's default reproduces 027's
+centroids and some setting there reproduces this laptop's, the reduction order
+is the whole story. That is step 4's session.
 
 **If it is confirmed, the honest fix may not be "make it reproduce across
 machines."** Pinning every float reduction order across instruction sets means
@@ -176,8 +222,8 @@ Every figure above carries its script. The two that matter most:
 - Suite, guard and identifier scan: **not yet run for this task** — no project
   code has changed yet beyond the docstring correction below.
 
-**Couldn't check.** Whether SIMD dispatch is the cause. It needs a second CPU
-with the same wheel, which is step 4's pod session.
+**Couldn't check.** Which BLAS each wheel links, and whether that is the
+difference that produced 027's 0.00104. Step 4's session.
 
 ## Observed, not done
 
