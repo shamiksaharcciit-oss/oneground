@@ -449,6 +449,22 @@ def test_the_page_is_built_from_the_card_alone_synthetic(run_dir):
         assert _h.escape(sentence, quote=True) in rebuilt
 
 
+def test_a_card_carries_no_machine_identifier_synthetic(run_dir):
+    """A card is published, so task 014's rule applies to it.
+
+    `build_info.json` records the corpus paths, and on this machine they run
+    through a home directory; a card names those files and their digests
+    instead.
+    """
+    from oneground import environment as env
+    for name in ("held", "breach", "failed"):
+        d = os.path.join(run_dir["wd"], "proposals", name)
+        blob = open(os.path.join(d, "card.json"), encoding="utf-8").read()
+        page = open(os.path.join(d, "card.html"), encoding="utf-8").read()
+        assert env.scan_text(blob) == [], (name, env.scan_text(blob)[:2])
+        assert env.scan_text(page) == [], (name, env.scan_text(page)[:2])
+
+
 def test_the_page_makes_no_network_call_synthetic(run_dir):
     html = open(os.path.join(run_dir["wd"], "proposals", "held", "card.html"),
                 encoding="utf-8").read()

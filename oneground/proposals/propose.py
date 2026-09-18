@@ -248,15 +248,16 @@ def plan_proposal(workdir, policy_path, prediction_path, name=None,
 
     from .. import simulate as sim
     recorded_depth = info.get("shard_depth")
+    # Named without the workdir: this string is read back in the card, and a
+    # workdir given as an absolute path would put a home directory in it.
     if recorded_depth is None:
         shard_depth, depth_source = sim.FAMILY_DEFAULT, (
-            "the family's own default: %s/simulate_info.json records no "
-            "shard_depth, so the baseline row was measured under it"
-            % workdir)
+            "the family's own default: simulate_info.json records no "
+            "shard_depth, so the baseline row was measured under it")
     else:
         shard_depth, depth_source = int(recorded_depth), (
-            "%s/simulate_info.json: the value the baseline row was measured "
-            "under" % workdir)
+            "simulate_info.json: the value the baseline row was measured "
+            "under")
 
     out_dir = os.path.join(workdir, PROPOSALS_DIR,
                            name or (_slug(policy) if policy else "proposal"))
@@ -541,6 +542,10 @@ def build_card(plan, prediction, pred_sha, changed_row, judgement,
                 source="simulate.json:rows[%s]" % from_label,
                 file_sha256=plan.baseline_cite["sha256"],
                 measured_at=plan.simulate_info.get("run_at"),
+                # What it was measured under. The run refuses when a pinned
+                # library differs from this, so a reader can see the two rows
+                # were produced by the same versions rather than take it.
+                library_versions=plan.simulate_info.get("library_versions"),
                 re_run=False),
             "changed": {
                 "label": to_label,
