@@ -841,3 +841,104 @@ def test_the_count_line_offers_the_rest_of_a_capped_list():
         "the count line does not offer the whole list"
     assert "buildQueryList(total)" in marker, \
         "the control does not actually widen the list"
+
+
+def _add_projection(wd):
+    """A declared placement on a synthetic run's states, as
+    `state.with_projection` attaches one."""
+    import glob
+    import numpy as np
+    from oneground.models import state as statemod
+    for path in glob.glob(os.path.join(wd, "state", "*.state.npz")):
+        head, cols = statemod.read_state(path)
+        n = int(head["n_base"])
+        rng = np.random.default_rng(27)
+        xy = rng.normal(size=(n, 2)).astype(np.float32)
+        extra = {
+            "assignment.projection": xy,
+            "partition.projection": statemod.region_placement(
+                xy, np.asarray(cols["assignment.home_region"]),
+                len(cols["partition.region_ids"])),
+            "route.projection": statemod.query_placement(
+                xy, np.asarray(cols["candidates.true_ids"]),
+                min(statemod.QUERY_PLACEMENT_K,
+                    np.shape(cols["candidates.true_ids"])[1])),
+        }
+        _rewrite_state(path, extra)
+
+
+def _rewrite_state(path, extra):
+    import io
+    import zipfile
+    import numpy as np
+    from oneground.models import state as statemod
+    with zipfile.ZipFile(path, "r") as z:
+        head = json.loads(z.read("header.json").decode("utf-8"))
+        payload = {i.filename: z.read(i.filename) for i in z.infolist()}
+    for name, arr in extra.items():
+        buf = io.BytesIO()
+        np.lib.format.write_array(buf, np.ascontiguousarray(arr),
+                                  allow_pickle=False)
+        payload[name + ".npy"] = buf.getvalue()
+        head["columns"][name] = {"dtype": str(arr.dtype),
+                                 "shape": list(arr.shape),
+                                 "meaning": "DECLARED 2-D placement"}
+    payload["header.json"] = json.dumps(
+        head, indent=2, sort_keys=True, ensure_ascii=True).encode() + b"\n"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as z:
+        for name, data in sorted(payload.items()):
+            info = zipfile.ZipInfo(name, date_time=statemod._ZIP_EPOCH)
+            info.compress_type = zipfile.ZIP_STORED
+            info.external_attr = 0o644 << 16
+            z.writestr(info, data)
+
+
+def test_the_page_describes_whichever_layout_is_showing():
+    """Two layouts are two different claims, and the wrong one is false.
+
+    The cell caption ends "the state holds no positions", which stops being
+    true the moment the state carries a projection; the trace's key names
+    outlined cells, which the projected layout does not draw. Both follow the
+    toggle. Checked in a browser because both are set by the script.
+    """
+    cdp = _browser_or_skip
+    with tempfile.TemporaryDirectory() as tmp:
+        wd = _workdir(tmp, "run", 0.2, receipts=True)
+        _add_projection(wd)
+        lab = _lab(wd)
+        try:
+            with cdp(width=1200, height=1000) as b:
+                b.goto(f"http://127.0.0.1:{lab.port}/?token={TOKEN}")
+                assert _landing_reached(b), b.errors
+                b.evaluate("location.hash = '#/ground'")
+                assert b.wait_for(
+                    "!document.querySelector('#ground-layout').hidden",
+                    timeout=20), "the layout toggle never appeared"
+
+                projected = b.text("#ground-figcaption")
+                assert "declared position" in projected, projected
+                assert "holds no positions" not in projected, projected
+                assert "illustrative" in projected, projected
+
+                b.evaluate("document.querySelector("
+                           "'#ground-layout [data-layout=\"regions\"]').click()")
+                assert b.wait_for(
+                    "document.querySelector('#ground-figcaption')"
+                    ".textContent.indexOf('One cell per region') === 0",
+                    timeout=20)
+                cells = b.text("#ground-figcaption")
+                assert "declared position" not in cells, cells
+
+                # and the trace's key names the marks that are drawn
+                b.evaluate("document.querySelector("
+                           "'#ground-layout [data-layout=\"projection\"]').click()")
+                b.evaluate("location.hash = '#/trace'")
+                assert b.wait_for(
+                    "document.querySelectorAll('#trace-key li').length > 0",
+                    timeout=60)
+                key = b.evaluate(
+                    "Array.from(document.querySelectorAll('#trace-key li'))"
+                    ".map(e => e.textContent)").__str__()
+                assert "the query itself" in key, key
+        finally:
+            lab.stop()

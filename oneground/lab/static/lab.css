@@ -484,3 +484,18 @@ pre {
   .readouts { gap: 0.5rem; }
   .copy-bar { grid-template-columns: 1rem 4.2rem minmax(2rem, 1fr) auto; }
 }
+
+/* Trace key marks for the projected layout: rings, and the query's cross. */
+.key .ring {
+  width: 1rem; height: 1rem; border-radius: 50%;
+  border: 2px solid var(--rule); box-sizing: border-box;
+}
+.key .ring.routed { border-color: var(--ochre); }
+.key .ring.probed { border-color: var(--muted); }
+.key .ring.neighbours { border-color: var(--ink); }
+.key .cross {
+  width: 1rem; height: 1rem;
+  background:
+    linear-gradient(var(--ink), var(--ink)) center/100% 2px no-repeat,
+    linear-gradient(var(--ink), var(--ink)) center/2px 100% no-repeat;
+}

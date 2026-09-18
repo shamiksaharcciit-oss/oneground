@@ -95,12 +95,22 @@
 
   <div class="ground-grid">
     <figure class="stage">
+      <!-- Two ways of drawing the same vectors. The projection is the
+           teaser's picture; by region is the truer answer to "which region
+           does this belong to". Hidden when the run carries no projection. -->
+      <div class="seg" id="ground-layout" role="group"
+           aria-label="how the ground is drawn" hidden>
+        <button type="button" data-layout="projection" aria-pressed="true">Projection</button>
+        <button type="button" data-layout="regions" aria-pressed="false">By region</button>
+      </div>
       <div class="canvas-box" id="ground-box">
         <canvas id="ground-canvas" aria-label="every base vector, grouped by home region and coloured by copy count"></canvas>
         <p class="overlay" id="ground-overlay" hidden></p>
       </div>
       <p class="hover" id="ground-hover">Point at a cell to see which region it is.</p>
-      <figcaption class="source">
+      <!-- Set by lab.js: the two layouts are two different claims about what
+           the picture is, and the wrong one is a false statement. -->
+      <figcaption class="source" id="ground-figcaption">
         One cell per region; inside it, the vectors whose home is that region,
         in id order, coloured by how many regions hold a copy of each at this ε.
         It is a layout, not a map: the state holds no positions.
@@ -182,12 +192,10 @@
           <p class="overlay" id="trace-overlay" hidden></p>
         </div>
         <p class="hover" id="trace-hover">Point at a cell to see which region it is.</p>
-        <ul class="key" aria-label="what the marks mean">
-          <li><span class="key-box routed"></span>the region the query was routed to</li>
-          <li><span class="key-box probed"></span>the other region(s) it probed</li>
-          <li><span class="key-box neighbours"></span>regions its true neighbours live in</li>
-          <li><span class="key-ramp" aria-hidden="true"><span class="c1"></span><span class="c2"></span><span class="c3"></span><span class="c4"></span></span>vector colour: held by 1, 2, 3, 4 regions</li>
-        </ul>
+        <!-- Filled by lab.js: the marks differ between the two layouts
+             (outlined cells, or rings at declared positions), and a key that
+             names the wrong ones is worse than none. -->
+        <ul class="key" id="trace-key" aria-label="what the marks mean"></ul>
       </figure>
       <ul class="gaps" id="trace-gaps"></ul>
     </article>

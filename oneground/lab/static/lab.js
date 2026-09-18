@@ -117,7 +117,10 @@
   // ------------------------------------------------------------ state held
   let run = null;          // /api/run: declared facts about the run
   let check = null;        // /api/check: workdir, receipts, mode
-  let layout = null;       // per-vector pixel positions, fixed by home region
+  let layout = null;       // the layout on screen: cells, or the projection
+  let cellLayout = null;   // by home region -- always available
+  let projLayout = null;   // the declared projection -- only when the state has one
+  let layoutMode = 'projection';   // which the reader asked for
   let lastGround = null;   // the ground drawing on screen
   let lastTrace = null;    // the trace drawing on screen
   let index = null;        // the query index drawing, for the picker
@@ -160,6 +163,114 @@
     return { at, width, height: rows * cell, cell, side, columns, cellOrigin };
   }
 
+  /* The declared projection, as pixels (task 027).
+   *
+   * The state carries a 2-D position per vector, declared and illustrative.
+   * This maps those coordinates onto the canvas and nothing else: no distance
+   * is taken, nothing is clustered, no neighbour is found by position. The
+   * server refuses those operations in a view; the page does not need them.
+   *
+   * Points land on whole pixels, so several vectors can share one at this
+   * scale — the picture is a density, which is what the teaser's is too. The
+   * bounds are the projection's own extent, padded so nothing sits on the
+   * edge, and they are computed once: they do not move when epsilon does,
+   * because epsilon changes a vector's colour and not its place.
+   */
+  const PROJECTED_SIDE = 900;
+
+  // What each layout is, said under the picture. Two different claims about
+  // what is on screen, and showing the wrong one states something false: the
+  // cell caption ends "the state holds no positions", which stops being true
+  // the moment the state carries a projection.
+  const FIGCAPTION = {
+    projection: 'Every vector at its declared position, coloured by how many '
+      + 'regions hold a copy of it at this ε. The positions are a projection '
+      + 'the fixture declares illustrative; regions, distances and copy counts '
+      + 'were computed in the full space, not from this picture. Rings mark '
+      + 'each region at the mean position of its own vectors.',
+    regions: 'One cell per region; inside it, the vectors whose home is that '
+      + 'region, in id order, coloured by how many regions hold a copy of each '
+      + 'at this ε. It is a layout, not a map: it places a vector by which '
+      + 'region it belongs to, and nothing else.',
+  };
+  const HOVER = {
+    projection: 'Positions are the declared projection; switch to "By region" '
+      + 'to point at a region.',
+    regions: 'Point at a cell to see which region it is.',
+  };
+
+  // What the trace's marks are, per layout. A key that names marks the
+  // canvas is not drawing is worse than no key at all.
+  const KEY = {
+    projection: [
+      ['ring routed', 'the region the query was routed to'],
+      ['ring probed', 'the other region(s) it probed'],
+      ['ring neighbours', 'its true neighbours; louder where one lives '
+        + 'outside the routed region'],
+      ['cross', 'the query itself, placed among its true neighbours'],
+    ],
+    regions: [
+      ['key-box routed', 'the region the query was routed to'],
+      ['key-box probed', 'the other region(s) it probed'],
+      ['key-box neighbours', 'regions its true neighbours live in'],
+    ],
+  };
+
+  function describeLayout() {
+    const which = (layout && layout.projected) ? 'projection' : 'regions';
+    text($('ground-figcaption'), FIGCAPTION[which]);
+    text($('ground-hover'), HOVER[which]);
+    text($('trace-hover'), HOVER[which]);
+    const key = $('trace-key');
+    if (key) {
+      key.replaceChildren();
+      KEY[which].forEach(([cls, label]) => {
+        const li = make('li');
+        li.append(make('span', cls), document.createTextNode(label));
+        key.append(li);
+      });
+      const ramp = make('li');
+      const swatches = make('span', 'key-ramp');
+      swatches.setAttribute('aria-hidden', 'true');
+      ['c1', 'c2', 'c3', 'c4'].forEach((c) => swatches.append(make('span', c)));
+      ramp.append(swatches,
+                  document.createTextNode('vector colour: held by 1, 2, 3, 4 regions'));
+      key.append(ramp);
+    }
+  }
+
+  function buildProjected(points) {
+    const xs = points.data.x;
+    const ys = points.data.y;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < xs.length; i++) {
+      if (xs[i] < minX) minX = xs[i];
+      if (xs[i] > maxX) maxX = xs[i];
+      if (ys[i] < minY) minY = ys[i];
+      if (ys[i] > maxY) maxY = ys[i];
+    }
+    const spanX = (maxX - minX) || 1;
+    const spanY = (maxY - minY) || 1;
+    const span = Math.max(spanX, spanY);
+    const pad = PROJECTED_SIDE * 0.02;
+    const usable = PROJECTED_SIDE - 2 * pad;
+    // one scale for both axes, so the picture is not stretched
+    const place = (x, y) => [
+      pad + ((x - minX) - (spanX - span) / 2) / span * usable,
+      // y grows downward on a canvas and upward in a projection
+      pad + usable - ((y - minY) - (spanY - span) / 2) / span * usable,
+    ];
+    const at = new Int32Array(xs.length);
+    for (let i = 0; i < xs.length; i++) {
+      const [px, py] = place(xs[i], ys[i]);
+      const cx = Math.min(PROJECTED_SIDE - 1, Math.max(0, Math.round(px)));
+      const cy = Math.min(PROJECTED_SIDE - 1, Math.max(0, Math.round(py)));
+      at[i] = cy * PROJECTED_SIDE + cx;
+    }
+    return { at, width: PROJECTED_SIDE, height: PROJECTED_SIDE,
+             projected: true, place };
+  }
+
   /* The canvas holds one pixel per vector, and CSS scales it to the box. The
    * drawing is therefore independent of the window; resizing only rescales
    * what is already painted, which is why a resize needs no redraw of the
@@ -195,8 +306,25 @@
       px[o] = colour[0]; px[o + 1] = colour[1]; px[o + 2] = colour[2];
     }
     ctx.putImageData(image, 0, 0);
+    if (layout.projected) paintRegionMarks(ctx);
     if (withOutlines) paintTraceOutlines(ctx);
     fitCanvas(canvas);
+  }
+
+  /* Each region at the position the state declares for it -- the mean of its
+   * own vectors' positions, computed at emit time, never here. Small and
+   * muted: they locate the regions without competing with the vectors. */
+  function paintRegionMarks(ctx) {
+    const at = regionPlacement();
+    if (!at) return;
+    ctx.strokeStyle = 'rgba(231, 234, 239, 0.45)';
+    ctx.lineWidth = 1;
+    for (const [, pos] of at) {
+      const [px, py] = layout.place(pos[0], pos[1]);
+      ctx.beginPath();
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   function outline(ctx, region, colour, weight) {
@@ -210,11 +338,74 @@
 
   function paintTraceOutlines(ctx) {
     if (!lastTrace) return;
+    if (layout && layout.projected) { paintTraceOnProjection(ctx); return; }
     const point = lastTrace.marks[2];
     const link = lastTrace.marks[1];
     for (const region of new Set(point.data.home_region)) outline(ctx, region, '#E7EAEF', 1);
     link.data.region.forEach((region, i) => { if (i > 0) outline(ctx, region, '#8B96A5', 2); });
     outline(ctx, lastTrace.figures.routed_region, '#C99A3B', 3);
+  }
+
+  /* The same three things the cell layout outlines, on the projection: the
+   * routed region, the other probed regions, and the query's true
+   * neighbours -- plus the query's own declared placement, which the cells
+   * have nowhere to put. Regions are rings at the position the state
+   * declares for them (`partition.projection`), not shapes computed here. */
+  function ring(ctx, x, y, radius, colour, weight) {
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = weight;
+    ctx.stroke();
+  }
+
+  function regionPlacement() {
+    // the ground's region mark, when the state declared one
+    const mark = (lastGround && lastGround.marks || []).find(
+      (m) => m.kind === 'region' && m.data && m.data.x);
+    if (!mark) return null;
+    const at = new Map();
+    mark.data.region.forEach((r, i) => {
+      const x = mark.data.x[i];
+      const y = mark.data.y[i];
+      if (Number.isFinite(x) && Number.isFinite(y)) at.set(r, [x, y]);
+    });
+    return at;
+  }
+
+  function paintTraceOnProjection(ctx) {
+    const place = layout.place;
+    const [, link, point, queryMark] = lastTrace.marks;
+    const regions = regionPlacement();
+
+    if (regions) {
+      link.data.region.forEach((r, i) => {
+        const pos = regions.get(r);
+        if (!pos) return;
+        const [px, py] = place(pos[0], pos[1]);
+        if (i === 0) ring(ctx, px, py, 26, '#C99A3B', 3);
+        else ring(ctx, px, py, 20, '#8B96A5', 2);
+      });
+    }
+
+    // the true neighbours, ringed; the ones outside the routed region louder
+    point.data.x.forEach((x, i) => {
+      const [px, py] = place(x, point.data.y[i]);
+      const outside = point.data.outside_routed_region[i];
+      ring(ctx, px, py, 5, outside ? '#E0A83A' : '#E7EAEF', outside ? 2 : 1.5);
+    });
+
+    // the query itself: a cross, so it is not mistaken for a vector
+    if (queryMark && queryMark.data && queryMark.data.x) {
+      const [px, py] = place(queryMark.data.x[0], queryMark.data.y[0]);
+      ctx.strokeStyle = '#E7EAEF';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(px - 7, py); ctx.lineTo(px + 7, py);
+      ctx.moveTo(px, py - 7); ctx.lineTo(px, py + 7);
+      ctx.stroke();
+      ring(ctx, px, py, 10, '#E7EAEF', 1);
+    }
   }
 
   // Which region a pointer is over, so a cell can be named.
@@ -235,6 +426,10 @@
     if (!canvas || !hover) return;
     const rest = hover.textContent;
     canvas.addEventListener('mousemove', (e) => {
+      if (layout && layout.projected) {
+        hover.textContent = HOVER.projection;
+        return;
+      }
       const region = regionAt(canvas, e);
       if (region === null) { hover.textContent = rest; return; }
       const held = lastGround && lastGround.marks[1].data.vectors_held[region];
@@ -434,7 +629,16 @@
     lastGround = drawing;
     const f = drawing.figures;
     shownEpsilon = f.epsilon === undefined ? null : f.epsilon;
-    if (!layout) layout = buildLayout(drawing.marks[0], drawing.marks[1].data.region.length);
+    const points = drawing.marks[0];
+    if (!cellLayout) {
+      cellLayout = buildLayout(points, drawing.marks[1].data.region.length);
+    }
+    if (!projLayout && points.data.x) projLayout = buildProjected(points);
+    // Epsilon recolours; it never moves a point. Both layouts are built once.
+    const seg = $('ground-layout');
+    if (seg) seg.hidden = !projLayout;
+    if (!projLayout) layoutMode = 'regions';
+    layout = (layoutMode === 'projection' && projLayout) ? projLayout : cellLayout;
 
     text(need('r-copied'), f.vectors_copied === undefined ? '—' : fmtInt(f.vectors_copied));
     text(need('r-storage'), f.storage_amplification === undefined
@@ -448,6 +652,7 @@
     text(need('ground-caption'), drawing.caption || '');
     listGaps(need('ground-gaps'), drawing.gaps);
     need('eps-stale').hidden = true;
+    describeLayout();
     paint($('ground-canvas'), false);
     paint($('trace-canvas'), true);
   }
@@ -908,6 +1113,22 @@
         buildQueryList();
       });
     });
+    const seg = $('ground-layout');
+    if (seg) {
+      seg.querySelectorAll('button').forEach((b) => {
+        b.addEventListener('click', () => {
+          layoutMode = b.dataset.layout;
+          seg.querySelectorAll('button').forEach((o) => o.setAttribute(
+            'aria-pressed', String(o === b)));
+          // Both layouts are already built; this only chooses which to paint.
+          layout = (layoutMode === 'projection' && projLayout)
+            ? projLayout : cellLayout;
+          describeLayout();
+          paint($('ground-canvas'), false);
+          paint($('trace-canvas'), true);
+        });
+      });
+    }
     window.addEventListener('hashchange', route);
     window.addEventListener('resize', () => {
       fitCanvas($('ground-canvas'));
