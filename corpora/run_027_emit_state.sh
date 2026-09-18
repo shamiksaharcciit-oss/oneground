@@ -113,19 +113,51 @@ if pr.get("kind") != "declared":
     raise SystemExit(f"projection kind is {pr.get('kind')!r}, not 'declared'")
 PYEOF
 
-# ---- the acceptance, against the same answer key task 027 used ----
+# ---- package the outputs BEFORE any check that can fail ----
+# This session's own first run got the order wrong. The acceptance ran first,
+# failed on a real finding, and `set -euo pipefail` aborted the script before
+# its tar -- so `pod fetch` had nothing to fetch and the evidence for the
+# failure had to be pulled off the pod by hand over ssh before the stall
+# watchdog terminated it. A failure's evidence is the evidence you most need.
+#
+# Receipts first, the same rule task 016 keeps. From here the bundle exists
+# whatever the checks say, and the checks decide only whether DONE is printed.
 echo "--------------------------------------------------------------"
-echo "acceptance: the emitted state against site/teaser/data/base.bin"
-ONEGROUND_STATE_DIR="$WORKDIR/state" \
-  $PY tasks/scratch/027_acceptance.py --state-dir "$WORKDIR/state"
-
-echo "--------------------------------------------------------------"
-echo "packaging outputs"
+echo "packaging outputs (before the checks: a failure's evidence must come home)"
 tar -czf "$OUT" \
     "$WORKDIR/state" \
     "$WORKDIR/simulate.json" \
     "$WORKDIR/simulate_info.json"
 echo "  $OUT  ($(stat -c %s "$OUT") bytes)"
+
+# ---- the acceptance, against the same answer key task 027 used ----
+# It is allowed to fail: `set +e` around it so the packaging below always runs.
+echo "--------------------------------------------------------------"
+echo "acceptance: the emitted state against site/teaser/data/base.bin"
+set +e
+$PY tasks/scratch/027_acceptance.py --state-dir "$WORKDIR/state"
+acceptance=$?
+set -e
+
+# The acceptance's own JSON says which check failed and why; it belongs in the
+# bundle, so repack with it.
+if [ -f tasks/scratch/027-acceptance.json ]; then
+  tar -czf "$OUT" \
+      "$WORKDIR/state" \
+      "$WORKDIR/simulate.json" \
+      "$WORKDIR/simulate_info.json" \
+      tasks/scratch/027-acceptance.json
+  echo "  repacked with the acceptance result  ($(stat -c %s "$OUT") bytes)"
+fi
+
+if [ "$acceptance" -ne 0 ]; then
+  echo "--------------------------------------------------------------"
+  echo "ERROR: the acceptance did not pass. The lines above say which check"
+  echo "failed and whether it is this task's or a build that does not"
+  echo "reproduce. The outputs are packaged at $OUT and can be fetched."
+  echo "  finished    : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  exit "$acceptance"
+fi
 
 echo "  finished    : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "DONE"

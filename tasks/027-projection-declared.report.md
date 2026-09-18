@@ -168,9 +168,12 @@ canvas 900×900 projected and 688×688 by region.
 - **A fixture finding, for the main stream.** `ground_view_base.parquet`'s own
   `region` and `copies` columns disagree with `base.bin`'s on near-tie rows:
   **35 region disagreements** and **40 copy-count disagreements** at ε 0.20,
-  out of 150,000. Every one sits where the two nearest centroids are within
-  **d2/d1 ≈ 1.0001–1.002** — the ambiguity band the `ambiguous` flag exists
-  for. Two exports of the same `projection.npy` broke those ties differently.
+  out of 150,000. I first read this as two exports of the same
+  `projection.npy` breaking ties differently. **The pod session showed that is
+  wrong**: the cause is that `semantic_sharded`'s k-means does not reproduce
+  across environments, so the two exports were not breaking ties — they were
+  working from different centroids. See "A main-stream defect this session
+  found" above; this bullet is that defect seen from one side.
   **This is a fixture matter, not a lab one**, and I used only the parquet's
   `x`/`y`, which are bit-identical to `base.bin`'s. The state's own copy counts
   and home regions agree with `base.bin` exactly — 0 and 0 — so nothing the lab
@@ -185,6 +188,114 @@ canvas 900×900 projected and 688×688 by region.
   `tasks/scratch/027-arxiv-projection.yaml`.
 - **Two scan tests confuse "not a checkout" with "git is not runnable."**
   Below; `main`'s file, outside this brief.
+
+## A main-stream defect this session found: `semantic_sharded` does not reproduce across environments
+
+**Not task 027's**, and not fixed here. Recorded with the evidence so the main
+stream can act on it. It is also the cause of the fixture finding reported
+earlier in this report, which I had put down to two exports breaking ties
+differently.
+
+### What was run
+
+Session `20260918-184234`, pod `wlfnzjp71vpjw6`, RTX PRO 4000 in EU-RO-1:
+`oneground simulate --emit-state` on arXiv 150k with the projection declared —
+the one path this laptop cannot take. It succeeded. The state carries all
+three declared columns, and the acceptance **read the emitted columns** rather
+than attaching its own:
+
+```
+projection: READ FROM THE STATE as emitted
+emitted column == the declared file: True
+maximum coordinate difference               0     (bit-identical)
+```
+
+**So the emit path is proved.** What failed is beside it.
+
+### The two camps
+
+Four independent computations of the same assignment over the same 150,000
+vectors, the same seed and the same configuration. They fall into two groups
+that agree perfectly inside each and disagree across:
+
+| | home-region disagreements |
+|---|---|
+| pod state vs laptop state (task 020) | **35** |
+| pod state vs `ground_view_base.parquet` | **0** |
+| laptop state vs `site/teaser/data/base.bin` | **0** |
+| `ground_view_base.parquet` vs `base.bin` | **35** |
+
+Camp A: the laptop's task-020 state and `base.bin`. Camp B: the pod's fresh
+state and the parquet `export_ground_view.py` wrote. Each pair agrees to the
+row; the pairs disagree on the same 35 vectors.
+
+### It is not a tie-break
+
+That was my first reading, and it is wrong. The stored distances themselves
+differ:
+
+```
+centroid_dist identical, pod vs laptop : False
+maximum |difference|                   : 0.004463374614715576
+nearest_region identical               : False
+```
+
+A tie-break would leave `centroid_dist` bit-identical and move only which of
+two equal distances won. **The centroids are different**, so k-means itself
+converged elsewhere. The 35 rows that flip are simply the ones close enough to
+a boundary for a centroid shift of that size to move them: their `d2/d1`
+ranges 1.000012 to 1.005830.
+
+### What it moves
+
+At epsilon 0.20, `simulate.json` for the same configuration:
+
+| field | pod | laptop (020) |
+|---|---|---|
+| `storage_amplification` | 3.715147 | 3.71516 |
+| `stored_vectors` | 557,272 | 557,274 |
+| `recall_at_10` | 0.9319 | 0.9318 |
+| `ceiling_at_10` | 0.9324 | 0.9323 |
+| `recall_at_1` | 0.9505 | 0.95 |
+| `routing_loss` | 0.0676 | 0.0677 |
+| `recall_at_100` | 0.886 | 0.886115 |
+| `inv_ratio_at_10` | 0.997593 | 0.997592 |
+
+`fanout`, `shards`, `index_loss` and the copy percentiles are unchanged.
+
+### It was already written down as an open gap
+
+`oneground/models/base.py:52-53`, from task 012b:
+
+> `hash_sharded` and `semantic_sharded` build `IndexHNSWFlat` per shard and
+> have not been converted; they take the same helper when someone does.
+
+That paragraph is about the HNSW build, which task 012 made deterministic for
+`single_node_hnsw` by pinning faiss to one OpenMP thread after measuring 37% of
+returned ids differing between two builds. The k-means that decides the regions
+is the same class of problem and is not covered by that fix either. The
+determinism promise in the same docstring — *"two builds from the same
+(vectors, config, seed) must produce the same measurements"* — does not hold
+for this family across machines.
+
+### What it means for what is published
+
+- `requirements.arxiv-150k.yaml` is frozen and its published values came from
+  one environment. Nothing here changes them.
+- It does mean **a user reproducing the fixture on their own machine may not
+  get the published `storage_amplification` to six decimals**, and the fixture
+  verification's tolerances are what decides whether that reads as verified or
+  contradicted. That is worth checking against the declared tolerances; I have
+  not.
+- The lab is unaffected. Positions are declared and read from a file, so they
+  are bit-identical everywhere; the ground's colours are recounted from
+  whatever the state holds, and are correct for that state.
+
+### What I did not do
+
+Not fixed here, per the ruling. No seed, threshold, tolerance or published
+value was touched. `corpora/export_ground_view.py` and
+`corpora/export_teaser_data.py` were read and not changed.
 
 ## A check that would have proved the wrong thing
 
@@ -290,10 +401,14 @@ merge.
 
 ## Blocked on developer
 
-- **A pod run of `simulate --emit-state` on arXiv 150k with the projection
-  declared**, to prove the emit path end to end at scale. Everything else about
-  it is proved; this is the one step this machine cannot take.
-  **Prepared and priced, awaiting your `y`:**
+- ~~A pod run of `simulate --emit-state` on arXiv 150k~~ **— done.** Session
+  `20260918-184234`, pod `wlfnzjp71vpjw6`. The emit path is proved: all three
+  declared columns emitted at 150,000 vectors, the acceptance read them rather
+  than attaching its own, and the coordinates are bit-identical to `base.bin`.
+  The same run found the k-means defect above. Emit time 2 min 41 s for the
+  configuration, 3.3 s to write 19.2 MB of state; ~$0.05 against the $0.57
+  cap; pod terminated, `pod ls` reports 0 oneground pods. The session as
+  planned and priced was:
   `sessions/027-emit-state-arxiv.yaml`, with
   `requirements.arxiv-150k.projection.pod.yaml` and
   `corpora/run_027_emit_state.sh`. `oneground pod plan` resolves it live to
