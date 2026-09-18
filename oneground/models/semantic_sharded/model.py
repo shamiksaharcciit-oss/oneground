@@ -40,7 +40,7 @@ import numpy as np
 from ..base import (BUILD, CONSTANT, RUN, BuiltIndex, Candidates, Config,
                     Footprint, Param, declare_parameters,
                     estimate_memory_bytes, exact_over, merge_candidates,
-                    resolve_deterministic, single_threaded_faiss)
+                    resolve_deterministic, deterministic_faiss)
 
 NAME = "semantic_sharded"
 
@@ -149,7 +149,7 @@ class SemanticSharded:
         n_cent = int(config.get("centroids", 256))
         eps = float(config.get("epsilon", 0.2))
 
-        with single_threaded_faiss(det):
+        with deterministic_faiss(det):
             cents = (context or {}).get("centroids")
             if cents is None or len(cents) != n_cent:
                 cents = kmeans(vectors, n_cent, seed)

@@ -215,8 +215,58 @@ byte-identical ids. The measured cost and the sizes it was measured at are in
 available for sweeps where a rebuild is not needed, and any receipt produced
 that way should say so.
 
-`hash_sharded` and `semantic_sharded` build `IndexHNSWFlat` per shard and have
-**not** been converted. They take the same helper when someone does.
+`hash_sharded` and `semantic_sharded` were converted the same way by **task
+015**; both build inside `single_threaded_faiss(det)`. (This paragraph said
+they had not been, until task 029 — 015 landed the fix and did not update the
+sentence, and two streams then went looking for a defect that was already
+fixed.)
+
+### What one thread does not cover: the machine (task 029)
+
+Single threading fixes the order of work *within* a process. It says nothing
+about **which kernel does the arithmetic**, and that is decided per machine.
+
+Above `distance_compute_blas_threshold`, faiss hands a distance computation to
+the bundled BLAS as a GEMM. OpenBLAS selects its GEMM kernel by
+microarchitecture at run time, so the same floats are summed in a different
+order on a different CPU. For `semantic_sharded` that lands on the k-means
+that decides the regions, and a shifted centroid moves the vectors nearest a
+boundary into a different shard.
+
+**Measured, task 029**, twelve k-means over the same 150,000 × 768 at seed
+20260908, same `faiss-cpu 1.15.0` and `numpy 2.5.3`, on an Intel laptop with
+AVX512 and an AMD EPYC pod without it:
+
+| | result |
+|---|---|
+| BLAS path, the two machines | centroids differ by 0.00104; 35 of 150,000 vectors change home region; eight published values move in the sixth decimal |
+| BLAS path, each machine twice | bitwise identical — each machine reproduces itself |
+| **no BLAS, the two machines** | **bitwise identical centroids** |
+| `FAISS_OPT_LEVEL` (generic / AVX2 / AVX512) | no effect on either machine, with BLAS on **or** off |
+
+So `deterministic=True` now enters `deterministic_faiss`, which is both
+halves: one OpenMP thread, and `distance_compute_blas_threshold` raised so the
+arithmetic stays in faiss's own kernels. `deterministic=False` keeps the fast
+path, and `simulate_info.json` records which each configuration was built on.
+
+**What it costs, and the cost is not one-signed.** Five runs each, median:
+
+| corpus | machine | BLAS | no BLAS | ratio |
+|---|---|---|---|---|
+| 20,000 × 768, k=256 | laptop, 4 cores | 1.39 s | 8.45 s | **6.1× slower** |
+| 150,000 × 768, k=256 | laptop, 4 cores | 6.82 s | 33.50 s | **4.9× slower** |
+| 150,000 × 768, k=256 | pod, 48 threads | 39.46 s | 6.85 s | **5.8× faster** |
+
+**The deterministic path is slower on a few-core machine and faster on a
+many-core one.** On four cores BLAS is winning; on forty-eight it loses to its
+own threading over a 65,536-point subsample, and faiss's kernels do not. Beside
+task 012's HNSW figures — 1.8× slower on 1.18M, faster at 20k — this is the
+same shape: determinism here is not a uniform tax, and on the machines that
+run canonical builds it is cheaper.
+
+`single_node_hnsw` takes the thread half only. It has no k-means, and task 029
+was scoped to the families that do; changing its arithmetic would move its
+published values for no reason.
 
 ---
 

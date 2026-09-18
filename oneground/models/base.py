@@ -50,14 +50,18 @@ default (`deterministic=True`, via `single_threaded_faiss`), and pays a
 measured build-time penalty for it -- see `docs/MODELS.md`.
 
 `hash_sharded` and `semantic_sharded` build `IndexHNSWFlat` per shard and were
-converted in task 015 (`dc85609`): each wraps its whole build --- the k-means,
-the closure and every shard's adds --- in the same `single_threaded_faiss`
-helper. These two lines said they had *not* been converted until task 028c,
-a week after they had; task 029's brief then quoted the stale sentence as a
-recorded gap, which is the cost of a comment that outlives what it describes.
+converted the same way by task 015 (`dc85609`): each wraps its whole build --
+the k-means, the closure and every shard's adds -- in the same helper. All
+three families are deterministic by default.
 
-What `deterministic=True` guarantees, per family, all of it measured on one
-machine (tasks 012, 015, 028b):
+These lines said the sharded families had *not* been converted until task
+028c, a week after they had, and task 029's brief then quoted the stale
+sentence as a recorded gap. Two streams went looking for an HNSW defect that
+015 had already fixed. A stale claim in the place people check claims costs
+more than it looks.
+
+What `deterministic=True` guarantees, per family, measured on one machine
+(tasks 012, 015, 028b, 029):
 
     single_node_hnsw    two builds from the same (vectors, config, seed)
                         return the same ids. Task 012: 37% of ids differed at
@@ -67,20 +71,39 @@ machine (tasks 012, 015, 028b):
                         copy counts and each shard's ids are the same. Task
                         028b: two builds of one 5,219-vector shard differed on
                         3.455% of returned ids at efSearch=96 under four
-                        threads, and were identical under one.
+                        threads, and were identical under one. Task 029, at
+                        20,000 vectors: 691 of 20,000 ids differ at four
+                        threads and none at one, at 2.6x the build time.
     hash_sharded        the same wrapper over the same kind of per-shard
                         build; converted by the same commit, not separately
                         measured.
 
-What it does not guarantee: the same numbers on a *different* machine. A pod
-run and a laptop run produced different k-means centroids from the same seed
-and the same vectors -- task 027's report, on the `task-020` branch until it
-merges, gives distances differing by up to 0.004463 and 35 of 150,000 home
-regions moving --
-and single threading does not address that. Within one machine the k-means is
-stable: two runs of it are bit-identical, threaded or not (028b). Searching an
-already-built index is deterministic either way (028b). The cross-environment
-question is open.
+ACROSS MACHINES, WHICH ONE THREAD DOES NOT COVER
+------------------------------------------------
+Single threading fixes the order of work *within* a process. It says nothing
+about which kernel does the arithmetic, and that is chosen per machine.
+
+Task 027 found the consequence: a pod and this laptop produced different
+k-means centroids from the same seed and the same vectors -- distances
+differing by up to 0.004463, 35 of 150,000 home regions moving, eight
+published values in the sixth decimal -- while every run on each machine
+reproduced bitwise.
+
+Task 029 established the cause and closed it. It is not SIMD dispatch, which
+was disproved: all four `FAISS_OPT_LEVEL` settings give bitwise identical
+centroids on one machine, with the BLAS path on and off. It is the BLAS path
+itself. Above `distance_compute_blas_threshold` faiss hands the assignment
+step to the bundled BLAS as a GEMM, and OpenBLAS -- the same library family on
+both sides, confirmed by `ldd` -- selects its kernel by microarchitecture at
+run time. So `deterministic=True` now enters `deterministic_faiss`, which is
+both halves: one OpenMP thread, and the assignment kept off the BLAS path.
+
+Proved, not predicted: with both halves, an Intel laptop with AVX512 and an
+AMD EPYC pod without it produce bitwise identical centroids and a
+byte-identical `simulate.json`. The cost is not one-signed -- ~4.9x slower at
+150,000 vectors on four cores, ~5.8x faster on forty-eight -- and
+`docs/MODELS.md` carries both numbers. `simulate_info.json` records which path
+each configuration was built on.
 """
 
 import contextlib
@@ -122,6 +145,70 @@ def single_threaded_faiss(enabled=True):
         yield
     finally:
         faiss.omp_set_num_threads(prev)
+
+
+# The threshold above which faiss hands a distance computation to the bundled
+# BLAS as a GEMM. Raising it past any batch this project will ever pass keeps
+# the arithmetic in faiss's own kernels.
+#
+# It is a C `int` on the faiss side, so it has to fit in one: 1 << 40 raises
+# OverflowError. 2**30 is ~1.07e9, against the largest batch here of 150,000
+# vectors x 256 centroids = 3.84e7 -- two orders of headroom, inside int32.
+_NO_BLAS_THRESHOLD = 2 ** 30
+
+
+@contextlib.contextmanager
+def deterministic_blas(enabled=True):
+    """Keep faiss's distance computations off the BLAS path, then restore.
+
+    This is the half task 029 found, and it is the half that crosses machines.
+    One thread fixes the order of work *within* a process; it says nothing
+    about which kernel does the arithmetic. Above
+    `distance_compute_blas_threshold` faiss hands the k-means assignment step
+    to the bundled BLAS as a GEMM, and OpenBLAS picks its kernel by
+    microarchitecture at run time -- an AVX512 kernel on one machine, a Zen
+    kernel on another -- so the same floats are summed in a different order
+    and the centroids differ.
+
+    Measured (task 029, 12 runs on two machines, same faiss-cpu 1.15.0 and
+    numpy 2.5.3): with BLAS in play, an Intel AVX512 laptop and an AMD EPYC
+    pod produced centroids differing by 0.00104, each machine reproducing
+    itself exactly. With BLAS off, the two produced **bitwise identical**
+    centroids. The faiss dispatch level (`FAISS_OPT_LEVEL`) changed nothing on
+    either machine, with BLAS on or off: faiss's own kernels agree across
+    these two instruction sets and the BLAS does not.
+
+    The cost is real and it is not one-signed -- see `docs/MODELS.md`. On a
+    4-core laptop this path is ~4.9x slower at 150,000 vectors; on a 48-thread
+    pod it is ~5.8x *faster*, because BLAS loses to its own threading over a
+    65,536-point subsample.
+
+    `distance_compute_blas_threshold` is a process-wide faiss global, so the
+    restore is in a `finally` for the same reason the thread count's is.
+    """
+    if not enabled:
+        yield
+        return
+    import faiss
+    prev = faiss.cvar.distance_compute_blas_threshold
+    faiss.cvar.distance_compute_blas_threshold = _NO_BLAS_THRESHOLD
+    try:
+        yield
+    finally:
+        faiss.cvar.distance_compute_blas_threshold = prev
+
+
+@contextlib.contextmanager
+def deterministic_faiss(enabled=True):
+    """Both halves of a reproducible build: one thread, and no BLAS.
+
+    One thread (task 012) makes a build reproduce on the machine that ran it.
+    No BLAS (task 029) makes it reproduce on a different machine as well.
+    A family that wants byte-identity wants both; `deterministic=False` keeps
+    the fast path for a sweep that does not.
+    """
+    with single_threaded_faiss(enabled), deterministic_blas(enabled):
+        yield
 
 
 # --------------------------------------------------------------------------

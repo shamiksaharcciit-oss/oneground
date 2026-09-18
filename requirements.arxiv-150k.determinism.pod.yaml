@@ -1,0 +1,59 @@
+# Task 029 proof run: arxiv-150k's reference semantic configuration on a pod,
+# with the determinism fix in place, so byte-identity across environments is
+# shown through `simulate` rather than a probe script.
+#
+# Not a replacement for requirements.arxiv-150k.yaml, which is frozen.
+
+oneground: 1
+
+run:
+  name: 029-proof
+  mode: measure
+  seed: 20260908
+  workdir: ./runs/029-proof
+
+corpus:
+  sample:
+    kind: receipt
+
+    vectors:
+      path: /workspace/arxiv-150k/vectors.npy
+      normalized: true             # the builder normalized at embed time
+
+    queries:
+      path: /workspace/arxiv-150k/queries.npy
+      count_min: 50
+      source: written
+
+    target_sample_size: 150000
+
+# `verify --on-pod` reads the corpus and the workdir; it does not simulate.
+# The sweep below is carried so the file stays a valid requirements document
+# and so calibration can find the same reference row the local run used.
+
+# ------------------------------------------------------------------
+# simulate -- the reference configuration only, deterministic
+# ------------------------------------------------------------------
+simulate:
+  kind: declared
+  families: [semantic_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+  include:
+    # `deterministic: true` is the default; written out because this run
+    # exists to prove what that default now guarantees, and a reader should
+    # not have to know the default to read the receipt.
+    - {family: semantic_sharded, centroids: 256, epsilon: 0.2, probe: 2,
+       M: 32, efSearch: 96, deterministic: true}
+
+  grid:
+    semantic_sharded:
+      centroids: [256]
+      epsilon: [0.2]
+      probe: [2]
+      M: [32]
+      efSearch: [96]
+
+  budget:
+    max_minutes: 45

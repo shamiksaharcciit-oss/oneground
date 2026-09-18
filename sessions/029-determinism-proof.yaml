@@ -1,0 +1,101 @@
+# Task 029 step 4, end to end: `simulate` on a second environment, with the
+# determinism fix in place. Creates nothing; `oneground pod up` is the only
+# billable subcommand and still needs a typed 'y'.
+#
+# WHY A SECOND SESSION. The first (20260918-201437) measured the k-means
+# directly and answered the question: with faiss's BLAS path disabled, an
+# Intel AVX512 laptop and an AMD EPYC pod produce bitwise identical centroids,
+# and with it they do not. That was a probe script. The developer's ruling is
+# that the claim now worth making -- byte-identity across environments -- must
+# be proved through `simulate` itself, because that is what a user runs and
+# what the fixture's receipt is about.
+#
+# So this runs the real command on the pod with `deterministic=True` (the
+# default, now meaning one thread AND no BLAS) and brings back simulate.json,
+# simulate_info.json and the centroids. The laptop's side of the comparison is
+# already on disk from the same command.
+#
+# THE CLAIM: simulate.json is byte-identical between the two machines with
+# build_seconds and query_seconds masked, and the centroids are bitwise equal.
+# If it holds, cross-environment reproducibility is proved through the product
+# path. If it does not, the residual is the finding and gets reported as one
+# rather than anything being widened.
+
+# CPU work: k-means is faiss-cpu and numpy. A pod needs a card and this one
+# will idle; the cheapest offered in the volume's datacenter is taken.
+gpu:
+  - RTX PRO 4000
+  - RTX PRO 4500
+  - RTX A4000
+  - L4
+
+volume: vecbench                 # datacenter derived from the name
+volume_mount_path: /workspace
+
+# The image the canonical build and task 027's session used, so the
+# interpreter and the pins resolve the same way. Setup builds a fresh venv
+# from requirements.txt.
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+
+disk_gb: 20
+
+env:
+  ONEGROUND_OUT: /workspace/029-proof.tgz
+  ONEGROUND_WORKDIR: runs/029-proof
+  ONEGROUND_VECTORS: /workspace/arxiv-150k/vectors.npy
+  ONEGROUND_REQUIREMENTS: requirements.arxiv-150k.determinism.pod.yaml
+
+setup: corpora/POD_SETUP.md
+run: bash corpora/run_029_proof.sh
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-029-proof.log
+done_marker: DONE
+
+# Twelve k-means over 150,000 x 768 (four dispatch levels x three BLAS
+# settings). Each took 15-24 s on this 4-core laptop; a 16-vCPU host should be
+# quicker, and the log prints a line per run, so ten minutes of silence would
+# already be abnormal.
+stall_minutes: 15
+
+# UPLOADED: the measuring script only. The corpus is on the volume -- 460 MB
+# does not go up an scp, and the `input_size_cap_mb` default of 50 stays where
+# task 011 put it. `run_029_kmeans.sh` checks for the corpus in its first
+# seconds and fails with the path rather than after twenty minutes.
+inputs:
+  # the characterization this run simulates against, from the reference run,
+  # so the emitted row is comparable with the laptop's
+  - local: runs/020-ref-arxiv/characterization.json
+    remote: /workspace/oneground/runs/029-proof/characterization.json
+    optional: false
+  - local: runs/020-ref-arxiv/ground_truth.npy
+    remote: /workspace/oneground/runs/029-proof/ground_truth.npy
+    optional: false
+  - local: runs/020-ref-arxiv/ground_truth_scores.npy
+    remote: /workspace/oneground/runs/029-proof/ground_truth_scores.npy
+    optional: true
+  - local: runs/020-ref-arxiv/sample_ids.json
+    remote: /workspace/oneground/runs/029-proof/sample_ids.json
+    optional: true
+  - local: runs/020-ref-arxiv/queries_ids.json
+    remote: /workspace/oneground/runs/029-proof/queries_ids.json
+    optional: true
+  - local: runs/020-ref-arxiv/build_info.json
+    remote: /workspace/oneground/runs/029-proof/build_info.json
+    optional: true
+
+outputs:
+  # Raw centroid arrays plus a manifest and the host's CPU description. Twelve
+  # arrays of 256 x 768 float32 = 9.4 MB before compression.
+  - remote: /workspace/029-proof.tgz
+    local: runs/029-proof-pod/
+    extract: true
+
+caps:
+  # Twelve k-means, no index build, no embedding. Task 027's session did more
+  # than this and finished in 2.9 minutes of compute after a 3.4-minute setup.
+  # An hour is generous, and the cap is confirmed at the TOP of the live price
+  # range rather than its floor.
+  max_hours: 1.0
+  max_concurrent: 1
+  max_usd: 2.0
