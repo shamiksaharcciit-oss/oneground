@@ -25,6 +25,7 @@ The properties:
 """
 
 import builtins
+import contextlib
 import hashlib
 import http.client
 import json
@@ -668,14 +669,36 @@ def test_every_element_the_script_needs_is_in_the_page():
         f"define: {missing}")
 
 
-def _browser_or_skip():
+LOOKED_FOR = ("msedge", "google-chrome", "chromium", "chromium-browser",
+              "and Edge or Chrome in their usual install locations")
+
+
+@contextlib.contextmanager
+def _browser_or_skip(**kw):
+    """A headless browser, or a skip that names what was missing.
+
+    A machine with no Chromium must not fail this suite: the page was not
+    loaded there, which is a gap and not a defect, and the skip says so rather
+    than reading as a pass. Both ways of not having one are covered -- no
+    binary at all, and a binary that will not start headless -- because only
+    the first is a matter of `shutil.which`.
+    """
     import pytest
     from oneground.lab import cdp
     found = cdp.find_browser()
     if not found:
-        pytest.skip("no Chromium-family browser found, so the page was not "
-                    "loaded; this does not pass")
-    return cdp
+        pytest.skip("no Chromium-family browser on this machine (looked for "
+                    + ", ".join(LOOKED_FOR) + "), so the page was not loaded; "
+                    "this does not pass")
+    try:
+        browser = cdp.Browser(**kw)
+    except (OSError, RuntimeError) as e:
+        pytest.skip(f"{os.path.basename(found)} would not start headless "
+                    f"({e}), so the page was not loaded; this does not pass")
+    try:
+        yield browser
+    finally:
+        browser.close()
 
 
 def _landing_reached(b):
@@ -697,7 +720,6 @@ def test_the_landing_page_reaches_its_loaded_state_in_a_browser():
     workdir. The only thing that sees this is a browser that runs the script
     and is asked what the page ended up holding.
     """
-    cdp = _browser_or_skip()
     with tempfile.TemporaryDirectory() as tmp:
         # Two shapes: one with characterize's receipts and a second run added
         # with --also, one bare. The stall was identical on both real
@@ -711,7 +733,7 @@ def test_the_landing_page_reaches_its_loaded_state_in_a_browser():
             lab = _lab(wd, also=also)
             try:
                 url = f"http://127.0.0.1:{lab.port}/?token={TOKEN}"
-                with cdp.Browser(width=1200, height=900) as b:
+                with _browser_or_skip(width=1200, height=900) as b:
                     b.goto(url)
                     reached = _landing_reached(b)
                     state = b.evaluate("window.__labState()")
@@ -740,13 +762,12 @@ def test_a_failure_while_loading_is_shown_in_the_page():
     fails. The page must say so where a person can see it, rather than sitting
     on its placeholder.
     """
-    cdp = _browser_or_skip()
     with tempfile.TemporaryDirectory() as tmp:
         wd = _workdir(tmp, "run", 0.2, receipts=True)
         lab = _lab(wd)
         port = lab.port
         lab.stop()                      # nothing is listening any more
-        with cdp.Browser(width=1000, height=800) as b:
+        with _browser_or_skip(width=1000, height=800) as b:
             b.goto(f"http://127.0.0.1:{port}/?token={TOKEN}")
             shown = b.wait_for(
                 "(() => { const f = document.querySelector('#fatal');"

@@ -251,6 +251,13 @@ JSON.
 - **Nothing measured.** The server imports nothing that measures and does not
   import numpy. The rendering contract's guard is run over its source, and
   over everything it imports, before it binds a port.
+- **`oneground/lab/cdp.py` is a test tool, not part of the lab.** It is a very
+  small DevTools-protocol client on the standard library alone, used by the
+  tests that load the real page in a real browser and ask what it ended up
+  holding — the only thing that catches an interface whose script and markup
+  have drifted apart. It adds no dependency, nothing at run time imports it,
+  and `oneground lab` never loads it. Where no Chromium-family browser exists,
+  those tests skip and name what was missing.
 
 ### What the token protects against
 
