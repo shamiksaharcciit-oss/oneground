@@ -1,0 +1,102 @@
+# Task 032b: the other half of the determinism proof — the emitted state.
+#
+# Creates nothing. `oneground pod up` is the only billable subcommand and it
+# still needs a typed 'y'. This file is the spec; the developer runs it.
+#
+# WHY A SESSION AT ALL. Task 029 step 4 proved cross-environment identity
+# through `simulate` for `simulate.json` and the centroids, on session
+# 20260918-205534. It could not prove it for the emitted state, because that
+# run predates `--emit-state` on its branch: its tarball carries
+# simulate.json, simulate_info.json, the centroids and the host description,
+# and **no `state/` directory at all**. The claim about state columns is
+# therefore unproved rather than proved — nothing on disk contradicts it, and
+# nothing on disk supports it either.
+#
+# THE CLAIM THIS SESSION TESTS: for the same corpus, the same characterization
+# and the same seed, each `*.state.npz` this run writes is **byte-identical**
+# to the one the laptop writes from the same command at the same commit.
+# The writer is deterministic by construction — `oneground/models/state.py`
+# fixes every zip entry's timestamp and sorts the entries — so byte-identity
+# is the right claim rather than a hopeful one, and its sha256 in
+# `MANIFEST.sha256` is what a reader would check.
+#
+# IF IT DOES NOT HOLD, the residual is the finding: which columns differ, by
+# how much, and in which layer. Nothing is widened and no tolerance is
+# invented for a comparison that is supposed to be exact.
+
+# CPU work throughout: k-means and HNSW are faiss-cpu and numpy. A pod needs a
+# card and this one will idle; the cheapest offered in the volume's
+# datacenter is taken, as 029's session did.
+gpu:
+  - RTX PRO 4000
+  - RTX PRO 4500
+  - RTX A4000
+  - L4
+
+volume: vecbench                 # datacenter derived from the name
+volume_mount_path: /workspace
+
+# The image 027 and 029 used, so the interpreter and the pins resolve the same
+# way. Setup builds a fresh venv from requirements.txt.
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+
+disk_gb: 20
+
+env:
+  ONEGROUND_OUT: /workspace/032b-state.tgz
+  ONEGROUND_WORKDIR: runs/032b-state
+  ONEGROUND_VECTORS: /workspace/arxiv-150k/vectors.npy
+  ONEGROUND_REQUIREMENTS: requirements.arxiv-150k.determinism.pod.yaml
+
+setup: corpora/POD_SETUP.md
+run: bash corpora/run_032b_state_proof.sh
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-032b-state.log
+done_marker: DONE
+
+# 029's session measured two configurations in 288 s of compute. This runs the
+# same two and adds the state emission, which took 2.7 s and 38.4 s per
+# configuration on the laptop. Ten minutes of silence would already be
+# abnormal.
+stall_minutes: 15
+
+# UPLOADED: the run's inputs only. The corpus is on the volume — 460 MB does
+# not go up an scp — and these are the same files 029's session uploaded, from
+# the same reference run, so the two sessions simulate the same sample against
+# the same ground truth.
+inputs:
+  - local: runs/020-ref-arxiv/characterization.json
+    remote: /workspace/oneground/runs/032b-state/characterization.json
+    optional: false
+  - local: runs/020-ref-arxiv/ground_truth.npy
+    remote: /workspace/oneground/runs/032b-state/ground_truth.npy
+    optional: false
+  - local: runs/020-ref-arxiv/ground_truth_scores.npy
+    remote: /workspace/oneground/runs/032b-state/ground_truth_scores.npy
+    optional: true
+  - local: runs/020-ref-arxiv/sample_ids.json
+    remote: /workspace/oneground/runs/032b-state/sample_ids.json
+    optional: true
+  - local: runs/020-ref-arxiv/queries_ids.json
+    remote: /workspace/oneground/runs/032b-state/queries_ids.json
+    optional: true
+  - local: runs/020-ref-arxiv/build_info.json
+    remote: /workspace/oneground/runs/032b-state/build_info.json
+    optional: true
+
+outputs:
+  # The whole workdir, `state/` included: two `.state.npz` receipts (8 MB and
+  # 18 MB on the laptop), `state_info.json`, the state manifest, and the
+  # simulate pair beside them so the two halves of the proof travel together.
+  - remote: /workspace/032b-state.tgz
+    local: runs/032b-state-pod/
+    extract: true
+
+caps:
+  # 029's session: 3.4 min setup, 4.8 min compute, $0.57/hr. This adds about a
+  # minute of state emission. The cap is confirmed at the top of the live
+  # price range rather than its floor, as 029's was.
+  max_hours: 1.0
+  max_concurrent: 1
+  max_usd: 2.0
