@@ -16,6 +16,8 @@ oneground characterize requirements.yaml   # five measures on your own sample
 oneground simulate     requirements.yaml   # architectures against exact k-NN
 oneground verify       requirements.yaml   # real engines: Qdrant, pgvector
 oneground report       requirements.yaml   # verdicts, with every source named
+oneground lab          runs/my-run         # look at a run, read-only
+oneground propose      runs/my-run ...     # measure one change you wrote
 ```
 
 Three outcomes, always kept apart: **verified**, **contradicted**,
@@ -103,6 +105,31 @@ tolerance.
 never by a tag, so a session installs nothing; a missing digest refuses the
 run rather than falling back.
 
+**A lab you can look at a run in.** `oneground lab runs/my-run` starts a
+local, read-only server on your own machine — loopback by default, and
+serving anywhere else needs a flag and prints what that exposes — and draws
+what a sweep measured: where the regions are, which vectors the ε closure
+copies into more than one of them, and what moves when ε does. It serves a
+run's own files and writes nothing; every drawing is a projection and says so,
+because a picture of 768 dimensions in two is illustrative and never evidence.
+Run `simulate` with `--emit-state` first, so the run records what each family
+did. See [docs/LAB.md](docs/LAB.md).
+
+**A proposal loop with no model in it.** `oneground propose <workdir>
+--policy p.yaml --prediction q.yaml` measures one parameter change you wrote
+yourself, against a prediction you wrote **before** the run, and publishes a
+card saying whether it held. The prediction is written first and the run cites
+its digest, the baseline row is the one your workdir already has — cited by
+digest, never re-measured — and the side-effect budget is a first-class part
+of the verdict: a change whose recall rose exactly as promised and whose
+storage budget broke is *did not hold*, with the breach named first. Failures
+are published with the same completeness as successes, and a card may never
+say a change is good, recommended or deployable, or say anything about a
+corpus other than the one it ran on. **This is tier 1: you write the policy.**
+The model-written tier described in
+[docs/PROPOSALS.md](docs/PROPOSALS.md) is not built, there is no `--model`
+flag, and nothing in this release sends anything anywhere.
+
 ## The release assets
 
 Two, one per full fixture. Neither is in the repository: 480 MB does not
@@ -111,10 +138,10 @@ download.
 
 ```
 oneground-0.1.0-py3-none-any.whl
-  sha256  a6203b78…
+  sha256  a6203b7845ca58c4f3042f368c071a2455d78a9518ad35af21799fd4c8fdfad5
 
 oneground-0.1.0.tar.gz
-  sha256  1c2eb6ba…
+  sha256  1c2eb6ba4bb7479e051136b3fbc5da5c05d2b1ae68e2046f72b9b3081fbf4e14
 
 arxiv-150k-v1.tgz
   483,467,899 bytes

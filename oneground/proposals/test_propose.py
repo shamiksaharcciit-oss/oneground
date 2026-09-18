@@ -123,6 +123,55 @@ def test_the_baseline_is_not_re_run_synthetic(run_dir):
     assert info["not_measured"] == [base["label"]]
 
 
+def _stub_row(label):
+    """A measured row, as `measure_config` hands one back."""
+    # Above the fixture's baseline by more than the predicted 0.02, so the
+    # prediction holds and the outcome is the same for both shapes.
+    return {"config": label, "family": "semantic_sharded",
+            "params": dict(BASE, probe=2), "recall_at_1": 0.99,
+            "recall_at_10": 1.0, "recall_at_100": 0.9, "ceiling_at_10": 1.0,
+            "routing_loss": 0.0, "index_loss": 0.0,
+            "inv_ratio_at_10": 0.99, "storage_amplification": 1.5,
+            "fanout": 2.0, "est_memory_bytes": 1234567}
+
+
+@pytest.mark.parametrize("shape", ["row", "row_and_timing"])
+def test_a_measurement_may_be_a_row_or_a_row_and_timing_synthetic(run_dir,
+                                                                  shape):
+    """Both shapes, because two branches return different ones.
+
+    `simulate.measure_config` returns the row here and `(row, timing)` after
+    task 020b lands on `main`. Git merges those two changes without a
+    conflict and the merged tree then failed every proposal test on a tuple
+    reaching `judge()` — the release rehearsal found it. Accepting either
+    shape is what makes that merge hands-off, and this is the test that says
+    both work.
+    """
+    from oneground.proposals import validate_policy
+    label = validate_policy(POLICY).to_config.label
+    row, timing = _stub_row(label), {"build_seconds": 1.5,
+                                     "query_seconds": 0.25}
+
+    def measure(plan, log_fn):
+        return dict(row) if shape == "row" else (dict(row), dict(timing))
+
+    card = _propose(run_dir, "shape-" + shape, measure=measure)
+    assert card["outcome"] == HELD, card["judgement"]
+    assert card["measured"]["changed"]["recall_at_10"] == row["recall_at_10"]
+    info = json.load(open(os.path.join(run_dir["wd"], "proposals",
+                                       "shape-" + shape, "propose_info.json"),
+                          encoding="utf-8"))
+    assert info["timing"] == (None if shape == "row" else timing), info
+
+
+def test_row_and_timing_normalises_both_shapes_synthetic():
+    """The shim itself, without a run around it."""
+    row = _stub_row("x")
+    assert propose.row_and_timing(row) == (row, None)
+    assert propose.row_and_timing((row, {"build_seconds": 1})) == (
+        row, {"build_seconds": 1})
+
+
 def test_the_card_carries_what_the_brief_lists_synthetic(run_dir):
     card = _propose(run_dir, "complete")
     assert card["policy"] == POLICY["policy"]                 # in full

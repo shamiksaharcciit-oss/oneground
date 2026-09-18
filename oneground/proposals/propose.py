@@ -372,6 +372,25 @@ def _existing_prediction_problems(out_dir, policy, spec, baseline_cite):
 # the run
 # --------------------------------------------------------------------------
 
+def row_and_timing(measured):
+    """`(row, timing)` from whatever `measure_config` returned.
+
+    Two shapes, deliberately both accepted. On this branch `measure_config`
+    returns the row; task 020b, on `task-020`, moved the timing fields out of
+    the row and returns `(row, timing)`. Git merges the two branches without a
+    conflict -- the changes are in different functions -- and the merged tree
+    then fails every proposal test on a tuple reaching `judge()`, which is
+    what the release rehearsal found (`tasks/release-rehearsal.report.md`).
+
+    Accepting both is what makes that merge hands-off. It is a shim with a
+    known end: once 020b has landed, `measure_config` returns one shape and
+    this can go back to unpacking it.
+    """
+    if isinstance(measured, tuple):
+        return measured
+    return measured, None
+
+
 def measure_changed(plan, log_fn=log):
     """The one configuration this command measures.
 
@@ -407,10 +426,10 @@ def measure_changed(plan, log_fn=log):
     config = plan.policy.to_config
     context = sim._centroid_cache(base, plan.seed, log_fn)(config)
     log_fn("measuring %s" % config.label)
-    return sim.measure_config(get_model(plan.policy.family), config, base,
-                              queries, gt_ids, gt_scores, plan.seed,
-                              context=context, log_fn=log_fn,
-                              shard_depth=plan.shard_depth)
+    return row_and_timing(sim.measure_config(
+        get_model(plan.policy.family), config, base, queries, gt_ids,
+        gt_scores, plan.seed, context=context, log_fn=log_fn,
+        shard_depth=plan.shard_depth))
 
 
 def failed_judgement(prediction, reason):
@@ -461,9 +480,12 @@ def run(workdir, policy_path, prediction_path, name=None, dry_run=False,
         log_fn("this run replaces the card in %s" % plan.out_dir)
     prediction = _read_json(pred_path)
 
-    changed_row, failure = None, None
+    changed_row, changed_timing, failure = None, None, None
     try:
-        changed_row = (measure or measure_changed)(plan, log_fn)
+        # Either shape, from `measure_changed` or from a caller's own
+        # measurement: see `row_and_timing`.
+        changed_row, changed_timing = row_and_timing(
+            (measure or measure_changed)(plan, log_fn))
     except Exception as e:                            # a card is still written
         failure = "%s: %s" % (type(e).__name__, e)
         log_fn("the run did not complete: %s" % failure)
@@ -498,7 +520,8 @@ def run(workdir, policy_path, prediction_path, name=None, dry_run=False,
               encoding="utf-8", newline="\n") as f:
         f.write(card_mod.render_card_html(written))
     write_json_stable(os.path.join(plan.out_dir, INFO_NAME),
-                      _info(plan, pred_sha, failure, time.time() - t0))
+                      _info(plan, pred_sha, failure, time.time() - t0,
+                            timing=changed_timing))
     write_manifest(plan.out_dir, [PREDICTION_NAME, card_mod.CARD_NAME,
                                   card_mod.CARD_HTML, INFO_NAME])
     _print_card(card, plan)
@@ -616,7 +639,7 @@ def _calibration(plan):
     return out
 
 
-def _info(plan, pred_sha, failure, elapsed):
+def _info(plan, pred_sha, failure, elapsed, timing=None):
     import platform
     versions, torch_info = library_versions(log=None)
     return {
@@ -636,6 +659,10 @@ def _info(plan, pred_sha, failure, elapsed):
         "prediction": {"file": PREDICTION_NAME, "sha256": pred_sha,
                        "read": "at the start of the run, before the changed "
                                "configuration was measured"},
+        # None on this branch, where `measure_config` keeps its timings in the
+        # row; the pair task 020b returns once that lands. Timings belong in
+        # the declared file either way -- a card compares rows.
+        "timing": timing,
         "baseline": plan.baseline_cite,
         "measured": [plan.policy.to_config.label],
         "not_measured": [plan.policy.from_config.label],
