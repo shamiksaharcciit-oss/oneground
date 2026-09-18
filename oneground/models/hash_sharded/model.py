@@ -202,5 +202,61 @@ class HashSharded:
             shards=len(built.state["shards"]),
         )
 
+    # -- state -------------------------------------------------------------
+    def state(self, built, queries, k, config, gt_ids, seed):
+        """What this configuration did, as a `state.ModelState` (task 020).
+
+        A hash partition has no centroids and routes nothing: every vector has
+        one copy and no centroid distance (NaN, not zero), and every query
+        probes every shard for reason fan-out, with nothing scored because
+        nothing is chosen. The candidates are search's per-shard calls,
+        repeated at search's depth. Nothing is measured here that the row did
+        not already measure.
+        """
+        from .. import state as S
+        st = built.state
+        n, dim = st["vectors"].shape
+        nq = len(queries)
+        n_shards = int(config.get("shards", 3))
+        assign = st["assign"].astype(np.int32)
+        shards, ids_of = st["shards"], st["ids_of"]
+
+        partition = S.PartitionState(
+            family=NAME, kind="hash", seed=int(seed),
+            params={"shards": n_shards},
+            region_ids=np.arange(n_shards, dtype=np.int32),
+            region_sizes=np.bincount(assign,
+                                     minlength=n_shards).astype(np.int64))
+        assignment = S.AssignmentState(
+            home_region=assign, copy_count=np.ones(n, dtype=np.uint8),
+            copy_set=assign.reshape(-1, 1),
+            centroid_dist=np.full((n, 1), np.nan, dtype=np.float32),
+            max_assign=1, nearest_region=assign.reshape(-1, 1))
+        # search iterates `shards.items()`; the probe order is that order
+        order = np.asarray(list(shards), dtype=np.int32)
+        probed = np.tile(order, (nq, 1))
+        route = S.RouteState(
+            scored_region=np.zeros((nq, 0), dtype=np.int32),
+            scored_dist=np.zeros((nq, 0), dtype=np.float32),
+            probed_region=probed,
+            probe_reason=np.full(probed.shape, S.ROUTE_FANOUT,
+                                 dtype=np.uint8))
+
+        for s in shards.values():
+            s.hnsw.efSearch = int(config.get("efSearch", 96))
+        per_query, padded = S.collect_candidates(
+            shards, ids_of, queries, probed, max(SHARD_DEPTH, k))
+        candidates = S.build_candidates(per_query, gt_ids,
+                                        int(np.shape(gt_ids)[1]))
+        return S.ModelState(
+            family=NAME, config_label=config.label,
+            params=config.declared(), seed=int(seed), n_base=int(n),
+            n_queries=int(nq), dim=int(dim), partition=partition,
+            assignment=assignment, route=route, candidates=candidates,
+            load=S.build_load(partition.region_ids, assignment, route,
+                              candidates),
+            notes=[f"faiss padding slots mapped through ids_of as search "
+                   f"maps them: {padded}"])
+
 
 MODEL = HashSharded()

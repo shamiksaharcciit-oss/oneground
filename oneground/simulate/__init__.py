@@ -12,7 +12,11 @@ configuration:
     storage_amplification      stored copies per base vector
     est_memory_bytes           estimated, and labelled so everywhere
     fanout                     shards touched per query
-    build_seconds / query_seconds
+
+Wall clock -- `build_seconds` and `query_seconds` per configuration -- is
+declared in `simulate_info.json` under `timings`, not written into the rows
+(task 020b), so `simulate.json` depends only on what was measured and two runs
+of the same code write the same bytes.
 
 **This command measures. It does not decide.** There is no "meets", no
 "fails", no recommendation and no ranking by goodness — the table is sorted by
@@ -270,8 +274,15 @@ def _with_shard_depth(config, depth):
 
 
 def measure_config(model, config, base, queries, gt_ids, gt_scores, seed,
-                   ks=(1, 10, 100), context=None, log_fn=log):
-    """One row of the table. Every number here is measured, none inferred."""
+                   ks=(1, 10, 100), context=None, log_fn=log,
+                   state_sink=None):
+    """One row of the table. Every number here is measured, none inferred.
+
+    `state_sink(model, built, queries, k, config)`, when given, is called once
+    the row is complete and before the index is released: the last point at
+    which a family can still say what it did. The row is finished first, so
+    nothing the sink does can reach a measured value.
+    """
     k_max = max(ks)
     config = _with_shard_depth(config, shard_depth_for(ks))
     built = model.build(base, config, seed, context=context)
@@ -295,21 +306,28 @@ def measure_config(model, config, base, queries, gt_ids, gt_scores, seed,
     row["index_loss"] = row["ceiling_at_10"] - row["recall_at_10"]
     row["inv_ratio_at_10"] = inverse_ratio_at(cand.scores, gt_scores, 10)
     row.update(fp.as_dict())
-    row["build_seconds"] = built.build_seconds
-    row["query_seconds"] = query_seconds
+    # Wall clock goes beside the row, not in it (task 020b). A timing is a
+    # fact about this machine on this run; while it sat in the row, no two
+    # runs of the same code wrote the same simulate.json. `run` declares it in
+    # simulate_info.json instead.
+    timing = {"build_seconds": built.build_seconds,
+              "query_seconds": query_seconds}
+
+    if state_sink is not None:
+        state_sink(model, built, queries, k_max, config)
 
     # Release the index before the next config is built: three families over a
     # 150k corpus otherwise hold several HNSW graphs at once on a 7.6 GB
     # laptop.
     built.state.clear()
-    return row
+    return row, timing
 
 
 # --------------------------------------------------------------------------
 # the command
 # --------------------------------------------------------------------------
 
-def run(requirements_path, log_fn=log):
+def run(requirements_path, log_fn=log, emit_state=False):
     t0 = time.time()
     req = intake.load(requirements_path)
     workdir = req.resolve(req.workdir)
@@ -364,12 +382,81 @@ def run(requirements_path, log_fn=log):
            f"{len(set(f for f, _ in kept))} families"
            + (f", {len(dropped)} dropped by max_configs" if dropped else ""))
 
-    rows, stopped_at = [], None
+    rows, timings, stopped_at = [], {}, None
     # `is not None`, not truthiness: max_minutes: 0 means no time at all, and
     # a falsy check would silently turn the tightest budget into no budget.
     deadline = (t0 + float(max_minutes) * 60
                 if max_minutes is not None else None)
     context_for = _centroid_cache(base, seed, log_fn)
+
+    # ---- state (task 020), off unless asked for ----
+    state_dir, state_entries, state_sink = None, [], None
+    projection_xy, projection_info = None, None
+    if emit_state:
+        from ..models import projection as projmod
+        from ..models import state as statemod
+        from ..receipts import MANIFEST_NAME
+
+        # A declared 2-D placement, if the requirements name one. Read once,
+        # before anything is measured, so a projection that does not fit the
+        # corpus stops the run here rather than after an hour of simulating.
+        # It is never a precondition: a run without one emits states without
+        # the column, and the lab falls back to its cell layout.
+        declared = getattr(req, "projection", {}) or {}
+        proj_path = req.resolve(declared.get("path"))
+        if proj_path:
+            projection_xy = projmod.read(proj_path, len(base))
+            projection_info = projmod.provenance(
+                proj_path, declared, len(base), statemod.QUERY_PLACEMENT_K)
+            log_fn(f"projection: {len(projection_xy):,} declared positions "
+                   f"from {os.path.basename(proj_path)}")
+        else:
+            projection_info = {
+                "kind": "absent",
+                "why": (f"{COULDNT_CHECK}: no corpus.sample.projection.path "
+                        "in the requirements, so the states carry no "
+                        "positions and the lab draws its cell layout"),
+            }
+        state_dir = os.path.join(workdir, "state")
+        os.makedirs(state_dir, exist_ok=True)
+        # This command's own outputs from an earlier emit. Left in place they
+        # would sit beside this run's files, unlisted by its manifest.
+        for old in os.listdir(state_dir):
+            if old.endswith(".state.npz") or old in ("state_info.json",
+                                                     MANIFEST_NAME):
+                os.remove(os.path.join(state_dir, old))
+
+        def state_sink(model, built, q, k, config):
+            entry = {"family": model.name, "config_label": config.label}
+            if not callable(getattr(model, "state", None)):
+                entry.update(file=None, reason=(
+                    f"{COULDNT_CHECK}: {model.name} does not implement "
+                    "state()"))
+                state_entries.append(entry)
+                log_fn(f"  state: {entry['reason']}")
+                return
+            t_s = time.time()
+            st = model.state(built, q, k, config, gt_ids, seed)
+            if projection_xy is not None:
+                # Attached here, not filled by the family: a projection
+                # belongs to the corpus, not the architecture. Every family
+                # run on one corpus draws the same points in the same places
+                # and only their colours differ, and a model that invented a
+                # position would be measuring where it should be declaring.
+                st = statemod.with_projection(st, projection_xy,
+                                              gt_ids=gt_ids)
+            violations = statemod.contract_violations(
+                st, model.footprint(built))
+            fn = statemod.state_filename(model.name, config.label)
+            path = os.path.join(state_dir, fn)
+            statemod.write_state(path, st)
+            entry.update(file=fn, bytes=os.path.getsize(path),
+                         state_seconds=round(time.time() - t_s, 3),
+                         contract=violations or "holds", notes=st.notes)
+            state_entries.append(entry)
+            log_fn(f"  state {fn}  {entry['bytes'] / 1e6:.1f} MB in "
+                   f"{entry['state_seconds']:.1f}s  contract "
+                   f"{'holds' if not violations else 'VIOLATED'}")
 
     for i, (fam, config) in enumerate(kept, 1):
         if deadline and time.time() > deadline:
@@ -385,10 +472,12 @@ def run(requirements_path, log_fn=log):
                    f"{len(kept) - i + 1} configs not run")
             break
         log_fn(f"[{i}/{len(kept)}] {config.label}")
-        rows.append(measure_config(get_model(fam), config, base, queries,
-                                   gt_ids, gt_scores, seed,
-                                   context=context_for(config),
-                                   log_fn=log_fn))
+        row, timing = measure_config(get_model(fam), config, base, queries,
+                                     gt_ids, gt_scores, seed,
+                                     context=context_for(config),
+                                     log_fn=log_fn, state_sink=state_sink)
+        rows.append(row)
+        timings[config.label] = timing
 
     rows.sort(key=lambda r: (r["family"], -r["recall_at_10"]))
 
@@ -418,6 +507,12 @@ def run(requirements_path, log_fn=log):
         "torch_cuda": torch_info["torch_cuda"],
         "cuda_device_name": torch_info["cuda_device_name"],
         "elapsed_seconds": time.time() - t0,
+        "timings": round_floats(timings),
+        "timings_note": ("wall clock per configuration on this machine, one "
+                         "unrepeated run each. Declared: a fact about this "
+                         "run, not a measurement of the architecture, and "
+                         "kept out of simulate.json so that file's bytes "
+                         "depend only on measured values (task 020b)."),
         "shard_depth": shard_depth_for((1, 10, 100)),
         # Task 026b: this used to say "used by every sharded family", which
         # was never true of hash_sharded -- it does not read the setting.
@@ -445,7 +540,51 @@ def run(requirements_path, log_fn=log):
                if os.path.exists(os.path.join(workdir, f))]
     write_manifest(workdir, present)
 
-    _table(simulate_json, dropped, workdir, time.time() - t0)
+    if emit_state:
+        # Declared: what was written, by which versions, how long it took.
+        # The top-level MANIFEST is untouched; state/ carries its own, so a
+        # run with --emit-state and one without share every receipt above.
+        state_info = {
+            "kind": {"*.state.npz": "receipt", "state_info.json": "declared"},
+            "state_version": statemod.STATE_VERSION,
+            "format": "docs/STATE.md",
+            "run": req.name,
+            "seed": seed,
+            "n_base": int(len(base)),
+            "n_queries": int(len(queries)),
+            "ground_truth_k": gt_k,
+            "shard_depth": shard_depth_for((1, 10, 100)),
+            "configurations": state_entries,
+            "state_bytes_total": int(sum(e.get("bytes", 0)
+                                         for e in state_entries)),
+            "state_seconds_total": round(sum(e.get("state_seconds", 0.0)
+                                             for e in state_entries), 3),
+            "projection": projection_info,
+            "library_versions": versions,
+            "note": ("each state is written after its configuration's row is "
+                     "measured and before its index is released; "
+                     "simulate.json is identical with or without "
+                     "--emit-state, timings apart"),
+        }
+        write_json_stable(os.path.join(state_dir, "state_info.json"),
+                          state_info)
+        write_manifest(state_dir,
+                       [e["file"] for e in state_entries if e.get("file")]
+                       + ["state_info.json"])
+        log_fn(f"state: {sum(1 for e in state_entries if e.get('file'))} "
+               f"file(s), {state_info['state_bytes_total'] / 1e6:.1f} MB, in "
+               f"{state_dir}")
+        broken = [e for e in state_entries
+                  if e.get("file") and e.get("contract") != "holds"]
+        if broken:
+            raise SimulateError(
+                "state contract violated for "
+                + "; ".join(f"{e['config_label']}: {e['contract']}"
+                            for e in broken)
+                + ". simulate.json is valid; these state files are not, and "
+                "are listed as such in state/state_info.json.")
+
+    _table(simulate_json, dropped, workdir, time.time() - t0, timings)
     return workdir
 
 
@@ -522,7 +661,7 @@ def _centroid_cache(base, seed, log_fn):
     return context_for
 
 
-def _table(simulate_json, dropped, workdir, elapsed):
+def _table(simulate_json, dropped, workdir, elapsed, timings=None):
     """The plain-text table. Sorted by family then recall@10, and carrying no
     verdict: no column says whether a row is good enough for anything."""
     rows = simulate_json["rows"]
@@ -539,6 +678,7 @@ def _table(simulate_json, dropped, workdir, elapsed):
     print(hdr)
     print("-" * len(hdr))
     for r in rows:
+        t = (timings or {}).get(r["config"], {})
         print(f"{r['config']:<52} "
               f"{r['recall_at_1']:>6.3f} {r['recall_at_10']:>6.3f} "
               f"{r['recall_at_100']:>6.3f} {r['ceiling_at_10']:>6.3f} "
@@ -546,7 +686,8 @@ def _table(simulate_json, dropped, workdir, elapsed):
               f"{r['inv_ratio_at_10']:>6.3f} "
               f"{r['storage_amplification']:>5.2f} {r['fanout']:>4.0f} "
               f"{r['est_memory_bytes'] / 1e6:>8.1f} "
-              f"{r['build_seconds']:>8.1f} {r['query_seconds']:>8.1f}")
+              f"{t.get('build_seconds', float('nan')):>8.1f} "
+              f"{t.get('query_seconds', float('nan')):>8.1f}")
     print()
     print("  ceil   = routing ceiling@10: exact search over everything the "
           "routing can reach")

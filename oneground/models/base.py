@@ -262,6 +262,19 @@ class Config:
         param = parameter_table(self.family).get(key)
         return param is not None and param.role != CONSTANT
 
+    def declared(self):
+        """Every parameter this configuration carries, as a mapping.
+
+        For recording the configuration's identity, not for reading a setting:
+        a state header (task 021) has to write down the whole parameter set,
+        and a family reaching into `.params` to do it would be going around
+        the table that task 026 put in front of every read. `__post_init__`
+        has already validated these keys against the family's table, so what
+        comes back is declared by construction. Reading one key still goes
+        through `get`.
+        """
+        return dict(self.params)
+
     def get(self, key, default=None):
         """A declared key's value. An undeclared key is refused, naming the
         declared ones: reading a key the table does not list is how a family
@@ -441,6 +454,20 @@ class Model(Protocol):
     def footprint(self, built: BuiltIndex) -> Footprint:
         ...
 
+    def state(self, built: BuiltIndex, queries: np.ndarray, k: int,
+              config: Config, gt_ids: np.ndarray, seed: int):
+        """What this configuration did, as a `state.ModelState` (task 020).
+
+        Where every vector went, how every query was routed, and every
+        candidate each shard returned -- what the lab draws. Called by
+        `simulate --emit-state` after the row is measured and before the index
+        is released. It must not change anything the family measures, must
+        meet `state.contract_violations` against the family's own footprint,
+        and its candidates must merge back to exactly what `search` returned.
+        See docs/STATE.md.
+        """
+        ...
+
 
 # --------------------------------------------------------------------------
 # shared helpers
@@ -467,6 +494,15 @@ def merge_candidates(per_shard_ids, per_shard_scores, k):
     is the same merge the fixture builder has always used; it is here so all
     three families do it identically rather than three times slightly
     differently.
+
+    Equal scores keep the order the shards' results were concatenated in: the
+    sort is stable (task 021c). Numpy's default argsort is not, and leaves
+    tied candidates in whatever order its algorithm happens to -- which can
+    differ between numpy builds and CPUs, so a receipt counted from it could
+    change without any input changing. Exact ties are real: copies of one
+    vector score identically, and so do duplicate vectors under different
+    ids. `oneground/lab/test_lab.py` holds this merge and the query-trace
+    view's recall to one written-out rule on deliberately tied scores.
     """
     if not per_shard_ids:
         return np.full(k, -1, dtype=np.int64), np.full(k, -np.inf,
@@ -474,7 +510,7 @@ def merge_candidates(per_shard_ids, per_shard_scores, k):
     cid = np.concatenate(per_shard_ids)
     csc = np.concatenate(per_shard_scores)
     seen, out_ids, out_scores = set(), [], []
-    for j in np.argsort(-csc):
+    for j in np.argsort(-csc, kind="stable"):
         vid = int(cid[j])
         if vid < 0 or vid in seen:
             continue

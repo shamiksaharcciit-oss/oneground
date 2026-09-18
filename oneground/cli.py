@@ -4,6 +4,7 @@
     oneground simulate <requirements.yaml>       sweep architectures on them
     oneground verify <requirements.yaml>         measure a real engine
     oneground report <requirements.yaml>         judge them against constraints
+    oneground lab <workdir>                      look at a run, read-only
     oneground calibrate <curve|engine|show>      measure our own error
     oneground fixture verify <id>                check a fixture's digests
     oneground fixture build --spec ... --source ...
@@ -41,6 +42,10 @@ UNGUARDED = {
     "oneground calibrate reference": (
         "prints what the downloaded ANN-Benchmarks file contains; writes "
         "nothing"),
+    "oneground lab": (
+        "serves drawings of a run that already exists; writes no file, starts "
+        "no measurement, and runs its own guard over the modules it serves "
+        "from before it binds a port (docs/LAB.md)"),
 }
 
 
@@ -99,7 +104,7 @@ def _cmd_simulate(args, rest):
     if rest:
         raise SystemExit(f"oneground simulate: unexpected arguments: "
                          f"{' '.join(rest)}")
-    simulate.run(args.requirements)
+    simulate.run(args.requirements, emit_state=args.emit_state)
     return 0
 
 
@@ -122,6 +127,63 @@ def _cmd_report(args, rest, env_stamp=None):
                          f"{' '.join(rest)}")
     report.run(args.requirements, env_stamp=env_stamp)
     return 0
+
+
+def _cmd_lab(args, rest):
+    """`oneground lab <workdir>`: serve the lab for one run, read-only.
+
+    The host is checked before anything is loaded, so a refused `--host`
+    costs nothing. Then the run is loaded, the render mode measured and the
+    port bound, and one line is printed. Ctrl-C -- or SIGTERM, or Ctrl-Break
+    on Windows -- stops it and says so.
+    """
+    import signal
+    import time
+    import webbrowser
+
+    started = time.perf_counter()
+    if rest:
+        raise SystemExit(f"oneground lab: unexpected arguments: "
+                         f"{' '.join(rest)}")
+    from .lab import contract as labcontract
+    from .lab import server as labserver
+    from .lab.runs import LabRunError, LoadedRun
+
+    mode = {"move": labcontract.MOVE, "release": labcontract.RELEASE,
+            None: None}[args.mode]
+    try:
+        labserver.check_host(args.host, args.i_know)
+        run = LoadedRun(args.workdir, family=args.family, config=args.config,
+                        also=args.also)
+        lab = labserver.LabServer(run, host=args.host, port=args.port,
+                                  mode=mode, i_know=args.i_know)
+    except (LabRunError, labserver.LabRefused) as e:
+        print(f"oneground lab: refused. {e}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        print(f"oneground lab: could not listen on {args.host}:{args.port}: "
+              f"{e}", file=sys.stderr)
+        return 2
+    if lab.warning:
+        print(lab.warning, file=sys.stderr)
+    lab.start()
+    print(lab.startup_line(time.perf_counter() - started, args.workdir),
+          flush=True)
+    if args.open:
+        webbrowser.open(lab.url)
+
+    def interrupted(signum, frame):
+        raise KeyboardInterrupt
+    for name in ("SIGTERM", "SIGBREAK"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), interrupted)
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        lab.stop()
+        print("oneground lab: stopped. Nothing was written.", flush=True)
+        return 0
 
 
 def _fixture_parser():
@@ -237,6 +299,12 @@ def build_parser():
                              "sample")
     s_.add_argument("requirements",
                     help="path to the same requirements.yaml characterize used")
+    s_.add_argument("--emit-state", action="store_true",
+                    help="also write state/ beside simulate.json: where every "
+                         "vector went, how every query was routed and what "
+                         "every shard returned, one file per configuration "
+                         "(docs/STATE.md). Off by default; simulate.json is "
+                         "unchanged by it.")
     envmod.add_argument(s_)
 
     v_ = sub.add_parser("verify",
@@ -257,6 +325,38 @@ def build_parser():
                         help="judge the measurements against your constraints")
     r_.add_argument("requirements")
     envmod.add_argument(r_)
+
+    lab = sub.add_parser("lab",
+                         help="look at a run in the lab: a local, read-only "
+                              "server (docs/LAB.md)")
+    lab.add_argument("workdir",
+                     help="a run's directory: state/, simulate.json and "
+                          "characterization.json")
+    lab.add_argument("--port", type=int, default=0,
+                     help="default: an ephemeral port")
+    lab.add_argument("--host", default="127.0.0.1",
+                     help="default 127.0.0.1; anything but loopback also "
+                          "needs --i-know")
+    lab.add_argument("--i-know", action="store_true", dest="i_know",
+                     help="serve on a non-loopback --host, after a warning "
+                          "naming what that exposes")
+    browser = lab.add_mutually_exclusive_group()
+    browser.add_argument("--open", action="store_true",
+                         help="open the URL in a browser")
+    browser.add_argument("--no-browser", action="store_true",
+                         help="the default: open nothing")
+    lab.add_argument("--mode", choices=("move", "release"),
+                     help="override the render mode the startup measurement "
+                          "chooses; the caption says it was overridden")
+    lab.add_argument("--family",
+                     help="the model family to look at (default "
+                          "semantic_sharded)")
+    lab.add_argument("--config",
+                     help="the configuration label, when the run holds "
+                          "several that differ in more than epsilon")
+    lab.add_argument("--also", action="append", default=[],
+                     help="another run's directory, same configuration at "
+                          "other epsilons, read-only; repeatable")
 
     sub.add_parser("fixture",
                    help="build or verify a public fixture",
@@ -292,6 +392,8 @@ def main(argv=None):
         return _cmd_verify(args, rest)
     if args.command == "report":
         return _cmd_report(args, rest)
+    if args.command == "lab":
+        return _cmd_lab(args, rest)
     build_parser().print_help()
     return 1
 

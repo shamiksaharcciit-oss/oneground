@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="oneground-lab-token" content="__ONEGROUND_LAB_TOKEN__">
+<title>oneground lab</title>
+<!-- Served by `oneground lab` from this machine, read-only. No CDN, no
+     webfont, no analytics, no inline script or style: the server's
+     Content-Security-Policy refuses any other origin, and this page asks for
+     nothing the server did not send. -->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/lab.css?token=__ONEGROUND_LAB_TOKEN__">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <p class="eyebrow">oneground lab · served from this machine · read-only</p>
+    <p class="run-name" id="run-name">loading the run…</p>
+  </div>
+  <nav class="tabs" aria-label="views">
+    <a href="#/overview" id="tab-overview">Overview</a>
+    <a href="#/ground" id="tab-ground">The ground</a>
+    <a href="#/trace" id="tab-trace">Query trace</a>
+  </nav>
+</header>
+
+<p class="fatal" id="fatal" role="alert" hidden></p>
+
+<!-- The epsilon control: one control for both views, so moving between them
+     keeps the epsilon. -->
+<section class="control" id="control" aria-label="closure band epsilon" hidden>
+  <div class="control-inner">
+    <div class="eps-head">
+      <label for="eps">closure band ε</label>
+      <output id="eps-out" for="eps">—</output>
+      <span class="pill" id="eps-status">—</span>
+    </div>
+    <div class="track">
+      <input type="range" id="eps" min="0" max="0.5" step="0.005" value="0.2"
+             aria-describedby="eps-hint">
+      <div class="ticks" id="eps-ticks" role="group" aria-label="simulated values"></div>
+    </div>
+    <p class="hint" id="eps-hint">Drag, or focus the slider and use ← → (0.005), Page Up / Page Down (0.05), Home / End. The marked values were simulated: select one to jump to it.</p>
+    <p class="stale" id="eps-stale" role="status" hidden></p>
+    <details class="mode" id="mode">
+      <summary id="mode-summary">measuring…</summary>
+      <p id="mode-detail"></p>
+    </details>
+  </div>
+</section>
+
+<main>
+
+<!-- ============================================================ overview -->
+<section class="view" id="view-overview" aria-labelledby="ov-title">
+  <h1 id="ov-title">Loading the run…</h1>
+  <p class="lede" id="ov-lede"></p>
+
+  <div class="ov-grid">
+    <div>
+      <h2>What is loaded</h2>
+      <dl class="facts" id="ov-facts"></dl>
+    </div>
+    <div>
+      <h2>Receipts</h2>
+      <p class="source">Each run directory's MANIFEST.sha256, checked against the files on disk when the lab started.</p>
+      <ul class="receipts" id="ov-receipts"></ul>
+    </div>
+  </div>
+
+  <h2>Two views</h2>
+  <div class="cards">
+    <a class="card" href="#/ground" id="card-ground">
+      <span class="card-title">The ground →</span>
+      <span class="card-body">Every vector in the run, grouped by the region it lives in and coloured by how many regions hold a copy of it. Move ε and the copies are recounted from the stored distances.</span>
+    </a>
+    <a class="card" href="#/trace" id="card-trace">
+      <span class="card-title">Query trace →</span>
+      <span class="card-body">Pick one of the run's queries and follow it: scored against the centroids, routed to a region, its ten true neighbours, and what the probed regions returned.</span>
+    </a>
+  </div>
+
+  <h2>How ε behaves here</h2>
+  <p class="prose" id="ov-epsilon"></p>
+  <p class="prose" id="ov-mode"></p>
+  <p class="source" id="ov-writes"></p>
+</section>
+
+<!-- ============================================================== ground -->
+<section class="view" id="view-ground" aria-labelledby="ground-title" hidden>
+  <h1 id="ground-title" class="view-title">The ground</h1>
+  <div class="notice" id="ground-notice" role="status"></div>
+
+  <div class="ground-grid">
+    <figure class="stage">
+      <!-- Two ways of drawing the same vectors. The projection is the
+           teaser's picture; by region is the truer answer to "which region
+           does this belong to". Hidden when the run carries no projection. -->
+      <div class="seg" id="ground-layout" role="group"
+           aria-label="how the ground is drawn" hidden>
+        <button type="button" data-layout="projection" aria-pressed="true">Projection</button>
+        <button type="button" data-layout="regions" aria-pressed="false">By region</button>
+      </div>
+      <div class="canvas-box" id="ground-box">
+        <canvas id="ground-canvas" aria-label="every base vector, grouped by home region and coloured by copy count"></canvas>
+        <p class="overlay" id="ground-overlay" hidden></p>
+      </div>
+      <p class="hover" id="ground-hover">Point at a cell to see which region it is.</p>
+      <!-- Set by lab.js: the two layouts are two different claims about what
+           the picture is, and the wrong one is a false statement. -->
+      <figcaption class="source" id="ground-figcaption">
+        One cell per region; inside it, the vectors whose home is that region,
+        in id order, coloured by how many regions hold a copy of each at this ε.
+        It is a layout, not a map: the state holds no positions.
+      </figcaption>
+    </figure>
+
+    <div class="side">
+      <div class="readouts" id="readouts">
+        <div class="readout"><span class="value" id="r-copied">—</span><span class="label">vectors copied</span><span class="explain">held by more than one region</span></div>
+        <div class="readout"><span class="value" id="r-storage">—</span><span class="label">storage</span><span class="explain">copies held ÷ vectors</span></div>
+        <div class="readout"><span class="value" id="r-p99">—</span><span class="label">p99 copies</span><span class="explain">99% of vectors have at most this many</span></div>
+        <div class="readout"><span class="value" id="r-ceiling">—</span><span class="label">routing ceiling@10</span><span class="explain">share of true neighbours that a region the query probes holds a copy of</span></div>
+      </div>
+
+      <div class="copies">
+        <h2 class="h3">Copies per vector</h2>
+        <p class="source">Select a row to show only those vectors on the ground; select it again to show all.</p>
+        <div class="copy-bars" id="copy-bars" role="group" aria-label="copies per vector"></div>
+      </div>
+
+      <div class="about">
+        <h2 class="h3">What this drawing says about itself</h2>
+        <p class="caption" id="ground-caption">—</p>
+        <ul class="gaps" id="ground-gaps"></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================== trace -->
+<section class="view" id="view-trace" aria-labelledby="trace-title" hidden>
+  <h1 id="trace-title" class="view-title">Query trace</h1>
+
+  <div class="trace-grid">
+    <aside class="picker panel" aria-labelledby="picker-title">
+      <h2 class="h3" id="picker-title">Pick a query</h2>
+      <label class="field" for="q-search"><span>Find</span>
+        <input type="search" id="q-search" placeholder="query id or number" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="seg" id="q-filter" role="group" aria-label="show">
+        <button type="button" data-filter="all" aria-pressed="true">All</button>
+        <button type="button" data-filter="ambiguous" aria-pressed="false">Ambiguous</button>
+        <button type="button" data-filter="clear" aria-pressed="false">Not ambiguous</button>
+      </div>
+      <label class="field" for="q-order"><span>Order</span>
+        <select id="q-order">
+          <option value="missed-most">most neighbours missed first</option>
+          <option value="missed-least">fewest neighbours missed first</option>
+          <option value="outside-most">most neighbours outside the routed region</option>
+          <option value="outside-least">fewest neighbours outside the routed region</option>
+          <option value="query">query order</option>
+        </select>
+      </label>
+      <p class="note" id="q-note" hidden></p>
+      <p class="source" id="q-count" role="status">—</p>
+      <ol class="qlist" id="q-list"></ol>
+    </aside>
+
+    <article class="trace-main">
+      <div class="trace-head">
+        <h2 id="t-title">—</h2>
+        <div class="trace-nav">
+          <button type="button" id="t-prev">← previous</button>
+          <button type="button" id="t-next">next →</button>
+        </div>
+      </div>
+      <p class="source" id="t-sub"></p>
+
+      <ol class="hops" id="hops">
+        <li class="hop"><span class="n" aria-hidden="true">1</span><div class="hop-body"><h3>Scored against the centroids</h3><div class="hop-detail" id="hop-1">—</div></div></li>
+        <li class="hop"><span class="n" aria-hidden="true">2</span><div class="hop-body"><h3 id="hop-2-title">Routed to a region</h3><div class="hop-detail" id="hop-2">—</div></div></li>
+        <li class="hop"><span class="n" aria-hidden="true">3</span><div class="hop-body"><h3 id="hop-3-title">Its ten true neighbours</h3><div class="hop-detail" id="hop-3">—</div></div></li>
+        <li class="hop" id="hop-4-item"><span class="n" aria-hidden="true">4</span><div class="hop-body"><h3 id="hop-4-title">What the probed regions returned</h3><div class="hop-detail" id="hop-4">—</div></div></li>
+      </ol>
+
+      <figure class="stage mini">
+        <div class="canvas-box" id="trace-box">
+          <canvas id="trace-canvas" aria-label="the ground with this query's regions outlined"></canvas>
+          <p class="overlay" id="trace-overlay" hidden></p>
+        </div>
+        <p class="hover" id="trace-hover">Point at a cell to see which region it is.</p>
+        <!-- Filled by lab.js: the marks differ between the two layouts
+             (outlined cells, or rings at declared positions), and a key that
+             names the wrong ones is worse than none. -->
+        <ul class="key" id="trace-key" aria-label="what the marks mean"></ul>
+      </figure>
+      <ul class="gaps" id="trace-gaps"></ul>
+    </article>
+  </div>
+</section>
+
+</main>
+
+<script src="/static/lab.js?token=__ONEGROUND_LAB_TOKEN__"></script>
+</body>
+</html>

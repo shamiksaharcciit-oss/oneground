@@ -116,6 +116,63 @@ def test_simulate_writes_receipts_that_verify_synthetic():
             assert fv.sha256_file(os.path.join(wd, name)) == digest, name
 
 
+def test_emit_state_writes_state_and_leaves_simulate_json_unchanged_synthetic():
+    """Task 020. Without the flag there is no state/. With it, every measured
+    configuration gets a state file that meets the contract, state/ carries a
+    manifest that verifies, and simulate.json is byte-identical to the run
+    without it. Byte-identical, not merely equal once timings are masked:
+    task 020b moved wall clock to simulate_info.json for exactly this."""
+    from oneground.models import state as S
+
+    block = {
+        "families": ["single_node_hnsw", "semantic_sharded", "hash_sharded"],
+        "node_counts": [2],
+        "ground_truth_k": 20,
+        "grid": {"single_node_hnsw": {"M": [16], "efSearch": [64]},
+                 "semantic_sharded": {"centroids": [8], "epsilon": [0.2],
+                                      "probe": [2], "M": [16],
+                                      "efSearch": [64]},
+                 "hash_sharded": {"M": [16], "efSearch": [64]}},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        req = _prepared(tmp, block)
+        wd, _ = _capture(simulate.run, req, log_fn=_quiet)
+        sd = os.path.join(wd, "state")
+        assert not os.path.exists(sd), "state/ written without --emit-state"
+        with open(os.path.join(wd, "simulate.json"), "rb") as f:
+            plain_bytes = f.read()
+
+        wd, _ = _capture(simulate.run, req, log_fn=_quiet, emit_state=True)
+        with open(os.path.join(wd, "simulate.json"), "rb") as f:
+            emitted_bytes = f.read()
+        assert plain_bytes == emitted_bytes, \
+            "simulate.json differs between two runs, one with --emit-state"
+        emitted = json.loads(emitted_bytes.decode("utf-8"))
+
+        info = json.load(open(os.path.join(sd, "state_info.json"),
+                              encoding="utf-8"))
+        assert info["state_version"] == S.STATE_VERSION
+        confs = info["configurations"]
+        assert {e["config_label"] for e in confs} == \
+            {r["config"] for r in emitted["rows"]}
+        assert {e["family"] for e in confs} == set(block["families"])
+        for e in confs:
+            assert e["contract"] == "holds", e
+            head, _ = S.read_state(os.path.join(sd, e["file"]))
+            assert head["config_label"] == e["config_label"]
+            assert head["n_queries"] == emitted["n_queries"]
+
+        entries = fv.read_manifest(os.path.join(sd, "MANIFEST.sha256"))
+        assert {n for _, n in entries} == \
+            {e["file"] for e in confs} | {"state_info.json"}
+        for digest, name in entries:
+            assert fv.sha256_file(os.path.join(sd, name)) == digest, name
+        # the top-level manifest does not list state; state/ has its own
+        top = {n for _, n in fv.read_manifest(os.path.join(wd,
+                                                           "MANIFEST.sha256"))}
+        assert not any(n.endswith(".state.npz") for n in top), top
+
+
 def test_every_row_carries_its_decomposition_synthetic():
     with tempfile.TemporaryDirectory() as tmp:
         req = _prepared(tmp)
@@ -127,9 +184,16 @@ def test_every_row_carries_its_decomposition_synthetic():
             for key in ("recall_at_1", "recall_at_10", "recall_at_100",
                         "ceiling_at_10", "routing_loss", "index_loss",
                         "inv_ratio_at_10", "storage_amplification",
-                        "est_memory_bytes", "fanout", "build_seconds",
-                        "query_seconds"):
+                        "est_memory_bytes", "fanout"):
                 assert key in r, f"{r['config']} missing {key}"
+            # Task 020b: wall clock is declared in simulate_info.json, so
+            # simulate.json depends only on what was measured.
+            for key in ("build_seconds", "query_seconds"):
+                assert key not in r, f"{r['config']} still carries {key}"
+            timing = json.load(open(os.path.join(wd, "simulate_info.json"),
+                                    encoding="utf-8"))["timings"][r["config"]]
+            assert timing["build_seconds"] >= 0, timing
+            assert timing["query_seconds"] >= 0, timing
             # The invariant the whole interface exists for.
             assert r["ceiling_at_10"] >= r["recall_at_10"] - 1e-9, r
             assert abs(r["routing_loss"] - (1 - r["ceiling_at_10"])) < 1e-6, r

@@ -1354,13 +1354,40 @@ def _session_specs():
         env = spec.get("env") or {}
         req = env.get("ONEGROUND_REQUIREMENTS")
         if not req:
-            continue                    # not a verify session
+            continue                    # no requirements at all
         rpath = os.path.join(root, req)
         if not os.path.exists(rpath):
             continue
         with open(rpath, encoding="utf-8") as f:
             reqs = yaml.safe_load(f)
-        yield os.path.basename(path), env, (reqs.get("verify") or {})
+        # A verify session is one whose requirements DECLARE a verify block --
+        # not merely one that names a requirements file. Task 027 added a
+        # `simulate --emit-state` session, which needs a requirements file
+        # like any other run and has no verify block, and the old proxy read
+        # it as a verify session and demanded latency variables it has no
+        # reason to carry. The presence of ONEGROUND_REQUIREMENTS stopped
+        # meaning "verify" the moment a second kind of session existed.
+        if not (reqs.get("verify") or {}):
+            continue
+        yield os.path.basename(path), env, reqs["verify"]
+
+
+def test_the_session_collector_is_not_vacuous():
+    """A narrowed filter is how a loop-over-everything test stops testing.
+
+    `_session_specs` skips sessions whose requirements declare no verify
+    block, which is right -- a simulate session has no latency shape to check.
+    But a skip that is silent can grow until nothing is checked and the two
+    tests below pass over an empty list. This pins the floor: the verify
+    sessions that exist must be collected, by name.
+    """
+    found = {name for name, _, _ in _session_specs()}
+    assert found, "no verify sessions collected; the two tests below are vacuous"
+    for expected in ("verify-arxiv-smoke-via-product-path.yaml",
+                     "verify-arxiv-150k-two-engines.yaml"):
+        assert expected in found, (expected, sorted(found))
+    # and a session that is not a verify session must not be collected
+    assert "027-emit-state-arxiv.yaml" not in found, sorted(found)
 
 
 def test_every_session_engine_list_matches_its_requirements():

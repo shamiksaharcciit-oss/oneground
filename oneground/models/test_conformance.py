@@ -349,6 +349,189 @@ def test_hash_assignment_is_seeded_and_stable_synthetic():
     assert counts.min() > 500 / 4 * 0.6, counts
 
 
+# -------------------------------------------------------------------- state
+def _state(model, x, q, cfg=None):
+    """A family's state for `cfg`, called in the order simulate calls it:
+    after search and footprint, before the index is released."""
+    cfg = cfg or _first_config(model)
+    built = model.build(x, cfg, SEED)
+    gt = np.asarray(exact_knn(x, q, K), dtype=np.int64)
+    cand = model.search(built, q, K, cfg)
+    fp = model.footprint(built)
+    return model.state(built, q, K, cfg, gt, SEED), cand, fp
+
+
+def test_every_family_emits_a_state_that_meets_the_contract_synthetic():
+    """The state contract (task 020, docs/STATE.md): every candidate's shard
+    exists in the partition, every probed region was scored, copy counts agree
+    with the footprint's storage amplification, and candidate ids are a subset
+    of the base ids."""
+    from oneground.models import state as S
+
+    x, q = _corpus()
+
+    def check(name, model):
+        assert callable(getattr(model, "state", None)), \
+            "does not implement state()"
+        st, _, fp = _state(model, x, q)
+        v = S.contract_violations(st, fp)
+        assert v == [], v
+        assert st.family == name
+        assert (st.n_base, st.n_queries, st.dim) == (len(x), len(q),
+                                                     x.shape[1])
+    _each(check)
+
+
+def test_state_candidates_reproduce_search_synthetic():
+    """A state can meet the contract and still describe a different search.
+    Merging its candidates must give exactly what search() returned."""
+    from oneground.models.base import merge_candidates
+
+    x, q = _corpus()
+
+    def check(name, model):
+        st, cand, _ = _state(model, x, q)
+        c = st.candidates
+        for qi in range(len(q)):
+            lo, hi = int(c.offsets[qi]), int(c.offsets[qi + 1])
+            ids, sc = merge_candidates([c.cand_id[lo:hi]],
+                                       [c.cand_score[lo:hi]], K)
+            assert np.array_equal(ids, cand.ids[qi]), f"query {qi}: ids differ"
+            real = cand.ids[qi] >= 0
+            assert np.allclose(sc[real], cand.scores[qi][real]), \
+                f"query {qi}: scores differ"
+    _each(check)
+
+
+def test_state_names_every_true_neighbour_synthetic():
+    """`true_ids` is the exact top-k whether or not the route reached it --
+    the field task 020's acceptance test found missing -- and `true_rank`
+    agrees with it."""
+    x, q = _corpus()
+    gt = np.asarray(exact_knn(x, q, K), dtype=np.int64)
+
+    def check(name, model):
+        st, _, _ = _state(model, x, q)
+        c = st.candidates
+        assert np.array_equal(c.true_ids, gt), "true_ids is not the exact top-k"
+        for qi in range(len(q)):
+            lo, hi = int(c.offsets[qi]), int(c.offsets[qi + 1])
+            for vid, r in zip(c.cand_id[lo:hi].tolist(),
+                              c.true_rank[lo:hi].tolist()):
+                if r >= 0:
+                    assert gt[qi, r] == vid, f"query {qi}: rank {r} wrong"
+                else:
+                    assert vid not in gt[qi], f"query {qi}: {vid} unranked"
+    _each(check)
+
+
+def test_state_encoding_round_trips_and_is_deterministic_synthetic():
+    import hashlib
+    import tempfile
+
+    from oneground.models import state as S
+
+    x, q = _corpus()
+
+    def check(name, model):
+        st, _, _ = _state(model, x, q)
+        with tempfile.TemporaryDirectory() as t:
+            digests = []
+            for fn in ("a.state.npz", "b.state.npz"):
+                p = S.write_state(os.path.join(t, fn), st)
+                with open(p, "rb") as f:
+                    digests.append(hashlib.sha256(f.read()).hexdigest())
+            assert digests[0] == digests[1], "same state, different bytes"
+            head, cols = S.read_state(os.path.join(t, "a.state.npz"))
+        want = S._arrays(st)
+        assert set(cols) == set(want) == set(head["columns"])
+        for key, arr in want.items():
+            got = cols[key]
+            assert got.dtype == arr.dtype and got.shape == arr.shape, key
+            assert np.array_equal(got, arr,
+                                  equal_nan=arr.dtype.kind == "f"), key
+        assert head["state_version"] == S.STATE_VERSION
+    _each(check)
+
+
+def test_state_contract_names_each_break_synthetic():
+    """Each of the four rules, broken on purpose, is caught and named."""
+    import copy
+
+    from oneground.models import state as S
+
+    x, q = _corpus()
+    model = models.get("semantic_sharded")
+    st, _, fp = _state(model, x, q)
+    assert S.contract_violations(st, fp) == []
+
+    def broken(mutate):
+        s = copy.deepcopy(st)
+        mutate(s)
+        return " | ".join(S.contract_violations(s, fp))
+
+    def shard_not_in_partition(s):
+        s.candidates.cand_shard[0] = 10_000
+
+    def probed_never_scored(s):
+        s.route.scored_region[0, :] = -1
+
+    def one_more_copy(s):
+        a = s.assignment
+        row = int(np.where(a.copy_count < a.max_assign)[0][0])
+        a.copy_set[row, int(a.copy_count[row])] = a.home_region[row]
+        a.copy_count[row] += 1
+
+    def id_not_a_base_id(s):
+        s.candidates.cand_id[0] = len(x)
+
+    assert "not in the partition" in broken(shard_not_in_partition)
+    assert "never scored" in broken(probed_never_scored)
+    assert "amplification" in broken(one_more_copy)
+    assert "outside [0," in broken(id_not_a_base_id)
+
+
+def test_a_semantic_state_recounts_its_own_epsilon_synthetic():
+    """Task 021: the closure at the emitted epsilon, recounted from the state's
+    distances and nearest regions alone, is exactly the copy set the family
+    built -- the precondition for recounting at any other epsilon."""
+    x, q = _corpus()
+    model = models.get("semantic_sharded")
+    for eps in (0.0, 0.1, 0.5):
+        cfg = Config.make("semantic_sharded", {"centroids": 8, "epsilon": eps,
+                                               "probe": 2, "M": 16,
+                                               "efSearch": 64})
+        st, _, fp = _state(model, x, q, cfg)
+        a = st.assignment
+        d = a.centroid_dist
+        within = d <= d[:, [0]] * (1 + eps)
+        within[:, 0] = True
+        assert np.array_equal(np.where(within, a.nearest_region, -1),
+                              a.copy_set), f"epsilon {eps}: copy sets differ"
+        assert np.array_equal(within.sum(axis=1), a.copy_count), eps
+
+
+def test_the_contract_names_a_missing_or_wrong_nearest_region_synthetic():
+    import copy
+
+    from oneground.models import state as S
+
+    x, q = _corpus()
+    st, _, fp = _state(models.get("semantic_sharded"), x, q)
+
+    missing = copy.deepcopy(st)
+    missing.assignment.nearest_region = None
+    assert "nearest_region is missing" in \
+        " | ".join(S.contract_violations(missing, fp))
+
+    wrong = copy.deepcopy(st)
+    a = wrong.assignment
+    row = int(np.where(a.copy_count > 1)[0][0])
+    a.nearest_region[row, 1] = (a.nearest_region[row, 1] + 1) % 8
+    assert "does not hold in that slot" in \
+        " | ".join(S.contract_violations(wrong, fp))
+
+
 def _main():
     tests = [(n, o) for n, o in sorted(globals().items())
              if n.startswith("test_") and callable(o)]

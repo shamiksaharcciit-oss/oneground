@@ -1,0 +1,117 @@
+# oneground requirements — arxiv-150k with its declared projection, as the
+# POD reads it. Task 027.
+#
+# WHY THIS FILE EXISTS. Task 027 made the 2-D projection a declared state
+# column and proved the drawing path: the lab's ground places every one of the
+# 150,000 vectors exactly where the teaser's `base.bin` places it, with the
+# same copy count, zero differences. What it could NOT prove is the EMIT path
+# at scale. A fresh `simulate --emit-state` on this corpus does not complete on
+# the developer's laptop: `semantic_sharded` builds 256 HNSW shards and faiss
+# raises `MemoryError: std::bad_alloc` with under a gigabyte free of 7.6 GB.
+# So 027's comparison used task 020's own emitted state with the declared
+# columns attached by `state.with_projection` -- the same function `simulate`
+# calls, and the only step the OOM prevented.
+#
+# This run closes that gap and nothing else: one configuration, emitted by the
+# product path on a machine that can hold it.
+#
+# RELATION TO THE OTHER TWO FILES.
+#   requirements.arxiv-150k.yaml       the published run. FROZEN: it declares
+#                                      no projection, by the developer's
+#                                      ruling on 18 September, because adding
+#                                      an input moves a published run's
+#                                      declared digests.
+#   requirements.arxiv-150k.pod.yaml   the same run as the pod reads it.
+#   this file                          that one, plus the declared projection,
+#                                      narrowed to the single reference
+#                                      configuration.
+#
+# The corpus paths are the volume's, for the same reason the other pod file
+# gives: vectors.npy is 460 MB and 460 MB does not go up an scp. It is read
+# from /workspace, where task 002's build left it.
+
+oneground: 1
+
+run:
+  name: 027-arxiv-projection
+  mode: measure
+  # The fixture's own sampling seed, as every arxiv-150k run uses.
+  seed: 20260908
+  workdir: ./runs/027-arxiv-projection
+
+corpus:
+  sample:
+    kind: receipt
+
+    vectors:
+      path: /workspace/arxiv-150k/vectors.npy
+      normalized: true
+
+    # The declared 2-D placement. Uploaded by the session, small enough to go
+    # up an scp at 4.5 MB. It is the artifact the teaser's own picture was
+    # exported from: `corpora/export_ground_view.py` wrote it from the fixture
+    # build's projection.npy, and its x and y columns were verified
+    # bit-identical to site/teaser/data/base.bin before task 027 built on it.
+    # arxiv-150k ships no projection.npy -- it is in neither release tarball
+    # nor the asset folder -- so this parquet is the declared source.
+    #
+    # Nothing in the run reads it but the state writer. Regions, distances and
+    # copy counts are computed in the full space.
+    projection:
+      path: ./fixtures/arxiv-150k/ground_view_base.parquet
+      method: umap
+      library: umap-learn
+      fitted_on: base vectors only
+      note: >
+        exported by corpora/export_ground_view.py from the fixture build's
+        projection.npy; the coordinates the teaser publishes in
+        site/teaser/data/base.bin
+
+    queries:
+      path: /workspace/arxiv-150k/queries.npy
+      count_min: 50
+      source: written
+
+    sampling:
+      method: stratified
+      stratify_by: update_date
+      full_corpus_size: 2100000
+
+    # The whole corpus: no subsampling, so the 150,000 rows line up with the
+    # projection's 150,000 positions row for row. A projection is matched to
+    # its corpus by row, and `models/projection.py` refuses a length that does
+    # not match rather than padding or truncating.
+    target_sample_size: 150000
+
+# ------------------------------------------------------------------
+# simulate — the one reference configuration, and nothing else
+# ------------------------------------------------------------------
+# The published sweep is six semantic configurations plus single-node and
+# hash. This run needs exactly the configuration the teaser's picture was
+# drawn from, because that is what the acceptance compares against. Every
+# extra configuration would be another 256-shard build and another few
+# minutes of pod time for a state nothing checks.
+simulate:
+  kind: declared
+  families: [semantic_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+  include:
+    - {family: semantic_sharded, centroids: 256, epsilon: 0.2, probe: 2,
+       M: 32, efSearch: 96}
+
+  grid:
+    semantic_sharded:
+      centroids: [256]
+      epsilon: [0.2]
+      probe: [2]
+      M: [32]
+      efSearch: [96]
+
+  budget:
+    # A guard, not a plan. One configuration at 150,000 vectors took 360 s on
+    # the laptop when task 021 last completed one; the pod has 16 vCPU and
+    # 40 GB, so this is generous and exists so the log says which configuration
+    # was not measured rather than the run pretending it was complete.
+    max_minutes: 45
