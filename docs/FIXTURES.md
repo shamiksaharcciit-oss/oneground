@@ -1,6 +1,6 @@
 # The public fixtures
 
-Two corpora, built the same way, published with their receipts. They exist so
+Three corpora, built the same way, published with their receipts. They exist so
 that anyone can install oneground, rebuild a fixture, and confirm it reproduces
 the published numbers within tolerance — and so that a user with their own
 vectors has something measured to compare against.
@@ -20,29 +20,37 @@ rounding couldn't-check up to verified.
 
 ## Side by side
 
-|  | **arxiv-150k** | **stackexchange-150k** |
-|---|---|---|
-| status | `verified` | `built` |
-| source | arXiv metadata snapshot | Stack Overflow posts (Internet Archive Stack Exchange dump) |
-| provider | arxiv.org via Kaggle `Cornell-University/arxiv` | Hugging Face `mikex86/stackoverflow-posts`, revision `9e791fe8` |
-| licence | **CC0 1.0** | **CC BY-SA** 2.5 / 3.0 / 4.0, *per post*, from each record's `ContentLicense` |
-| what a record is | title + abstract | title + first 500 chars of the cleaned body |
-| queries are | the paper's title | the question's title |
-| model | `BAAI/bge-base-en-v1.5`, 768-d, normalized | same |
-| size | 150,000 base + 2,000 held-out queries | same |
-| sampling | stratified by year, hot categories by volume | same rule, tags in place of categories |
-| source scale | ~2.1M papers | 20,388,803 eligible questions of 58,329,355 posts |
-| drift cutoff | `2019-01-01` | `2017-01-01` |
+|  | **arxiv-150k** | **stackexchange-150k** | **sec-filings-10k** |
+|---|---|---|---|
+| status | `verified` | `built` | `planned` |
+| built for | reference | reference | **chunking** |
+| source | arXiv metadata snapshot | Stack Overflow posts (Internet Archive Stack Exchange dump) | EDGAR 10-K annual reports |
+| provider | arxiv.org via Kaggle `Cornell-University/arxiv` | Hugging Face `mikex86/stackoverflow-posts`, revision `9e791fe8` | U.S. Securities and Exchange Commission, twelve quarterly indexes |
+| licence | **CC0 1.0** | **CC BY-SA** 2.5 / 3.0 / 4.0, *per post*, from each record's `ContentLicense` | **no licence terms**: a public record the SEC publishes for free reuse. *Not* claimed under 17 U.S.C. §105 — see below |
+| what a record is | title + abstract | title + first 500 chars of the cleaned body | a **chunk** of a filing, 512 tokens |
+| queries are | the paper's title | the question's title | a **held-out chunk** — a 10-K has no title field |
+| model | `BAAI/bge-base-en-v1.5`, 768-d, normalized | same | same |
+| size | 150,000 base + 2,000 held-out queries | same | same, from 10,000 documents |
+| sampling | stratified by year, hot categories by volume | same rule, tags in place of categories | seeded shuffle, examine until 10,000 accepted |
+| source scale | ~2.1M papers | 20,388,803 eligible questions of 58,329,355 posts | 21,287 distinct 10-K filings, 2022–2024 |
+| drift cutoff | `2019-01-01` | `2017-01-01` | `2024-01-01` |
+| ships | — | — | section offsets per document; pre-chunking duplicate rate |
 
 ### The five measures
 
-| measure | tolerance | arxiv-150k | stackexchange-150k |
-|---|---|---|---|
-| intrinsic dimensionality (TwoNN) | 0.5 | 32.55 | **37.46** |
-| boundary crispness | 0.02 | 0.036 | **0.011** |
-| ambiguous query rate | 0.02 | 0.891 | **0.908** |
-| skew, top-10 share | 0.02 | 0.075 | 0.069 |
-| drift (before → after) | 0.02 | 0.522 → 0.549 | **0.485 → 0.450** |
+| measure | tolerance | arxiv-150k | stackexchange-150k | sec-filings-10k |
+|---|---|---|---|---|
+| intrinsic dimensionality (TwoNN) | 0.5 | 32.55 | **37.46** | not built |
+| boundary crispness | 0.02 | 0.036 | **0.011** | not built |
+| ambiguous query rate | 0.02 | 0.891 | **0.908** | not built |
+| skew, top-10 share | 0.02 | 0.075 | 0.069 | not built |
+| drift (before → after) | 0.02 | 0.522 → 0.549 | **0.485 → 0.450** | not built |
+
+`sec-filings-10k` is `planned`: its rules, seeds, thresholds and cutoffs are
+fixed in writing and every value in its spec is `TO_BE_FILLED`. Nothing is
+reported for it here until the canonical build fills them, and "not built" is
+not a placeholder for a number someone expects — it is the whole of what is
+known.
 
 Definitions are in each spec and are identical across the two: crispness is the
 fraction of base vectors whose second-nearest centroid distance exceeds 1.20×
@@ -101,6 +109,69 @@ From `stackexchange-150k`'s own `findings` block, verbatim:
 > opposite way (0.485->0.450 vs 0.522->0.549). Two corpora that look unalike
 > to a reader turn out to agree on the architecture question and disagree
 > about time.
+
+---
+
+## The third fixture is for chunking, and two of its numbers are the corpus's own
+
+`sec-filings-10k` exists because **the other two cannot measure chunking at
+all**. An arXiv abstract is one chunk; a Stack Overflow question is usually one
+chunk. Where you cut them does not arise. A 10-K runs 50 to 150 pages and is
+marked by convention — Item 1, Item 1A, Item 7 — so where you cut it matters
+and whether the cut landed on a boundary is measurable rather than
+couldn't-check. It ships every document's section offsets so a strategy can be
+scored on whether it cut through one.
+
+It ships **one** chunking — fixed size, 512 tokens, 64 of overlap,
+section-blind — and that is a **baseline, not a recommendation**. It is the
+thing a strategy has to beat, chosen to be the obvious naive default. Nothing
+in this fixture should be read as advice about how to chunk; comparing
+strategies against the baseline is what `docs/CHUNKING.md` describes and is not
+this fixture's job.
+
+Two properties of this corpus are reported rather than cleaned away, because
+hiding either would make the fixture misleading:
+
+**Extraction quality varies wildly across filers, so the rejection rate is
+published by category.** Filer HTML is of no fixed discipline: some letter-space
+headings across inline elements so the word arrives as `It em 7.`, some put the
+Item number on its own line. Every filing the rule turns away is counted and
+attributed, and the fixture publishes examined-versus-accepted. A fixture that
+silently drops a third of its corpus is measuring its own parser. On a seeded
+development sample of 40 filings the rule accepted 38, and both rejections were
+asset-backed trusts that file Items 1 to 15 under General Instruction J and
+answer "Omitted." to every one — structurally perfect, and empty.
+
+**Boilerplate repetition is intrinsic, so the near-duplicate rate is published
+for the corpus before any chunking.** This is the baseline a chunking
+comparison must be read against: without it, a strategy's duplicate rate cannot
+be told apart from the corpus's own. It is measured lexically — Jaccard over
+word shingles — precisely because a chunk vector exists only once a chunking has
+been chosen, so a cosine rate on chunk vectors already contains the strategy
+under test. Measured before the build on three filers' consecutive filings, the
+same company's adjacent-year 10-Ks score Jaccard 0.49 to 0.62. The repetition is
+large and it belongs to the corpus.
+
+**On the licence.** The SEC says of EDGAR that "anyone can access and download
+this information for free", asserts no copyright, and attaches no reuse terms —
+only access conditions, which are a declared user agent carrying a reachable
+contact and a rate limit of 10 requests a second. The spec deliberately does
+*not* claim 17 U.S.C. §105: that covers works the government authored, and a
+10-K is authored by the registrant and filed with the government. Any residual
+interest of a registrant in its own filed text is recorded as untested rather
+than dismissed. **A rebuilder must put their own contact in
+`source.user_agent`** — the address published there is the maintainer's, present
+because a source that cannot be re-fetched is not reproducible, and it is not an
+invitation to load a public service under someone else's name.
+
+**The comparison it is not.** The spec names `eur-lex` in its own `contrast`
+field as the fixture that has *not* been built, and says what it would settle:
+whether these results are about long documents or about *badly marked* long
+documents. Here a section boundary is recovered by a rule that some filings
+defeat; in EU legislation the structure is given by law. If a section-aware
+strategy beats the baseline on both, the finding is about length. If only on
+EUR-Lex, the finding is that structure-aware chunking needs structure it can
+trust — and the honest advice for a corpus of filings is a different one.
 
 ---
 

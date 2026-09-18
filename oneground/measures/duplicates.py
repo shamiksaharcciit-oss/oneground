@@ -145,23 +145,27 @@ def signature(shingle_hashes, a, b):
     return out
 
 
-def signatures(texts, seed):
+def signatures(texts, seed, log=None):
     """Signatures and exact shingle sets for a corpus, in input order."""
     a, b = _permutations(seed)
     cache = {}
     sets, sigs = [], []
-    for t in texts:
+    for i, t in enumerate(texts):
         s = shingles(t, cache=cache)
         sets.append(s)
         sigs.append(signature(s, a, b))
+        if log and (i + 1) % 1000 == 0:
+            log(f"  shingled {i + 1:,} of {len(texts):,} documents")
     return (np.vstack(sigs) if sigs else np.empty((0, NUM_PERM), np.uint64)), sets
 
 
-def candidate_pairs(sigs, bands=BANDS, rows=ROWS):
+def candidate_pairs(sigs, bands=BANDS, rows=ROWS, log=None):
     """Pairs sharing a whole band. Deterministic: sorted, no set iteration."""
     pairs = set()
     n = sigs.shape[0]
     for band in range(bands):
+        if log and band and band % 8 == 0:
+            log(f"  band {band}/{bands}, {len(pairs):,} candidate pairs so far")
         block = sigs[:, band * rows:(band + 1) * rows]
         keys = {}
         for i in range(n):
@@ -185,16 +189,22 @@ def exact_jaccard(sa, sb):
     return inter / union if union else 0.0
 
 
-def near_duplicate_rate(texts, seed, thresholds=THRESHOLDS):
+def near_duplicate_rate(texts, seed, thresholds=THRESHOLDS, log=None):
     """The receipt: the share of documents with a near-duplicate, per threshold.
 
     Returns the rate at each threshold, the number of candidate pairs LSH
     proposed, how many survived exact scoring, and the LSH recall at each
     threshold -- everything needed to read the number without trusting it.
     """
-    sigs, sets = signatures(texts, seed)
-    cands = candidate_pairs(sigs)
-    scored = [(i, j, exact_jaccard(sets[i], sets[j])) for i, j in cands]
+    sigs, sets = signatures(texts, seed, log=log)
+    cands = candidate_pairs(sigs, log=log)
+    if log:
+        log(f"  scoring {len(cands):,} candidate pairs exactly")
+    scored = []
+    for k, (i, j) in enumerate(cands):
+        scored.append((i, j, exact_jaccard(sets[i], sets[j])))
+        if log and (k + 1) % 50_000 == 0:
+            log(f"  scored {k + 1:,} of {len(cands):,} pairs")
 
     n = len(texts)
     out = {}

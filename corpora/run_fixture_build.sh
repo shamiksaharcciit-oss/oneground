@@ -90,6 +90,15 @@ fi
 FIXDIR="${OUT%/}/$SPEC_ID"
 LOG="logs/build-${SPEC_ID}.log"
 
+# Artifacts the spec declares beyond the seven the builder always writes. Empty
+# for every fixture before task 030. Read here so `pack` can include them
+# without this script knowing what any of them are.
+EXTRA_RECEIPTS="$(python -c 'import sys,yaml; a=(yaml.safe_load(open(sys.argv[1])).get("artifacts") or {}); print(" ".join(a.get("extra_receipts") or []))' "$SPEC")"
+EXTRA_LARGE_BYTES="${EXTRA_LARGE_BYTES:-52428800}"   # 50 MB
+if [ -n "$EXTRA_RECEIPTS" ]; then
+    echo "spec declares extra receipts: $EXTRA_RECEIPTS"
+fi
+
 # ------------------------------------------------------------- source receipt
 # Reported before any work starts. A local source is described from disk; a
 # streamed one has nothing on disk to describe, and its snapshot_sha256 is
@@ -185,11 +194,31 @@ pack() {
         [ -f "$f" ] && members+=("$f")
     done
 
+    # Artifacts a source produces that this script does not know the names of.
+    # The spec lists them under artifacts.extra_receipts; they are already in
+    # MANIFEST.sha256, and without this they would be digested and then not
+    # packaged, which is the worst of both. Split by size rather than by name,
+    # so the rule stays generic: anything over EXTRA_LARGE_BYTES belongs in the
+    # release asset, the rest in the review bundle.
+    local extra_small=() extra_large=()
+    for f in $EXTRA_RECEIPTS; do
+        [ -f "$FIXDIR/$f" ] || continue
+        if [ "$(stat -c %s "$FIXDIR/$f" 2>/dev/null || echo 0)" -gt \
+             "$EXTRA_LARGE_BYTES" ]; then
+            extra_large+=("$FIXDIR/$f")
+        else
+            members+=("$FIXDIR/$f")
+        fi
+    done
+
     mkdir -p "$(dirname "$TARBALL")"
     tar -czf "$TARBALL.tmp" -C "$REPO" "${members[@]}"
     mv -f "$TARBALL.tmp" "$TARBALL"
 
-    local large=()
+    # Guarded expansion: an empty array under `set -u` is an error in bash
+    # before 4.4, and this script's whole job is to still be packaging when
+    # something else has gone wrong.
+    local large=(${extra_large[@]+"${extra_large[@]}"})
     for f in "$FIXDIR/vectors.npy" "$FIXDIR/queries.npy" \
              "$FIXDIR/sample.jsonl.zst"; do
         [ -f "$f" ] && large+=("$f")

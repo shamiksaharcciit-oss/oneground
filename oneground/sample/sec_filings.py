@@ -34,8 +34,16 @@ every byte digest irreproducible without any error being raised. See
 """
 
 import html
+import json
+import os
+import random
 import re
+import time
 import unicodedata
+import urllib.error
+import urllib.request
+
+from ..receipts import manifest_digest, write_json_stable
 
 # ---------------------------------------------------------------- the source
 
@@ -472,3 +480,392 @@ def sections_spanned(chunk, sections):
     hit = [s["item"] for s in sections
            if s["start"] < chunk["char_end"] and s["end"] > chunk["char_start"]]
     return dict(items=hit, crosses_boundary=len(hit) > 1)
+
+
+# ============================================================ the source reader
+#
+# `sample_records` is the entry point `oneground.sample.READERS` dispatches to
+# for `source.format: sec_filings_edgar`. It returns chunk records in the shape
+# the generic builder expects, so `corpora/build_fixture.py` needs no knowledge
+# of filings at all.
+
+
+class SourceError(RuntimeError):
+    """The pinned source no longer resolves, or no longer matches its digest."""
+
+
+def _say(log, msg):
+    (log or (lambda _m: None))(msg)
+
+
+def _get(url, timeout=300):
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _parse_index_row(line):
+    """A form.idx row.
+
+    The columns are not at the header's offsets -- the header says File Name
+    begins at 98 and in the rows it does not -- so the fields are taken from
+    the right instead, where they are unambiguous.
+    """
+    s = line.rstrip()
+    rest, path = s.rsplit(None, 1)
+    rest, date = rest.rsplit(None, 1)
+    rest, cik = rest.rsplit(None, 1)
+    return dict(form=s[:12].strip(), company=rest[12:].strip(),
+                cik=cik, date=date, path=path)
+
+
+def stream_index(year, quarter, log=None):
+    """One quarter's 10-K rows, and the index's own digest, without storing it.
+
+    The index is 36-58 MB naming every filing made that quarter. It is pulled
+    through a hash and a line filter a megabyte at a time; only the 10-K rows
+    survive and the file is never on disk.
+    """
+    import hashlib
+    url = INDEX_URL.format(year=year, q=quarter)
+    h = hashlib.sha256()
+    rows, nbytes, tail = [], 0, b""
+    with _get(url) as r:
+        while True:
+            buf = r.read(1 << 20)
+            if not buf:
+                break
+            h.update(buf)
+            nbytes += len(buf)
+            tail += buf
+            *lines, tail = tail.split(b"\n")
+            for raw in lines:
+                if raw.startswith(b"10-K "):
+                    row = _parse_index_row(raw.decode("latin-1"))
+                    if row["form"] == "10-K":
+                        rows.append(row)
+    if tail.startswith(b"10-K "):
+        row = _parse_index_row(tail.decode("latin-1"))
+        if row["form"] == "10-K":
+            rows.append(row)
+    return rows, h.hexdigest(), nbytes
+
+
+def resolve_source(spec, log=None):
+    """The declared filings, verified against the spec's digests before any
+    filing content is read.
+
+    Two digests are checked and they catch different things.
+    `snapshot_sha256` is `manifest_digest` over the twelve index files, so it
+    moves if any index byte changes -- EDGAR restating a quarter, a filing
+    added or withdrawn. `selection_sha256` is over the sorted accession list,
+    so it moves if the set of 10-K filings in the range changes even where the
+    index bytes happen not to. A build against a moved source is refused and
+    reported, never worked around.
+    """
+    import hashlib
+    src = spec["source"]
+    y0, y1 = int(src["date_range"][0][:4]), int(src["date_range"][1][:4])
+    digests, rows = {}, []
+    for year in range(y0, y1 + 1):
+        for q in (1, 2, 3, 4):
+            t0 = time.time()
+            got, sha, nbytes = stream_index(year, q, log=log)
+            digests[f"{year}/QTR{q}/form.idx"] = sha
+            rows.extend(got)
+            _say(log, f"  index {year} QTR{q}: {len(got):>6,} 10-K rows, "
+                      f"{nbytes/1e6:>5.1f} MB, {time.time() - t0:>4.1f}s")
+
+    by_acc = {}
+    for r in rows:
+        by_acc.setdefault(r["path"].rsplit("/", 1)[1][:-4], r)
+
+    snapshot = manifest_digest(digests)
+    selection = hashlib.sha256(
+        "\n".join(sorted(by_acc)).encode("ascii")).hexdigest()
+
+    for name, got, want in (
+            ("snapshot_sha256", snapshot, src.get("snapshot_sha256")),
+            ("selection_sha256", selection, src.get("selection_sha256"))):
+        if want and want != got:
+            raise SourceError(
+                f"source.{name} does not match the live EDGAR indexes: the "
+                f"spec pins {want} and the source is now {got}. The declared "
+                f"source has moved; that is reported, not worked around.")
+    _say(log, f"  source verified: {len(by_acc):,} distinct accessions, "
+              f"snapshot {snapshot[:16]}")
+    return by_acc, snapshot, selection
+
+
+def fetch_10k(path, tries=4):
+    """The 10-K <DOCUMENT> of one submission, streamed and cut short.
+
+    Stops at the end of the 10-K part and abandons the rest of the response,
+    so a 16 MB submission costs the few MB the filing itself occupies.
+    Retries a transient 5xx with bounded backoff -- EDGAR returned one 503 in
+    the first twelve filings probed -- but never retries a 403 or a 404,
+    because neither clears by waiting and a 403 here means the user agent is
+    not declared.
+    """
+    url = ARCHIVES + path
+    for attempt in range(tries):
+        try:
+            buf, read = b"", 0
+            with _get(url) as r:
+                while read < (64 << 20):
+                    chunk = r.read(1 << 18)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    read += len(chunk)
+                    i = buf.find(b"<TYPE>10-K\n")
+                    if i == -1:
+                        i = buf.find(b"<TYPE>10-K\r\n")
+                    if i != -1:
+                        j = buf.find(b"</DOCUMENT>", i)
+                        if j != -1:
+                            return buf[i:j], read
+            return None, read
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 404):
+                raise
+            time.sleep(2 ** attempt)
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            time.sleep(2 ** attempt)
+    raise SourceError(f"gave up after {tries} attempts: {url}")
+
+
+def _local_parts(source):
+    """An offline directory of cached <DOCUMENT> parts, named <accession>.sgml.
+
+    For tests and for a rebuild without EDGAR. Determinism does not depend on
+    which is used: the result is fixed by the seed, the accession set and the
+    extraction rule.
+
+    A `meta.json` beside the parts supplies each filing's CIK, company and
+    filing date. It is optional but not cosmetic: the drift pair splits on the
+    filing date, so a local source that stubbed the date would put every
+    document on one side of the cutoff and the measure would divide by zero
+    rather than being measured. An offline rebuild that wants the drift pair
+    needs the dates, and one without them is told so here.
+    """
+    parts = {p[:-5]: os.path.join(source, p)
+             for p in sorted(os.listdir(source)) if p.endswith(".sgml")}
+    meta_path = os.path.join(source, "meta.json")
+    meta = {}
+    if os.path.exists(meta_path):
+        with open(meta_path, encoding="utf-8") as fh:
+            meta = json.load(fh)
+    return parts, meta
+
+
+def collect_documents(source, spec, log=None, receipt=None):
+    """Examine filings in seeded order until the target is accepted.
+
+    Returns the accepted documents and the rejection tally. Every filing that
+    does not become a document is counted under the category that turned it
+    away: the count is the deliverable, not a side effect of one.
+    """
+    target = spec["sampling"]["target_documents"]
+    seed = spec["sampling"]["seed"]
+    pause = 1.0 / MAX_REQUESTS_PER_SECOND
+
+    if source:
+        local, meta = _local_parts(source)
+        by_acc = {}
+        for a in local:
+            m = meta.get(a, {})
+            by_acc[a] = dict(cik=m.get("cik", "0"),
+                             company=m.get("company", "(local)"),
+                             date=m.get("date", "1970-01-01"), path=a)
+        snapshot = selection = "(local source, not the declared EDGAR indexes)"
+        _say(log, f"local source: {len(local):,} cached parts in {source}"
+                  f"{'' if meta else ' (no meta.json: dates are stubbed)'}")
+    else:
+        local = None
+        by_acc, snapshot, selection = resolve_source(spec, log=log)
+
+    order = sorted(by_acc)
+    random.Random(seed).shuffle(order)
+
+    docs, rejected, examined, bytes_read = [], {}, 0, 0
+    t0 = time.time()
+    for acc in order:
+        if len(docs) >= target:
+            break
+        examined += 1
+        row = by_acc[acc]
+        try:
+            if local:
+                with open(local[acc], "rb") as fh:
+                    part, read = fh.read(), 0
+            else:
+                part, read = fetch_10k(row["path"])
+                time.sleep(pause)
+        except (SourceError, urllib.error.HTTPError, OSError):
+            rejected["fetch_failed"] = rejected.get("fetch_failed", 0) + 1
+            continue
+        bytes_read += read
+        if part is None:
+            rejected["no_10k_document"] = rejected.get("no_10k_document", 0) + 1
+            continue
+        rec, why = extract(part)
+        if rec is None:
+            rejected[why] = rejected.get(why, 0) + 1
+            continue
+        docs.append(dict(accession=acc, cik=row["cik"], company=row["company"],
+                         date=row["date"], chars=rec["chars"],
+                         sections=rec["sections"], text=rec["text"]))
+        if len(docs) % 500 == 0:
+            rate = bytes_read / max(time.time() - t0, 1e-9) / 1e6
+            _say(log, f"  {len(docs):>6,} accepted of {examined:>6,} examined"
+                      f"   {bytes_read / 1e9:>5.2f} GB   {rate:>5.1f} MB/s")
+
+    seconds = time.time() - t0
+    n_rej = sum(rejected.values())
+    stats = dict(examined=examined, accepted=len(docs), rejected=n_rej,
+                 rejection_rate=round(n_rej / examined, 4) if examined else 0.0,
+                 by_category=dict(sorted(rejected.items())),
+                 bytes_streamed=bytes_read, seconds=round(seconds, 1),
+                 megabytes_per_second=round(
+                     bytes_read / max(seconds, 1e-9) / 1e6, 2))
+    if receipt is not None:
+        receipt["snapshot_sha256"] = snapshot
+        receipt["selection_sha256"] = selection
+        receipt["extraction"] = stats
+    _say(log, f"documents: {len(docs):,} accepted of {examined:,} examined "
+              f"({stats['rejection_rate']:.1%} rejected) in {seconds / 60:.1f} min")
+    for k, v in stats["by_category"].items():
+        _say(log, f"    rejected {v:>6,}  {k}")
+    if len(docs) < target:
+        _say(log, f"WARNING: {len(docs):,} accepted against a target of "
+                  f"{target:,} -- the source ran out before the target was met")
+    return docs, stats
+
+
+def section_statistics(docs):
+    """The published per-corpus view of what the extraction actually recovered."""
+    import numpy as np
+    per = np.array([len(d["sections"]) for d in docs])
+    lens = np.array([s["end"] - s["start"] for d in docs for s in d["sections"]])
+    chars = np.array([d["chars"] for d in docs])
+
+    def q(a, p):
+        return int(np.percentile(a, p)) if a.size else 0
+
+    return dict(
+        documents=len(docs),
+        sections_total=int(lens.size),
+        sections_per_document=dict(
+            min=int(per.min()) if per.size else 0, p50=q(per, 50),
+            p95=q(per, 95), max=int(per.max()) if per.size else 0,
+            mean=round(float(per.mean()), 2) if per.size else 0.0),
+        section_chars=dict(p5=q(lens, 5), p50=q(lens, 50), p95=q(lens, 95),
+                           max=int(lens.max()) if lens.size else 0),
+        document_chars=dict(
+            min=int(chars.min()) if chars.size else 0, p50=q(chars, 50),
+            p95=q(chars, 95), max=int(chars.max()) if chars.size else 0,
+            total=int(chars.sum()) if chars.size else 0),
+        item_coverage={it: sum(1 for d in docs
+                               if any(s["item"] == it for s in d["sections"]))
+                       for it in CANONICAL_ITEMS},
+    )
+
+
+def sample_records(source, spec, n_total, seed, log=None, receipt=None):
+    """The reader `oneground.sample.READERS` dispatches to.
+
+    Documents in, chunk records out. The three artifacts this fixture ships
+    that the others do not -- the documents with their section offsets, the
+    section statistics, and the pre-chunking duplicate rate -- are written
+    here, because each is a property of the corpus BEFORE chunking and
+    nothing downstream could reconstruct them afterwards.
+    """
+    import zstandard as zstd
+
+    from ..measures import duplicates as dup
+
+    outdir = ((receipt or {}).get("outdir")
+              or os.path.join("fixtures", spec["fixture"]["id"]))
+    os.makedirs(outdir, exist_ok=True)
+
+    docs, stats = collect_documents(source, spec, log=log, receipt=receipt)
+
+    # --- documents.jsonl.zst: the corpus, with its section offsets ----------
+    dpath = os.path.join(outdir, "documents.jsonl.zst")
+    with open(dpath, "wb") as f, \
+            zstd.ZstdCompressor(level=10).stream_writer(f) as w:
+        for d in docs:
+            w.write((json.dumps(d, sort_keys=True) + "\n").encode())
+    _say(log, f"documents.jsonl.zst: {os.path.getsize(dpath) / 1e6:.1f} MB")
+
+    # --- section statistics -------------------------------------------------
+    ss = section_statistics(docs)
+    ss["extraction"] = stats
+    write_json_stable(os.path.join(outdir, "section_statistics.json"), ss)
+
+    # --- the pre-chunking duplicate rate ------------------------------------
+    nd = spec["near_duplicates"]
+    _say(log, "near-duplicate rate, before any chunking")
+    t0 = time.time()
+    rates = dup.near_duplicate_rate([d["text"] for d in docs], seed=nd["seed"],
+                                    thresholds=tuple(nd["thresholds"]),
+                                    log=log)
+    write_json_stable(os.path.join(outdir, "near_duplicates.json"), rates)
+    _say(log, f"  {rates['candidate_pairs']:,} candidate pairs, "
+              f"{time.time() - t0:.0f}s")
+    for t, v in rates["by_threshold"].items():
+        _say(log, f"    J>={t}: {v['rate']:.4f} of documents "
+                  f"({v['documents']:,} in {v['pairs']:,} pairs) [{v['kind']}]")
+
+    # --- the baseline chunking ----------------------------------------------
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(spec["embedding"]["model"])
+    _say(log, f"chunking {len(docs):,} documents at {CHUNK_TOKENS} tokens, "
+              f"{CHUNK_OVERLAP} overlap, section-blind")
+    t0 = time.time()
+    index = []                      # (document, span) with no text, to bound memory
+    for i, d in enumerate(docs):
+        enc = tok(d["text"], add_special_tokens=False,
+                  return_offsets_mapping=True, truncation=False)
+        offs = enc["offset_mapping"]
+        for c in chunk_document(d["text"], offs, len(offs)):
+            index.append((i, c))
+        if (i + 1) % 1000 == 0:
+            _say(log, f"  chunked {i + 1:,} documents, {len(index):,} chunks, "
+                      f"{time.time() - t0:.0f}s")
+    _say(log, f"chunks: {len(index):,} from {len(docs):,} documents in "
+              f"{(time.time() - t0) / 60:.1f} min")
+
+    crossing = sum(1 for i, c in index
+                   if sections_spanned(c, docs[i]["sections"])["crosses_boundary"])
+    if receipt is not None:
+        receipt["chunking"] = dict(
+            chunks_total=len(index),
+            chunks_per_document=round(len(index) / max(len(docs), 1), 2),
+            chunks_crossing_a_boundary=crossing,
+            crossing_rate=round(crossing / max(len(index), 1), 4))
+    _say(log, f"  {crossing:,} of {len(index):,} chunks cross a section "
+              f"boundary ({crossing / max(len(index), 1):.1%})")
+
+    if len(index) < n_total:
+        raise SourceError(
+            f"the baseline chunking produced {len(index):,} chunks, fewer "
+            f"than the {n_total:,} the spec asks for")
+    picked = sorted(random.Random(seed).sample(range(len(index)), n_total))
+
+    out = []
+    for k in picked:
+        i, c = index[k]
+        d = docs[i]
+        span = sections_spanned(c, d["sections"])
+        out.append(dict(
+            id=f"{d['accession']}#{c['token_start']}",
+            accession=d["accession"], cik=d["cik"], company=d["company"],
+            date=d["date"],
+            text=d["text"][c["char_start"]:c["char_end"]],
+            item=(span["items"] or ["none"])[0],
+            items=span["items"], crosses_boundary=span["crosses_boundary"],
+            char_start=c["char_start"], char_end=c["char_end"],
+            token_start=c["token_start"], token_end=c["token_end"]))
+    _say(log, f"sampled {len(out):,} chunks of {len(index):,}")
+    return out

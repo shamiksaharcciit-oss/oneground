@@ -62,6 +62,18 @@ fixture:
 source:
   name: EDGAR 10-K annual reports
   provider: U.S. Securities and Exchange Commission
+  format: sec_filings_edgar
+  # Which record field plays each of the five roles the generic builder needs.
+  # `title` maps to the chunk's own text rather than to a title field, because
+  # a chunk has no title: the builder embeds `title` for queries, and here a
+  # query IS a held-out chunk. `categories` is the Item the chunk begins in,
+  # which is what gives the query draw the same skew as the corpus.
+  field_map:
+    id: id
+    title: text
+    body: text
+    categories: item
+    date: date
   repository: https://www.sec.gov/Archives/edgar/
   index_url: https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{q}/form.idx
   document_url: https://www.sec.gov/Archives/{path}   # the form.idx File Name column
@@ -241,6 +253,10 @@ extraction:
 
 sampling:
   target_documents: 10000
+  # The base corpus, in chunks, matching arxiv-150k and stackexchange-150k so
+  # the three are comparable line for line. Read by the generic builder.
+  target_size: 150000
+  text_template: '{text}'
   rule: >
     The 21,287 distinct accessions are shuffled once under `seed`, examined in
     that order, and the first 10,000 that the extraction rule accepts become
@@ -361,8 +377,21 @@ near_duplicates:
 queries:
   count: 2000
   rule: >
-    2,000 chunks held out from the sample before ground truth, drawn uniformly
-    under `seed`, and used as queries against the remaining base.
+    2,000 chunks held out from the sample before ground truth and used as
+    queries against the remaining base: 1,000 drawn uniformly and 1,000 drawn
+    from the Items that carry the most chunks, so query skew mirrors corpus
+    skew, exactly as in the other two fixtures.
+
+    One consequence of applying that rule unchanged here is stated rather than
+    designed around. "The top 5% of categories by volume" over arXiv's ~150
+    subject classes selects seven; over this corpus's 23 Items it selects
+    ONE. So half the queries come from a single Item, and it will be whichever
+    section is longest — in practice Item 8, the financial statements. The
+    rule is kept identical because comparability with the other two fixtures
+    is what makes the three readable together, and changing a constant for one
+    corpus after seeing what it selects is the fitting this fixture exists to
+    avoid. Which Item is hot, and what share of the corpus it holds, is
+    published in `findings`.
 
     This differs from arxiv-150k and stackexchange-150k, where the query is
     the record's title and so is much shorter than the document, and the
@@ -515,6 +544,13 @@ rebuild:
 
 artifacts:
   directory: fixtures/sec-filings-10k/
+  # Artifacts this fixture ships that the generic builder does not know about.
+  # They join MANIFEST.sha256 beside the standard receipts; a spec that
+  # declares none behaves exactly as before.
+  extra_receipts:
+    - documents.jsonl.zst
+    - section_statistics.json
+    - near_duplicates.json
   files:
     - documents.jsonl.zst        # 10,000 filings: text, sections with offsets, digest
     - chunks.jsonl.zst           # the sampled 150,000 chunks, with their spans
