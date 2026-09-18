@@ -424,17 +424,42 @@ for no reason asked for.
 because the state cannot: `models/state.py` is task-020's and not on this
 branch.
 
-## Step 4, local half — two runs through `simulate`
+## Step 4, the local runs — and a verdict that contradicted itself
 
 `simulate.json` byte-identical across two full runs with `build_seconds` and
 `query_seconds` masked (020b moved them out, but that commit is on task-020):
 sha256 `6d836710b455f009` both times.
 
-**The cross-environment half is not proved yet.** It is predicted by
-construction — both machines' BLAS-off centroids are already known to be
-bitwise equal — but predicted is not proved, and the developer's ruling is
-that the claim must be shown through `simulate` rather than a probe. That
-session is prepared and priced below.
+**The cross-environment half is proved too** — session `20260918-205534`,
+reported under "The result" above: masking only the wall clock and the `run`
+name, the two machines' `simulate.json` is byte-identical and all 36 measured
+row fields are equal.
+
+### The comparison said NOT PROVED with an empty residual
+
+Recorded because of what it nearly cost.
+
+The staged comparison printed `BYTE-IDENTITY ACROSS ENVIRONMENTS: NOT PROVED
+— residual above`, and above it, under "THE RESIDUAL, field by field:", was
+nothing at all.
+
+**A failing verdict with nothing to show is a contradiction.** Either
+something differs and the residual should name it, or nothing differs and the
+verdict is wrong. Both cannot hold. It would have been easy to report the
+verdict as it stood — it was the cautious-sounding answer, and "not proved" is
+the safer thing to say when you are unsure. It would also have been false.
+
+Chased instead, the cause was mine: `029_compare.py` diffed only `rows`, while
+the actual difference sat at the top level in `run` — `029-proof` against
+`029-proof-laptop`, two names I had chosen myself in the two requirements
+files. A full structural diff showed exactly five differences: the four
+wall-clock timings and that one label. With both masked, identical.
+
+The lesson is not about this script. **An inconsistency between a verdict and
+its evidence is a signal to investigate, not something to pass along** — and
+the direction of the error does not matter. A falsely negative result is as
+wrong as a falsely positive one, and it is more likely to survive review
+because it looks like caution.
 
 ## Step 6 — draft fixture wording, for the developer to rule on
 
