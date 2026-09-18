@@ -25,6 +25,14 @@ refuses: that recall is in the other state, not here.
 Which epsilons count as simulated comes from the `EpsilonSet` the composer
 builds once and hands to every view, so this view and the ground cannot
 disagree about it (task 023).
+
+Ambiguity (task 025): given the ratio the run declared (`characterization.json`
+`definitions.ambiguity_ratio`), the trace says whether the query is ambiguous
+by the same definition the characterization measured -- its second-nearest
+centroid within that ratio of its nearest, on non-squared distances -- read
+from the two distances `route.scored_dist` holds. Given a `couldnt_check`
+reason instead, it carries the reason as a gap. Given nothing, it says nothing
+about ambiguity, as before.
 """
 
 import numpy as np
@@ -33,6 +41,7 @@ from ..contract import (COULDNT_CHECK, NOT_SIMULATED, SIMULATED, Drawing,
                         EpsilonSet, Mark, View, same_epsilon)
 
 K_TRUE = 10
+NON_SQUARED = "euclidean (non-squared)"
 
 
 class QueryTraceView(View):
@@ -47,18 +56,25 @@ class QueryTraceView(View):
         "candidates.survived_dedupe", "candidates.true_rank",
     )
 
-    def __init__(self, query=15, k=K_TRUE, eps=None):
+    def __init__(self, query=15, k=K_TRUE, eps=None, ambiguity=None):
         """`eps` is the `EpsilonSet`: where the control stands, which epsilons
         were simulated, and the cost and action the recall panel offers
-        between them. Default: this state's own epsilon."""
+        between them. Default: this state's own epsilon.
+
+        `ambiguity` is the run's declared ambiguity ratio, a `couldnt_check`
+        reason why there is none, or None to leave ambiguity out."""
         self.query = int(query)
         self.k = int(k)
         self.eps = eps or EpsilonSet()
+        self.ambiguity = ambiguity
 
     def params(self):
-        return {"query": self.query, "k": self.k,
-                "epsilon": self.eps.epsilon,
-                "simulated_epsilons": list(self.eps.simulated)}
+        out = {"query": self.query, "k": self.k,
+               "epsilon": self.eps.epsilon,
+               "simulated_epsilons": list(self.eps.simulated)}
+        if self.ambiguity is not None:
+            out["ambiguity"] = self.ambiguity
+        return out
 
     def render(self, state):
         h = state.header
@@ -91,15 +107,8 @@ class QueryTraceView(View):
         routed = probed[0]
 
         gaps = {}
-        if state.has("candidates.true_ids"):
-            row = state["candidates.true_ids"][q][:k].tolist()
-            found = {r: int(v) for r, v in enumerate(row) if v >= 0}
-        elif at_state:
-            # a state written before task 020 added true_ids: the returned
-            # candidates name what they can, at the epsilon they were
-            # returned at
-            found = self._ranked_from_candidates(state, q, k)
-        else:
+        found = located(state, q, k, at_state)
+        if found is None:
             found = {}
             gaps["true_neighbours"] = (
                 f"{COULDNT_CHECK}: this state has no candidates.true_ids, and "
@@ -119,6 +128,8 @@ class QueryTraceView(View):
             "probed_regions": [r for r in probed if r >= 0],
             "true_neighbours_located": len(found),
         }
+        if self.ambiguity is not None:
+            ambiguity(h, scored, scored_dist, self.ambiguity, figures, gaps)
         if len(found) == k:
             figures["outside_routed_region"] = sum(outside)
         elif "true_neighbours" not in gaps:
@@ -196,6 +207,7 @@ class QueryTraceView(View):
 
         returned = set(cand.tolist())
         missed = [v not in returned for v in ids]
+        in_top = set(top_ids.tolist())
         named = set(int(r) for r in rank.tolist() if 0 <= r < k)
         return {
             "status": SIMULATED,
@@ -208,6 +220,9 @@ class QueryTraceView(View):
                 "candidates_returned": int(hi - lo),
                 "missed_by_route": sum(missed),
                 "missed_by_route_by_rank": missed,
+                # task 025: which of the true neighbours, by rank, are in the
+                # merged top k -- what the trace marks found or not found
+                "found_by_rank": [v in in_top for v in ids],
                 "answerable_from_candidates_alone": len(named) == k,
             },
         }
@@ -221,3 +236,47 @@ class QueryTraceView(View):
                 "params": params,
                 "command": "oneground simulate <requirements.yaml> "
                            "--emit-state"}
+
+
+def ambiguity(h, scored, scored_dist, declared, figures, gaps):
+    """The query's ambiguity by the run's declared definition, into `figures`,
+    or why not, into `gaps`. Shared with the query index, so the two cannot
+    disagree about a query.
+
+    `scored` and `scored_dist` are the query's scored regions and their
+    distances, nearest first, as `route.scored_*` store them.
+    """
+    if isinstance(declared, str):
+        gaps["ambiguous"] = declared
+        return
+    pairs = [(r, d) for r, d in zip(scored, scored_dist) if r >= 0]
+    if len(pairs) < 2:
+        gaps["ambiguous"] = (
+            f"{COULDNT_CHECK}: the state scored this query against "
+            f"{len(pairs)} region(s), and ambiguity compares the nearest two")
+        return
+    if h.get("distance_convention") != NON_SQUARED:
+        gaps["ambiguous"] = (
+            f"{COULDNT_CHECK}: the state's distances are "
+            f"{h.get('distance_convention')!r}, and the declared ratio "
+            "compares non-squared distances")
+        return
+    (r1, d1), (r2, d2) = pairs[0], pairs[1]
+    figures["second_region"] = int(r2)
+    figures["ambiguity_ratio"] = float(declared)
+    figures["distance_ratio"] = float(d2 / d1) if d1 > 0 else None
+    figures["ambiguous"] = bool(d2 <= declared * d1)
+
+
+def located(state, q, k, at_state):
+    """Query `q`'s true neighbours this state can name, as {rank: vector id},
+    or None when it cannot name them at this epsilon. Shared with the query
+    index, so the two locate the same neighbours."""
+    if state.has("candidates.true_ids"):
+        row = state["candidates.true_ids"][q][:k].tolist()
+        return {r: int(v) for r, v in enumerate(row) if v >= 0}
+    if at_state:
+        # a state written before task 020 added true_ids: the returned
+        # candidates name what they can, at the epsilon they were returned at
+        return QueryTraceView._ranked_from_candidates(state, q, k)
+    return None

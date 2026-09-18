@@ -5,8 +5,10 @@ module sitting here is a view module, and a view module may not measure.
 """
 
 from .ground import GroundView
+from .query_index import QueryIndexView
 from .query_trace import QueryTraceView
 
-VIEWS = {GroundView.name: GroundView, QueryTraceView.name: QueryTraceView}
+VIEWS = {GroundView.name: GroundView, QueryTraceView.name: QueryTraceView,
+         QueryIndexView.name: QueryIndexView}
 
-__all__ = ["GroundView", "QueryTraceView", "VIEWS"]
+__all__ = ["GroundView", "QueryIndexView", "QueryTraceView", "VIEWS"]

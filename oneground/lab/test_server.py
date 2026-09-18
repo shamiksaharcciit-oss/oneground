@@ -42,11 +42,12 @@ sys.path.insert(0, REPO)
 from oneground.lab import contract, guard, server        # noqa: E402
 from oneground.lab import test_lab as T                   # noqa: E402
 from oneground.lab.runs import LabRunError, LoadedRun     # noqa: E402
-from oneground.lab.views import GroundView, QueryTraceView  # noqa: E402
+from oneground.lab.views import (GroundView, QueryIndexView,  # noqa: E402
+                                 QueryTraceView)
 
 TOKEN = "test-token-not-a-secret"
 ROUTES = ("/", "/static/lab.css", "/static/lab.js", "/api/check", "/api/run",
-          "/api/ground", "/api/trace")
+          "/api/ground", "/api/trace", "/api/query-index", "/api/ids?rows=0")
 
 
 def _manifest(directory, names):
@@ -57,16 +58,26 @@ def _manifest(directory, names):
                 f.write(f"{hashlib.sha256(g.read()).hexdigest()}  {name}\n")
 
 
-def _workdir(root, name="run", eps=0.2, seconds=(240.0, 60.0)):
-    """A run directory as characterize and simulate --emit-state leave it."""
+def _workdir(root, name="run", eps=0.2, seconds=(240.0, 60.0),
+             receipts=False):
+    """A run directory as characterize and simulate --emit-state leave it.
+
+    `receipts` adds what characterize writes beside the characterization:
+    the declared ambiguity ratio, and the corpus's own ids for the 12 base
+    rows and 3 queries."""
     state_dir, _ = T._run(root, name, eps, seconds, "requirements.synthetic.yaml")
     wd = os.path.dirname(state_dir)
-    for fname, body in (("simulate.json", {"rows": []}),
-                        ("characterization.json", {"characterization": {}})):
+    characterization = {"characterization": {}}
+    files = [("simulate.json", {"rows": []})]
+    if receipts:
+        characterization["definitions"] = {"ambiguity_ratio": 1.17}
+        files += [("sample_ids.json", [f"doc-{i}" for i in range(12)]),
+                  ("queries_ids.json", ["q-alpha", "q-beta", "q-gamma"])]
+    files.append(("characterization.json", characterization))
+    for fname, body in files:
         with open(os.path.join(wd, fname), "w", encoding="utf-8") as f:
             json.dump(body, f)
-    _manifest(wd, ["simulate.json", "characterization.json",
-                   "simulate_info.json"])
+    _manifest(wd, [f for f, _ in files] + ["simulate_info.json"])
     _manifest(state_dir, ["synthetic.state.npz", "state_info.json"])
     return wd
 
@@ -110,7 +121,7 @@ def test_a_full_session_writes_nothing_synthetic():
     could write a file is watched. The workdir and the other run's directory
     come out byte for byte as they went in, with no file added."""
     with tempfile.TemporaryDirectory() as tmp:
-        wd = _workdir(tmp, "run", 0.2)
+        wd = _workdir(tmp, "run", 0.2, receipts=True)
         also = _workdir(tmp, "other", 0.1, (90.0, 30.0))
         before = _digests(tmp)
 
@@ -142,9 +153,12 @@ def test_a_full_session_writes_nothing_synthetic():
                 statuses.append(_get(lab, path)[0])
             for eps in ("", "0", "0.1", "0.15", "0.2", "0.5"):
                 statuses.append(_get(lab, f"/api/ground?epsilon={eps}")[0])
+                statuses.append(
+                    _get(lab, f"/api/query-index?epsilon={eps}")[0])
                 for q in (0, 1, 2):
                     statuses.append(
                         _get(lab, f"/api/trace?query={q}&epsilon={eps}")[0])
+            statuses.append(_get(lab, "/api/ids?rows=0,5,11")[0])
             refused = [_get(lab, "/api/run", token=None)[0],
                        _get(lab, "/../simulate.json")[0],
                        _get(lab, "/api/run", method="POST")[0],
@@ -186,11 +200,21 @@ def test_the_server_sends_the_views_drawings_unchanged_synthetic():
 
             for q, eps in ((0, 0.1), (1, 0.15), (2, 0.2)):
                 want = contract.draw(
-                    QueryTraceView(q, 10, eps=run.epsilon_set(eps)),
+                    QueryTraceView(q, 10, eps=run.epsilon_set(eps),
+                                   ambiguity=run.ambiguity),
                     *run.trace_state(eps))
                 status, _, body = _get(lab,
                                        f"/api/trace?query={q}&epsilon={eps}")
                 assert status == 200 and body == expected(want), (q, eps)
+
+            for eps in (0.1, 0.15, 0.2):
+                want = contract.draw(
+                    QueryIndexView(10, eps=run.epsilon_set(eps),
+                                   ambiguity=run.ambiguity),
+                    *run.trace_state(eps))
+                status, _, body = _get(lab,
+                                       f"/api/query-index?epsilon={eps}")
+                assert status == 200 and body == expected(want), eps
             panel = json.loads(_get(lab, "/api/trace?query=0&epsilon=0.15")
                                [2])["panels"]["recall"]
             assert panel["status"] == contract.NOT_SIMULATED
@@ -391,8 +415,45 @@ def test_bad_parameters_are_refused_synthetic():
             for path in ("/api/trace?query=99", "/api/trace?query=-1",
                          "/api/trace?query=x", "/api/ground?epsilon=x",
                          "/api/ground?epsilon=5", "/api/ground?epsilon=nan",
-                         "/api/ground?epsilon=-0.1"):
+                         "/api/ground?epsilon=-0.1",
+                         "/api/query-index?epsilon=x",
+                         "/api/query-index?epsilon=2", "/api/ids",
+                         "/api/ids?rows=x", "/api/ids?rows=12",
+                         "/api/ids?rows=-1",
+                         "/api/ids?rows=" + ",".join(["0"] * 101)):
                 assert _get(lab, path)[0] == 400, path
+        finally:
+            lab.stop()
+
+
+def test_the_receipts_are_passed_through_as_declared_synthetic():
+    """Task 025. The query ids, the base rows' ids and the ambiguity ratio are
+    what characterize declared, handed on unchanged; where a run lacks them the
+    interface is told so rather than given a guess."""
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _lab(_workdir(tmp, "with", receipts=True))
+        try:
+            run = json.loads(_get(lab, "/api/run")[2])
+            assert run["query_ids"] == ["q-alpha", "q-beta", "q-gamma"]
+            assert run["ambiguity"] == 1.17
+            ids = json.loads(_get(lab, "/api/ids?rows=11,0,5")[2])
+            assert ids == {"ids": ["doc-11", "doc-0", "doc-5"]}
+            trace = json.loads(_get(lab, "/api/trace?query=2")[2])
+            assert trace["figures"]["ambiguous"] is True
+        finally:
+            lab.stop()
+
+        lab = _lab(_workdir(tmp, "without"))
+        try:
+            run = json.loads(_get(lab, "/api/run")[2])
+            assert run["query_ids"] is None
+            assert run["ambiguity"].startswith(contract.COULDNT_CHECK)
+            ids = json.loads(_get(lab, "/api/ids?rows=0")[2])
+            assert ids["ids"] is None
+            assert ids["why"].startswith(contract.COULDNT_CHECK)
+            trace = json.loads(_get(lab, "/api/trace?query=2")[2])
+            assert "ambiguous" not in trace["figures"]
+            assert trace["gaps"]["ambiguous"] == run["ambiguity"]
         finally:
             lab.stop()
 

@@ -38,7 +38,7 @@ sys.path.insert(0, REPO)
 
 from oneground.lab import contract, guard               # noqa: E402
 from oneground.lab.views import (VIEWS, GroundView,      # noqa: E402
-                                 QueryTraceView)
+                                 QueryIndexView, QueryTraceView)
 
 S = contract.state_format()
 SIMULATED, NOT_SIMULATED = contract.SIMULATED, contract.NOT_SIMULATED
@@ -121,7 +121,8 @@ def test_every_view_module_passes_the_guard():
         "\n".join(f"  {m}:{line}  {rule}  {detail}"
                   for m, v in sorted(found.items())
                   for line, rule, detail in v)
-    assert len(guard.view_modules()) >= 3      # __init__, ground, query_trace
+    # __init__, ground, query_index, query_trace
+    assert len(guard.view_modules()) >= 4
 
 
 def test_the_guard_catches_each_kind_of_measuring_synthetic():
@@ -785,6 +786,73 @@ def test_tied_scores_merge_one_way_in_simulate_and_in_the_view_synthetic():
                                "scores; the test would prove nothing")
 
 
+# ------------------------------------------------------------ query index
+def test_the_query_index_states_what_the_trace_states_for_every_query_synthetic():
+    """Task 025. The picker lists every query by the query index's rows; the
+    trace draws one. Drawn at a simulated and at an unsimulated epsilon, each
+    row must equal the trace drawn for that query, figure for figure, or the
+    list would send a person to a query that is not what it said.
+
+    By hand, at ratio 1.17: query 2 scores 0.30 and 0.35 (d2/d1 1.167), so it
+    alone is ambiguous; queries 0 (1.2) and 1 (2.25) are not. Query 0's true
+    neighbours 0, 1, 4 against its merged top three 0, 4, 8: found, not
+    found, found.
+    """
+    head, cols = _state(0.2)
+    for eps in (EpsilonSet.make(epsilon=0.2, simulated=[0.1, 0.2]),
+                EpsilonSet.make(epsilon=0.15, simulated=[0.1, 0.2],
+                                cost={"low": 1.0, "high": 2.0, "basis": "b"},
+                                action={"command": "oneground simulate x"})):
+        index = contract.draw(QueryIndexView(k=3, eps=eps, ambiguity=1.17),
+                              head, cols)
+        row = index.marks[0].data
+        panel = index.panels["recall"]
+        simulated = panel["status"] == SIMULATED
+        assert simulated == (eps.epsilon == 0.2)
+        for q in range(3):
+            t = contract.draw(QueryTraceView(q, k=3, eps=eps, ambiguity=1.17),
+                              head, cols)
+            f = t.figures
+            assert row["routed_region"][q] == f["routed_region"], q
+            assert row["true_neighbours_located"][q] == \
+                f["true_neighbours_located"], q
+            assert row["outside_routed_region"][q] == \
+                f.get("outside_routed_region"), q
+            assert row["distance_ratio"][q] == f["distance_ratio"], q
+            assert row["ambiguous"][q] == f["ambiguous"], q
+            if simulated:
+                tf = t.panels["recall"]["figures"]
+                assert panel["figures"]["hits"][q] == tf["hits"], q
+                assert panel["figures"]["missed_by_route"][q] == \
+                    tf["missed_by_route"], q
+            else:
+                assert t.panels["recall"]["status"] == NOT_SIMULATED
+                assert "figures" not in panel
+                assert panel["cost_minutes"] == eps.cost
+        assert row["ambiguous"] == [False, False, True]
+        assert index.figures["ambiguous_queries"] == 1
+
+    t0 = contract.draw(QueryTraceView(0, k=3, ambiguity=1.17), head, cols)
+    assert t0.panels["recall"]["figures"]["found_by_rank"] == \
+        [True, False, True]
+    assert t0.figures["second_region"] == 1
+
+
+def test_an_undeclared_ambiguity_is_a_gap_not_a_guess_synthetic():
+    """A run whose characterization declares no ratio: neither the trace nor
+    the index calls a query ambiguous, and both say why."""
+    head, cols = _state(0.2)
+    reason = f"{contract.COULDNT_CHECK}: no ratio declared"
+    t = contract.draw(QueryTraceView(0, k=3, ambiguity=reason), head, cols)
+    i = contract.draw(QueryIndexView(k=3, ambiguity=reason), head, cols)
+    for d in (t, i):
+        assert d.gaps["ambiguous"] == reason
+        assert "ambiguous" not in d.figures
+    assert "ambiguous" not in i.marks[0].data
+    plain = contract.draw(QueryTraceView(0, k=3), head, cols)
+    assert "ambiguous" not in plain.figures and "ambiguous" not in plain.gaps
+
+
 # ---------------------------------------------------------------- hygiene
 def test_drawing_loads_no_model_family_or_measuring_code():
     """Not synthetic: a clean process draws both views and is then asked what
@@ -794,7 +862,8 @@ def test_drawing_loads_no_model_family_or_measuring_code():
         f"sys.path.insert(0, {REPO!r})\n"
         "from oneground.lab import contract\n"
         "from oneground.lab import test_lab as T\n"
-        "from oneground.lab.views import GroundView, QueryTraceView\n"
+        "from oneground.lab.views import (GroundView, QueryIndexView, "
+        "QueryTraceView)\n"
         "with tempfile.TemporaryDirectory() as tmp:\n"
         "    head, cols = T._synthetic(tmp)\n"
         "eps = contract.EpsilonSet.make(epsilon=0.15, simulated=[0.2])\n"
@@ -802,6 +871,9 @@ def test_drawing_loads_no_model_family_or_measuring_code():
         "contract.draw(GroundView(eps), head, cols)\n"
         "contract.draw(QueryTraceView(1, k=3), head, cols)\n"
         "contract.draw(QueryTraceView(1, k=3, eps=eps), head, cols)\n"
+        "contract.draw(QueryIndexView(k=3, ambiguity=1.1), head, cols)\n"
+        "contract.draw(QueryIndexView(k=3, eps=eps, ambiguity=1.1), head, "
+        "cols)\n"
         "bad = ('faiss', 'sklearn', 'scipy', 'torch', 'umap', "
         "'oneground.models', 'oneground.measures', 'oneground.truth', "
         "'oneground.simulate', 'oneground.characterize')\n"

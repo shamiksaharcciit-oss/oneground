@@ -22,6 +22,12 @@ COULDNT_CHECK = contract.COULDNT_CHECK
 # What `oneground lab <workdir>` needs, and what it shows when it is there.
 REQUIRED_FILES = ("simulate.json", "characterization.json")
 OPTIONAL_FILES = ("verify.json", "report.json")
+# Receipts characterize writes beside the characterization (task 025): which
+# queries were used and which input rows were sampled, by the ids the corpus
+# gave them. The interface searches queries and names neighbours by these.
+QUERY_IDS_FILE = "queries_ids.json"
+SAMPLE_IDS_FILE = "sample_ids.json"
+IDS_PER_REQUEST = 100
 
 
 class LabRunError(RuntimeError):
@@ -164,6 +170,22 @@ def plan(base_path, simulated_dirs, family, epsilon=None):
             "cost": cost, "action": action, "eps": eps}
 
 
+def declared_ambiguity(characterization_path):
+    """The ambiguity ratio a run's characterization declared it measured with
+    (`definitions.ambiguity_ratio`), or a couldnt_check reason. Read, never
+    assumed: a view compares by the ratio the run's own figure used."""
+    try:
+        with open(characterization_path, encoding="utf-8") as f:
+            ratio = (json.load(f).get("definitions") or {}).get(
+                "ambiguity_ratio")
+    except (OSError, ValueError) as e:
+        return f"{COULDNT_CHECK}: characterization.json could not be read ({e})"
+    if isinstance(ratio, (int, float)) and not isinstance(ratio, bool)             and ratio > 0:
+        return float(ratio)
+    return (f"{COULDNT_CHECK}: characterization.json declares no "
+            "definitions.ambiguity_ratio, so no query is called ambiguous")
+
+
 class LoadedRun:
     """One run, loaded once, for `oneground lab` to draw from (task 024).
 
@@ -248,7 +270,42 @@ class LoadedRun:
                                 else contract.load_state(path))
         self.state_dirs = [state_dir] + also_state_dirs
         self.present = {f: os.path.isfile(os.path.join(self.workdir, f))
-                        for f in REQUIRED_FILES + OPTIONAL_FILES}
+                        for f in REQUIRED_FILES + OPTIONAL_FILES +
+                        (QUERY_IDS_FILE, SAMPLE_IDS_FILE)}
+        self.ambiguity = declared_ambiguity(
+            os.path.join(self.workdir, "characterization.json"))
+        self.query_ids = self._receipt(QUERY_IDS_FILE,
+                                       int(self.head["n_queries"]))
+        self.sample_ids = self._receipt(SAMPLE_IDS_FILE,
+                                        int(self.head["n_base"]))
+
+    def _receipt(self, name, length):
+        """A list of ids characterize wrote, as strings, when it is present
+        and names exactly `length` rows; None otherwise."""
+        path = os.path.join(self.workdir, name)
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as f:
+            ids = json.load(f)
+        if not isinstance(ids, list) or len(ids) != length:
+            return None
+        return [str(i) for i in ids]
+
+    def ids_of(self, rows):
+        """The corpus's own ids for base rows, by index: a lookup in the
+        receipt, at most IDS_PER_REQUEST at a time."""
+        rows = [int(v) for v in rows]
+        if len(rows) > IDS_PER_REQUEST:
+            raise ValueError(f"at most {IDS_PER_REQUEST} ids per request")
+        n = int(self.head["n_base"])
+        for v in rows:
+            if not 0 <= v < n:
+                raise ValueError(f"row {v} is not in [0, {n})")
+        if self.sample_ids is None:
+            return {"ids": None, "why": (
+                f"{COULDNT_CHECK}: {SAMPLE_IDS_FILE} is missing from this run "
+                "or does not name every base row")}
+        return {"ids": [self.sample_ids[v] for v in rows]}
 
     @property
     def has_epsilon(self):
@@ -305,4 +362,8 @@ class LoadedRun:
             "simulated_epsilons": self.simulated,
             "epsilon_max": self.epsilon_max() if self.has_epsilon else None,
             "files": self.present,
+            "ambiguity": self.ambiguity,
+            "query_ids": self.query_ids,
+            "partition_regions": int(self.head["partition"].get(
+                "n_regions") or 0) or None,
         }

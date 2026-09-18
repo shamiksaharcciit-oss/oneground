@@ -47,7 +47,7 @@ import urllib.parse
 
 from . import contract, guard
 from .runs import LabRunError, LoadedRun                      # noqa: F401
-from .views import GroundView, QueryTraceView
+from .views import GroundView, QueryIndexView, QueryTraceView
 
 K_TRUE = 10
 MODE_READINGS = 5
@@ -72,6 +72,8 @@ ENDPOINTS = {
     "/api/run": "describe_run",
     "/api/ground": "ground",
     "/api/trace": "trace",
+    "/api/query-index": "query_index",
+    "/api/ids": "ids",
 }
 SECURITY_HEADERS = (
     ("Content-Security-Policy",
@@ -364,8 +366,23 @@ class LabServer:
         query_index = int((params.get("query") or ["0"])[0])
         epsilon = self._epsilon(params)
         eps = self.run.epsilon_set(epsilon)
-        return contract.draw(QueryTraceView(query_index, K_TRUE, eps=eps),
+        return contract.draw(QueryTraceView(query_index, K_TRUE, eps=eps,
+                                            ambiguity=self.run.ambiguity),
                              *self.run.trace_state(epsilon)).as_dict()
+
+    def query_index(self, params):
+        epsilon = self._epsilon(params)
+        eps = self.run.epsilon_set(epsilon)
+        return contract.draw(QueryIndexView(K_TRUE, eps=eps,
+                                            ambiguity=self.run.ambiguity),
+                             *self.run.trace_state(epsilon)).as_dict()
+
+    def ids(self, params):
+        raw = (params.get("rows") or [""])[0]
+        rows = [v for v in raw.split(",") if v != ""]
+        if not rows:
+            raise ValueError("name base rows as ?rows=1,2,3")
+        return self.run.ids_of(rows)
 
     # ------------------------------------------------------------ responses
     def send(self, req, status, obj, extra=()):
