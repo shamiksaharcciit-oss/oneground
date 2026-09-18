@@ -273,18 +273,33 @@ def _with_shard_depth(config, depth):
                   label=config.label)
 
 
+# What a run that recorded no `shard_depth` measured under: the family's own
+# default, whatever it is. Task 028 -- a proposal measures its changed
+# configuration under the run-level settings the baseline row was measured
+# under, and for a workdir written before this setting was recorded that is
+# the family default, not today's rule.
+FAMILY_DEFAULT = "family default"
+
+
 def measure_config(model, config, base, queries, gt_ids, gt_scores, seed,
                    ks=(1, 10, 100), context=None, log_fn=log,
-                   state_sink=None):
+                   state_sink=None, shard_depth=None):
     """One row of the table. Every number here is measured, none inferred.
 
     `state_sink(model, built, queries, k, config)`, when given, is called once
     the row is complete and before the index is released: the last point at
     which a family can still say what it did. The row is finished first, so
-    nothing the sink does can reach a measured value.
+    nothing the sink does can reach a measured value. (task 020)
+
+    `shard_depth` is the run-level setting: None for this run's own rule,
+    `FAMILY_DEFAULT` to inject nothing and leave the family its default, or an
+    integer to measure under exactly that. (task 026)
     """
     k_max = max(ks)
-    config = _with_shard_depth(config, shard_depth_for(ks))
+    if shard_depth is None:
+        config = _with_shard_depth(config, shard_depth_for(ks))
+    elif shard_depth != FAMILY_DEFAULT:
+        config = _with_shard_depth(config, int(shard_depth))
     built = model.build(base, config, seed, context=context)
 
     t0 = time.time()

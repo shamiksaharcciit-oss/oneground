@@ -38,9 +38,14 @@ MEETS, FAILS, CC = vd.MEETS, vd.FAILS, vd.COULDNT_CHECK
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 
-# The modules that render text about rows. `claims.py` is the renderer and is
-# therefore the one place allowed to interpolate a verdict into a string.
-RENDERING_MODULES = ("__init__.py", "html.py")
+# The modules that render text about rows, relative to this directory.
+# `claims.py` is the renderer and is therefore the one place allowed to
+# interpolate a verdict into a string. Task 028 put the proposal card under
+# the same rule: a card asserts about rows exactly as a report does, and its
+# sentences are rendered in `claims.py` beside the report's.
+RENDERING_MODULES = ("__init__.py", "html.py",
+                     os.path.join("..", "proposals", "card.py"),
+                     os.path.join("..", "proposals", "propose.py"))
 
 # What may never be interpolated outside the renderer: an outcome, a verdict,
 # an engine name, or a measured value.
@@ -97,9 +102,10 @@ def test_no_rendering_module_formats_a_verdict_into_a_string():
     offences = []
     for name in RENDERING_MODULES:
         path = os.path.join(HERE, name)
+        where = os.path.relpath(path, ROOT).replace("\\", "/")
         for lineno, attr, src in _offending_sites(path):
-            offences.append("oneground/report/%s:%d interpolates .%s -- %s"
-                            % (name, lineno, attr, src))
+            offences.append("%s:%d interpolates .%s -- %s"
+                            % (where, lineno, attr, src))
     assert not offences, (
         "a sentence about rows is being formatted outside the Claim "
         "renderer:\n  " + "\n  ".join(offences)

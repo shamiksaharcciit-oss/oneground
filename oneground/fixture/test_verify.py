@@ -1068,6 +1068,60 @@ def test_a_missing_asset_still_checks_the_digests_and_exits_2():
         assert "listed files are present and match the manifest" in flat, out
 
 
+def _summary_digest_counts(out):
+    """(verified, contradicted, couldnt_check, split) from the summary line.
+
+    `split` is the parenthetical's two numbers, or None when it is absent.
+    """
+    import re
+    flat = " ".join(out.split())
+    m = re.search(r"digests (\d+) verified, (\d+) contradicted, "
+                  r"(\d+) couldnt_check(?: \((\d+) receipt, (\d+) declared\))?",
+                  flat)
+    assert m, flat
+    split = (None if m.group(4) is None
+             else (int(m.group(4)), int(m.group(5))))
+    return int(m.group(1)), int(m.group(2)), int(m.group(3)), split
+
+
+def test_the_summary_parenthetical_breaks_down_the_number_it_follows():
+    """It used to break down every listed file by kind, printed straight after
+    the couldn't-check count: `7 couldnt_check (6 receipt, 5 declared)`, which
+    is arithmetic that does not add up, on the one command an outsider is told
+    to run. Task 028e, found in the release rehearsal.
+
+    The fixture below is the view from a fresh clone -- the release-asset
+    files absent, the small ones present -- which is exactly the run that
+    printed the line.
+    """
+    absent = ["sample.jsonl.zst", "vectors.npy", "queries.npy",
+              "projection.npy"]
+    present = ["query_ids.json", "ground_truth.npy", "characterization.json",
+               "build_info.json"]
+    with tempfile.TemporaryDirectory() as tmp:
+        entries = [(n, None, f"{i:02x}" * 32) for i, n in enumerate(absent)]
+        entries += [(n, f"contents of {n}".encode(), None) for n in present]
+        _fixture(tmp, entries)
+        _code, out = _run(id="fx", fixtures_dir=tmp)
+    verified, _c, cc, split = _summary_digest_counts(out)
+    assert cc == len(absent), out       # the case the parenthetical is for
+    assert verified == len(present), out
+    assert split is not None, out
+    assert split[0] + split[1] == cc, (split, cc, out)
+
+
+def test_the_summary_says_nothing_in_brackets_when_nothing_is_unchecked():
+    """Two zeroes in brackets is noise; the line is shorter without them."""
+    with tempfile.TemporaryDirectory() as tmp:
+        entries = [(n, f"contents of {n}".encode(), None)
+                   for n in ("query_ids.json", "ground_truth.npy")]
+        _fixture(tmp, entries)
+        _code, out = _run(id="fx", fixtures_dir=tmp)
+    _v, _c, cc, split = _summary_digest_counts(out)
+    assert cc == 0, out
+    assert split is None, out
+
+
 def test_every_missing_precondition_is_named_in_the_same_run():
     """The environment and the asset, both, from one run -- not the first."""
     with tempfile.TemporaryDirectory() as tmp:

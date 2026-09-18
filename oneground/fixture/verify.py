@@ -1456,11 +1456,21 @@ def cmd_verify(args):
               for o in (VERIFIED, CONTRADICTED, COULDNT_CHECK)}
     vcounts = {o: sum(1 for r in value_rows if r[1] == o)
                for o in (VERIFIED, CONTRADICTED, COULDNT_CHECK)}
-    n_declared = sum(1 for _, k, _, _ in results if k == DECLARED)
+    # The parenthetical breaks down the number it follows.
+    #
+    # It used to break down every listed file by kind, printed straight after
+    # the couldn't-check count, so a reader saw `7 couldnt_check (6 receipt, 5
+    # declared)` -- arithmetic that does not add up, on the one command an
+    # outsider is told to run. It is the couldn't-checks' own split now, and
+    # it is omitted when there are none rather than printed as two zeroes.
+    cc_declared = sum(1 for _, k, o, _ in results
+                      if o == COULDNT_CHECK and k == DECLARED)
+    cc_receipt = counts[COULDNT_CHECK] - cc_declared
+    split = (f" ({cc_receipt} receipt, {cc_declared} declared)"
+             if counts[COULDNT_CHECK] else "")
     print(f"summary: digests {counts[VERIFIED]} verified, "
           f"{counts[CONTRADICTED]} contradicted, {counts[COULDNT_CHECK]} "
-          f"couldnt_check ({len(results) - n_declared} receipt, "
-          f"{n_declared} declared)")
+          f"couldnt_check{split}")
     print(f"         values  {vcounts[VERIFIED]} verified, "
           f"{vcounts[CONTRADICTED]} contradicted, "
           f"{vcounts[COULDNT_CHECK]} couldnt_check")
