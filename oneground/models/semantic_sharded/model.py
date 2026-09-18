@@ -280,7 +280,18 @@ class SemanticSharded:
         eps = float(config.get("epsilon", 0.2))
         probe = int(config.get("probe", 2))
 
-        with single_threaded_faiss(st.get("deterministic", True)):
+        # `deterministic_faiss`, not `single_threaded_faiss`: this recomputes
+        # the closure and asserts it equals what `build` produced, a few lines
+        # below. It therefore has to take the same arithmetic path the build
+        # took. Task 029 moved `build` off the BLAS path; leaving this one on
+        # it would let `centroid_dists` return distances the build never saw
+        # and fire that assertion on a correct state.
+        #
+        # This line and that import were merged from two branches without a
+        # textual conflict -- task 020 added this call site while task 029
+        # renamed the helper -- and the merged tree raised NameError. The same
+        # class of collision as the `measure_config` shape.
+        with deterministic_faiss(st.get("deterministic", True)):
             d, near = centroid_dists(vectors, cents, MAX_ASSIGN)
         within = d <= d[:, [0]] * (1 + eps)
         within[:, 0] = True
