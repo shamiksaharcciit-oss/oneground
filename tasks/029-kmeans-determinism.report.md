@@ -129,21 +129,18 @@ established: *the k-means result depends on the order in which the assignment
 step sums floats, and which implementation performs that step decides the
 order.*
 
-**The leading explanation is now the BLAS the wheel links.** Both environments pin
-the *same versions* — `faiss-cpu 1.15.0` and `numpy 2.5.3`, read from each
-run's own `state_info.json`. What differs is the **wheel** (a Windows build
-against a Linux one) and the **CPU** (this laptop against the pod's host).
-faiss selects kernels at run time by instruction set, so a different kernel
-does the same arithmetic in a different order and lands on different float
-sums. That is deterministic *within* a machine and different *across* — which
-is exactly the shape task 027 measured: four computations falling into two
-camps that agree perfectly inside each, {laptop, `base.bin`} and {pod,
-`ground_view_base.parquet`}.
+**The leading explanation is now the BLAS each wheel links.** Both environments
+pin `faiss-cpu 1.15.0` and `numpy 2.5.3` — read from each run's own
+`state_info.json` — so the *version* is not the variable. A Windows wheel and a
+Linux wheel of the same faiss link different BLAS builds, and a different BLAS
+sums a dot product in a different order. That is deterministic *within* a
+machine and different *across*, which is the shape task 027 measured: four
+computations falling into two camps that agree perfectly inside each, {laptop,
+`base.bin`} and {pod, `ground_view_base.parquet`}.
 
-Both environments pin `faiss-cpu 1.15.0` and `numpy 2.5.3` — read from each
-run's own `state_info.json` — so the *version* is not the variable. A Windows
-wheel and a Linux wheel of the same faiss link different BLAS builds, and a
-different BLAS sums a dot product in a different order.
+The cross-machine shape is the same under either explanation — which is why it
+could not, on its own, tell SIMD dispatch from BLAS. The local test could, and
+did.
 
 **Established:** the assignment step's reduction order changes the centroids,
 by more than the observed cross-machine difference, on one machine.
@@ -240,7 +237,26 @@ To follow — nothing committed at the time this section was first written.
 
 ## Blocked on developer
 
-- **A pod session for step 4**, to separate wheel from CPU. Prepared and
-  priced below; needs a typed `y`.
+- **A pod session for step 4.** Prepared and priced; needs a typed `y`.
+  `sessions/029-kmeans-second-environment.yaml` with
+  `corpora/run_029_kmeans.sh` and `tasks/scratch/029_pod_kmeans.py`. It runs
+  the same 256-centroid k-means on the pod under all four `FAISS_OPT_LEVEL`
+  settings and all three BLAS-threshold settings — twelve runs — and brings
+  the raw centroid arrays back with the host's CPU description, so the two
+  machines can be compared setting by setting. It measures and decides
+  nothing.
+
+  `oneground pod plan` resolves it live: **RTX PRO 4000 (Blackwell), EU-RO-1**
+  (derived from the `vecbench` volume), **$0.50–$0.57/hr**, confirmed at the
+  top of the range — **up to $0.57** for the one-hour cap, inside
+  `max_usd $2.00`. Uploads 0.004 MB; the corpus is read from the volume.
+  Stock on that card is **Low**, so `up` may not get one first try.
+
+  Three outcomes, all informative: the pod's default reproducing task 027's
+  centroids confirms 027 from a second run; any pod setting reproducing this
+  laptop's makes the difference a knob rather than a platform; none matching
+  means the BLAS implementations differ and the honest answer is to state that
+  centroid assignment is per-platform and bound the effect — **a finding, not
+  a failure, and yours to rule on.**
 - **Task 029b**, the state-column half of step 4, after task-020 merges on the
   23rd.
