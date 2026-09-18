@@ -658,6 +658,25 @@
       + (total > cap ? `, showing the first ${fmtInt(cap)}` : ''));
 
     list.replaceChildren();
+    if (!total) {
+      // An empty list with only a count is a state that renders blank. Say
+      // what emptied it and how to get back.
+      const why = make('li', 'more');
+      why.append(make('span', null, term
+        ? `No query matches “${term}”`
+        : 'No query matches this filter'));
+      const clear = make('button', null, 'show all queries');
+      clear.type = 'button';
+      clear.addEventListener('click', () => {
+        need('q-search').value = '';
+        need('q-filter').querySelectorAll('button').forEach(
+          (o) => o.setAttribute('aria-pressed', String(o.dataset.filter === 'all')));
+        buildQueryList();
+      });
+      why.append(clear);
+      list.append(why);
+      return;
+    }
     rows.slice(0, cap).forEach((r) => {
       const li = make('li');
       const b = make('button');

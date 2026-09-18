@@ -39,6 +39,104 @@ than ε, `--config <label>` picks one; `--family` picks the family (default
 configuration at other ε values, so its recall can be shown there too. Every
 directory is read once, at startup, and never written.
 
+## Using it
+
+The page opens on **Overview**, which says what is loaded and offers the other
+two views. Nothing here needs this document read first.
+
+**Overview** names the run: the workdir it came from, the configuration, how
+many vectors, queries and regions, the ε the run itself used and the ε values
+that were simulated, which files the run does and does not hold, and one line
+per `MANIFEST.sha256` saying how many files still match the digests recorded
+when they were written. If a manifest does not verify, it says so there, in
+red, before you have looked at any drawing.
+
+**The tabs** — Overview, The ground, Query trace — keep the ε control between
+them. Moving from the ground to a trace does not move ε, so a value you chose
+on one view is the value the other answers at.
+
+**The ε control** sits under the header on both drawing views:
+
+- The number beside it is where the control stands. The pill next to it reads
+  **simulated** or **not simulated at this epsilon**, which is the difference
+  that decides what the page can show you.
+- The marked values on the track are the ε values that were simulated. Select
+  one to jump to it.
+- Keyboard: focus the slider, then `←` `→` move by 0.005, `Page Up` and
+  `Page Down` by 0.05, and `Home` and `End` go to the ends of the range.
+- In **render on release** the ground stays where it was while you drag, and a
+  line reads *showing ε 0.20; release to redraw at 0.35*. Let go and it
+  redraws. In **redraw on move** it follows the control. Which one you get is
+  measured on your machine at startup: see the mode caption below.
+
+**The ground** draws one cell per region, and inside it the vectors whose home
+is that region, in id order, coloured by how many regions hold a copy of each.
+It is a layout, not a map — the state holds no positions, and the page says so
+under the drawing. Beside it:
+
+- four readouts — vectors copied, storage, p99 copies, routing ceiling@10 —
+  each with a line saying what it means. They recount as ε moves.
+- **Copies per vector**, a row per copy count with its swatch, its share and
+  its count. Copies 3 and 4 are close in colour at one pixel per vector, so
+  the counts are written out, and selecting a row shows only those vectors on
+  the ground and dims the rest. Select it again to show all. That is how you
+  tell 3 from 4; the palette is the teaser's own and is not forked.
+- **What this drawing says about itself**: the view's own caption, and any gap
+  it reported, in amber. A gap is a thing the state could not answer — it is
+  never filled in with a guess.
+
+**Query trace** has a picker on the left. It searches by the corpus's own query
+id, filters to ambiguous or unambiguous queries, and orders by the ones worth
+looking at: most or fewest true neighbours missed by the route, or most or
+fewest living outside the region the query was routed to. Each row carries the
+region it routed to, how many neighbours lie outside it, and — at a simulated ε
+— how many of the ten the route actually found.
+
+The trace itself is four hops: scored against the centroids, routed and probed
+with the reason for each probe, its ten true neighbours and where they live,
+and what the probed regions returned. Under it the ground is drawn again with
+the routed region, the other probed regions and the neighbours' regions
+outlined, and a key saying which outline is which. Outlines are drawn in a
+gutter around each cell, so no outline ever covers a vector.
+
+**The ε rule, as you meet it.** Move ε and the geometry follows immediately:
+copies, the histogram, storage, p99, shard sizes and the routing ceiling are
+all recounted from the distances stored in the state. Recall is not. Recall,
+the candidates the shards returned, and the neighbours the route missed all
+depend on indexes that ε rebuilds, so they exist only at the ε values that were
+actually simulated.
+
+At a simulated ε, hop 4 gives recall@10, the candidates returned and how many
+neighbours the route never reached. At any other ε it turns amber and reads
+**not simulated at this epsilon**, lists the ε values that were, says what
+simulating this one would cost in minutes from those runs' own recorded
+timings, and shows the exact `oneground simulate … --emit-state` command with
+the grid to put in your requirements file. It never interpolates and never goes
+blank, and the lab never runs the command for you. The ground carries the same
+statement in its own notice, so a screenshot of either cannot be mistaken for a
+measured configuration.
+
+**The mode caption.** Under the ε control is a line like
+
+```
+rendering: render on release — above the threshold: ground draw p95 21 ms over
+1 reading of 20 draws on this host against 12.5 ms (25% inside the 16.7 ms frame)
+```
+
+It says which of the two behaviours the control has, and why. At startup the
+lab timed whole ground draws of *your* corpus on *your* machine — up to five
+readings, each a p95 of 20 draws — and compared every reading with 12.5 ms,
+which is 25% inside a 60 Hz frame. Every reading inside it gives *redraw on
+move*; any reading above it gives *render on release*. Expand the line for the
+reason in full. The same sentence ends the ground's own caption, so a
+screenshot carries the mode it was taken under. `--mode move` or
+`--mode release` overrides the measurement, and the caption then says it was
+overridden and what the measurement alone chose.
+
+**If something is wrong**, the page says so rather than waiting. A red banner
+at the top names what failed; while it is still loading, the title says which
+step it is on — reading the run, checking the receipts, drawing the ground.
+
 ## The two views
 
 - **The ground.** Every base vector, coloured by how many regions it is copied
