@@ -162,7 +162,8 @@ baseline with its reason.
 Both changed configurations happen to be rows the 2026-09-09 sweep also
 measured, so the re-measurement can be compared against the sweep's own row
 for the same configuration — a like-for-like check of whether a row measured
-today can be subtracted from a row measured nine days ago:
+today can be subtracted from a row measured nine days ago. The two fields I
+looked at first, `recall_at_10` and `storage_amplification`:
 
 | configuration | sweep, 2026-09-09 | this run | difference |
 |---|---|---|---|
@@ -171,20 +172,112 @@ today can be subtracted from a row measured nine days ago:
 | `storage_amplification`, both | 3.71516 | 3.71516 | 0 |
 
 0.00005 of recall@10 over 2,000 queries is **one returned neighbour in
-20,000**. I did not expect a difference at all, and say so rather than
-explain it away: the k-means is seeded and shared, the family is built with
-`deterministic=True`, and one configuration reproduced exactly while the
-other did not. The one that moved is the one that probes two shards and
-merges their candidates, which is where an ordering difference would show;
-that is a hypothesis, not a measurement, and diagnosing it is not this task.
+20,000**. I did not expect a difference at all and said so; on the developer
+asking for it to be written up beside a finding from a pod the day before, I
+compared every field of both rows rather than the two I had looked at, and
+the decomposition is below. It changes what this sighting is.
 
-It does not touch either verdict: A's margin over its threshold is 0.0440 and
-B's is 0.0424, both more than 800 times the difference, and both cards are
-decided at a calibration tolerance of 0.01 which is 200 times larger.
+It touches neither verdict: A's margin over its threshold is 0.0440 and B's
+is 0.0424, both more than 800 times the difference, and both cards are
+decided at a calibration tolerance of 0.01, which is 200 times larger.
 
 **This check is available only because the sweep had measured both
 configurations already.** A proposal whose changed configuration has never
 been measured has no such comparison, and the card does not claim one.
+
+### The decomposition, and which layer it points at
+
+Every field of both re-measured rows against the sweep's row for the same
+configuration, from `tasks/scratch/028-row-vs-sweep.py`, which reads the two
+artifacts and nothing else. `sweep` is 2026-09-09; `now` is this run, same
+machine, same seed, same pinned libraries (numpy 2.5.3, faiss-cpu 1.15.0), a
+later revision of the code:
+
+| field | `…epsilon=0.2,probe=2]` | `…epsilon=0.2,probe=1]` |
+|---|---|---|
+| `ceiling_at_10` | 0.9323 = 0.9323 | 0.8382 = 0.8382 |
+| `routing_loss` | 0.0677 = 0.0677 | 0.1618 = 0.1618 |
+| `storage_amplification` | 3.71516 = 3.71516 | 3.71516 = 3.71516 |
+| `fanout` | 2.0 = 2.0 | 1.0 = 1.0 |
+| `est_memory_bytes` | 1854607872 = 1854607872 | 1854607872 = 1854607872 |
+| `recall_at_1` | 0.9505 → 0.95, **−0.0005** | 0.875 → 0.874, **−0.001** |
+| `recall_at_10` | 0.93185 → 0.9318, **−0.00005** | 0.83785 = 0.83785 |
+| `recall_at_100` | 0.42098 → 0.42097, **−0.00001** | 0.2978 → 0.297795, **−0.000005** |
+| `index_loss` | 0.00045 → 0.0005, **+0.00005** | 0.00035 = 0.00035 |
+| `inv_ratio_at_10` | 0.997595 → 0.997592, **−0.000003** | 0.993513 → 0.993509, **−0.000004** |
+
+The split is clean and it is the one the simulator was built to make:
+
+* **Everything the routing decides reproduced exactly.** `ceiling_at_10` is
+  exact search over everything the routing can reach; `storage_amplification`
+  is which vectors the ε boundary copies into which shard; `fanout` and
+  `est_memory_bytes` follow the same geometry. All four are identical in both
+  configurations, to every decimal recorded.
+* **Everything the index decides moved**, in *both* configurations.
+  `recall_at_1` moved in both — one query in 2,000 and two in 2,000 — and so
+  did `recall_at_100` and `inv_ratio_at_10`. Where the ceiling is fixed,
+  `index_loss` absorbs the whole of it: +0.00005 against −0.00005 of
+  recall@10.
+
+**Two corrections to what this report said before this comparison**, both
+mine and both from having looked at two fields instead of ten:
+
+1. *"One configuration reproduced exactly and the other did not"* is wrong.
+   Both moved. They differ in which metrics moved, and `recall_at_10` happens
+   to be unmoved in one of them.
+2. *"The one that moved is the one that probes two shards and merges their
+   candidates"* is wrong, and was a hypothesis I should not have offered. The
+   single-shard configuration moved too, on three fields. The merge is not
+   implicated.
+
+### The pod sighting, and how this one relates to it
+
+The developer reports a finding from the lab stream on a pod the day before
+this task: **`semantic_sharded`'s k-means does not reproduce across
+environments** — centroid distances differing by up to 0.0045, 35 home
+regions moving, eight published values shifting in the sixth decimal. I did
+not observe that run and this report does not restate it as measured here;
+what follows is how the two sightings sit together.
+
+They are **not the same defect, on the evidence above**, and saying so is
+more useful than filing this as a second instance of the first:
+
+* The pod's finding is in the **routing** layer: moving a home region changes
+  which shard a vector is copied into, and that is exactly what
+  `storage_amplification`, `ceiling_at_10`, `routing_loss` and `fanout`
+  measure. Those four are the values a k-means difference would move first —
+  and here they are **identical**, in two configurations, across nine days.
+* This sighting is in the **index** layer: with the ceiling fixed to the
+  decimal, the recalls still moved and `index_loss` absorbed it. That is HNSW
+  construction or search, not clustering.
+* The two also differ in what varied. The pod's is **across environments**
+  with the code fixed. This one is **within one environment**, nine days and
+  one code revision apart — and 026 did change `simulate`'s run-level
+  parameter handling in between, so "the code moved" is not excluded as the
+  cause here and is not separated from "the run is not deterministic".
+
+So: two sightings of *`semantic_sharded` not reproducing*, in two different
+layers, under two different things held fixed. Taken together they say the
+determinism task needs to cover both and to keep them apart, because a fix
+for one would not touch the other, and a test written for one would pass
+while the other still moved.
+
+**What would separate them, none of it done here** (see *Observed, not
+done*): recompute the 256 centroids twice in this environment at seed
+20260908 and compare the arrays — if they are identical, this machine's
+k-means is stable and the pod's finding is cross-environment only; build the
+same shard's HNSW twice in one process and search it twice, which separates
+build nondeterminism from search nondeterminism; and re-measure one of these
+configurations at `1fe8e26`, which separates "the code moved" from "the run
+does not reproduce". The first two are minutes of compute on this machine;
+the third is one sweep row.
+
+**A caveat about my own numbers.** The 2026-09-09 rows were measured by code
+at an unknown revision — `simulate_info.json` records library versions and no
+oneground version, which is item 3 of *Observed, not done*. Until a run
+records what built it, every comparison of this kind carries that ambiguity,
+which is a reason for the determinism task to fix the recording as well as
+the behaviour.
 
 ### The run-level setting
 
@@ -440,8 +533,14 @@ test did.
   baseline row was measured.** The run refuses on a pinned-library difference
   and the card states the versions both rows were measured under, but
   `simulate_info.json` records no version of oneground, so "the same code"
-  cannot be shown. The 0.00005 above is the only evidence either way, and it
-  is one neighbour.
+  cannot be shown. The row comparison above is the only evidence either way,
+  and it cannot separate "the code moved" from "the run does not reproduce".
+- Couldn't check: **why the index-layer values moved.** The decomposition
+  says which layer — routing identical, index moved, in both configurations —
+  and nothing here says whether the cause is the build, the search, or the
+  code revision in between. Three measurements that would separate them are
+  named in that section and none was made: this task's brief is the tier-1
+  loop, and the determinism work is its own task.
 - Couldn't check: **anything about a second machine.** Both cards were
   produced here; no run was made on a pod.
 
@@ -468,6 +567,21 @@ test did.
 5. **Cards are written inside the workdir, which is gitignored.** Nothing
    publishes them, and the public library of cards is explicitly unsettled in
    `docs/PROPOSALS.md` §5.
+6. **The three measurements that would separate this sighting's causes**, for
+   the determinism task rather than for this one: the 256 centroids computed
+   twice in this environment at seed 20260908 and compared array to array; one
+   shard's HNSW built twice in one process and searched twice, separating
+   build from search; and one of these configurations re-measured at
+   `1fe8e26`, separating the code revision from the run. The first two are
+   minutes of compute here. I stopped at the decomposition — which layer —
+   because the brief is the tier-1 loop.
+7. **A proposal card would not currently show a reader that the index layer
+   moves.** Its delta is a difference of two `recall_at_10` numbers; the
+   ceiling and the loss split are in `card.json:measured` but no sentence
+   reads them. If the determinism work concludes that index-layer movement is
+   a standing property rather than a defect, a card comparing two rows should
+   probably say what part of the delta the routing accounts for — which is a
+   proposals change, and nobody has asked for it.
 
 ## Repo now contains
 
