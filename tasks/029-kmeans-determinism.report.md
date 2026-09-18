@@ -1,9 +1,9 @@
 # Report: 029-kmeans-determinism
 
-**Status: steps 1, 2, 4 and 5 done. The cause is named and confirmed on a
-second environment: faiss's BLAS path, not SIMD dispatch and not threading.
-Four pod settings reproduce this laptop's centroids bitwise. Steps 3, 6 and 7
-wait on one decision, presented below and not taken.**
+**Status: steps 1, 2, 3, 5, 6 and 7 done; step 4's local half done and its
+cross-environment half prepared and priced, needing a `y`. The cause is faiss's
+BLAS path — not SIMD dispatch, not threading — confirmed on a second
+environment, and fixed by construction on the developer's Option A ruling.**
 
 ## Repo state expected vs found
 
@@ -302,7 +302,150 @@ Beside task 012's HNSW figures (1.8× on 1.18M, faster at 20k), this is the
 same shape of answer: the deterministic path is not uniformly more expensive,
 and on the machine that runs the canonical builds it is cheaper.
 
-## The decision, presented and not taken
+## Step 3 — the fix, by construction
+
+`deterministic=True` now means both halves.
+
+`models/base.py` gains `deterministic_blas(enabled)` beside task 012's
+`single_threaded_faiss`, and `deterministic_faiss(enabled)` entering both. One
+thread fixes the order of work within a process; keeping faiss's distance
+computations off the BLAS path is what crosses machines. Both restore in a
+`finally` — `distance_compute_blas_threshold` is a process-wide faiss global
+exactly as the thread count is — and the restore was checked to hold on an
+exception. The threshold is a C `int`, so `1 << 40` raises `OverflowError`; it
+is `2**30`, about 1.07e9 against a largest batch here of 150,000 × 256 = 3.84e7.
+
+**The call site that mattered was not in a family.** `simulate._centroid_cache`
+computes the k-means that every semantic row in a sweep depends on — the
+family's own call is only the fallback for when no context is given — and until
+now it ran **outside every determinism context**. That is where task 027's
+divergence came from, and the `single_threaded_faiss(det)` inside the family
+never covered it. It now runs under `deterministic_faiss(det)`, and the cache
+is keyed by `(centroids, deterministic)` rather than count alone, so two
+configs that disagree about determinism cannot silently share one clustering
+computed under whichever ran first.
+
+**Verified that the fix engages, not merely that it exists.** The sweep's
+shared cache now produces centroid digest `986c1b6b4772` on the real arXiv
+256/150,000 configuration — the exact set the AMD EPYC pod and this Intel
+AVX512 laptop both produced with BLAS off — against `9ebfeefc68df` (this
+laptop, task 020 emitted) and `6852d7979394` (the pod, task 027 emitted).
+
+**Scope, stated rather than implied.** `semantic_sharded` is the only family
+with a k-means. `hash_sharded` has none, so for it the BLAS half affects its
+index and not a partition; it takes the same context for one contract.
+`single_node_hnsw` keeps the thread half alone — the brief scopes this to the
+sharded families, and changing its arithmetic would move its published values
+for no reason asked for.
+
+**Which path was used is recorded** in `simulate_info.json`, per configuration,
+because the state cannot: `models/state.py` is task-020's and not on this
+branch.
+
+## Step 4, local half — two runs through `simulate`
+
+`simulate.json` byte-identical across two full runs with `build_seconds` and
+`query_seconds` masked (020b moved them out, but that commit is on task-020):
+sha256 `6d836710b455f009` both times.
+
+**The cross-environment half is not proved yet.** It is predicted by
+construction — both machines' BLAS-off centroids are already known to be
+bitwise equal — but predicted is not proved, and the developer's ruling is
+that the claim must be shown through `simulate` rather than a probe. That
+session is prepared and priced below.
+
+## Step 6 — draft fixture wording, for the developer to rule on
+
+**The spec is unchanged.** This is a draft of one finding's `note` in
+`fixtures/arxiv-150k.fixture.yaml`, for `digests_are_environment_specific`.
+Nothing in `fixtures/` was edited.
+
+### What it says now, and why it is now incomplete
+
+> Three builds, three environments … All three produced byte-identical
+> sampling receipts … and three distinct vector digests, and so three distinct
+> ground-truth, characterization and projection digests. … Artifact digests
+> are environment-specific; reproducing the published values within tolerance,
+> not the bytes, is the cross-environment claim this fixture makes.
+
+It is true, and it names one cause: the embedding produces different vectors
+on different hardware, so every digest downstream of `vectors.npy` differs.
+Task 029 found a **second, independent** cause that the passage does not
+mention — one that moves the same digests **even when the vectors are
+byte-identical**. A reader debugging a rebuild would check their vectors,
+find them matching, and have nowhere else to look.
+
+### Draft replacement
+
+> **id: digests_are_environment_specific**
+>
+> Three builds, three environments: build 1 on the pod template's numpy 2.1.2
+> (RTX 4090), build 2 in an isolated venv honouring requirements.txt exactly
+> (RTX 4090), build 3 in that same pinned environment on an RTX PRO 4500
+> Blackwell. All three produced byte-identical sampling receipts —
+> `sample.jsonl.zst 404cb92e…` and `query_ids.json a0f3236c…` in every build —
+> and three distinct vector digests, and so three distinct ground-truth,
+> characterization and projection digests.
+>
+> **Two independent causes produce those differences, and they are separable.**
+>
+> **1. The embedding, across hardware.** The same model on different
+> accelerators returns slightly different vectors, so `vectors.npy` differs and
+> every artifact derived from it differs with it. This is what the three builds
+> above show: different vector digests, different everything downstream.
+>
+> **2. The k-means assignment, across microarchitectures** (task 029). Above
+> faiss's `distance_compute_blas_threshold` the assignment step is a GEMM
+> handed to the bundled BLAS, and OpenBLAS selects its kernel by CPU at run
+> time. The same floats are summed in a different order, so the centroids
+> differ — **even given byte-identical vectors**. Measured on the same
+> 150,000 × 768 at seed 20260908, same `faiss-cpu 1.15.0` and `numpy 2.5.3`,
+> on an Intel AVX512 laptop and an AMD EPYC pod: centroids differ by 0.00104,
+> **35 of 150,000 vectors change home region**, 40 copy counts change, and
+> eight `simulate.json` values move in the sixth decimal —
+> `storage_amplification` 3.715147 against 3.71516, `stored_vectors` 557,272
+> against 557,274, `recall_at_10` 0.9319 against 0.9318, `ceiling_at_10`
+> 0.9324 against 0.9323. Each machine reproduced itself exactly; the two did
+> not agree with each other.
+>
+> **What each cause moves.** Cause 1 moves `vectors.npy` and therefore every
+> digest. Cause 2 moves the characterization, the regions and the
+> `semantic_sharded` rows, while leaving `vectors.npy`, the sampling receipts
+> and the ground truth untouched. A rebuild whose vector digest matches and
+> whose characterization does not has hit cause 2 alone.
+>
+> **What a rebuild should expect from task 029 onward.** Cause 2 is fixed by
+> construction: `deterministic=True` — the default — now keeps the k-means off
+> the BLAS path as well as pinning faiss to one thread, and two machines with
+> different instruction sets produce bitwise identical centroids. A rebuild on
+> the pinned environment should now reproduce the characterization and the
+> `semantic_sharded` rows byte for byte on any CPU, and will still produce a
+> different `vectors.npy` on different accelerator hardware, because cause 1 is
+> not fixed and is not a defect. `simulate_info.json` records which path each
+> configuration used.
+>
+> **The published values on this page were computed before that fix**, on the
+> BLAS path. They are correct within their stated tolerances — the deltas cause
+> 2 introduces are ~1.3e-5 against tolerances of 0.02, three orders of margin,
+> and every rebuild reports `verified` — and they are **not** the bytes a
+> post-029 rebuild will produce for the characterization and the semantic
+> rows. Reproducing the published values within tolerance remains the
+> cross-environment claim this fixture makes. Byte-identity of the derived
+> artifacts is now available for the k-means half and is not claimed here,
+> because these values predate it.
+
+### What I deliberately did not put in the draft
+
+- **Any change to a published value.** They stand; recomputing them would
+  invalidate the three-build receipt that makes the fixture's claim checkable,
+  which is the developer's stated reason for freezing them.
+- **A claim that a post-029 rebuild reproduces *this page's* digests.** It will
+  not, and saying so would be the same error the current wording makes in the
+  other direction.
+- **Any wording about `single_node_hnsw`.** It has no k-means and task 029 did
+  not touch it.
+
+## The decision as it was presented (the developer chose Option A)
 
 Both options are viable on the evidence. **I am not choosing.**
 
@@ -366,7 +509,11 @@ Every figure above carries its script. The two that matter most:
 - Suite, guard and identifier scan: **not yet run for this task** — no project
   code has changed yet beyond the docstring correction below.
 
-**Couldn't check.** Which BLAS the *pod's* wheel links. This laptop's bundles
+**Couldn't check — recorded as a known unmeasured detail, not left implied.**
+Which BLAS the pod's wheel links. The result does **not** rest on it: it rests
+on the twelve runs, which show the BLAS path differing across the two machines
+and faiss's own kernels agreeing, whatever library was underneath. Naming
+OpenBLAS on the pod is inference from packaging, not measurement. This laptop's bundles
 `libopenblas.dll`, read off disk; my session script recorded the host CPU and
 not the linked libraries, so the pod's is inferred from packaging rather than
 measured. `ldd` on the installed `_swigfaiss*.so` would have settled it. A gap
@@ -388,7 +535,25 @@ To follow — nothing committed at the time this section was first written.
 
 ## Blocked on developer
 
-- **A pod session for step 4.** Prepared and priced; needs a typed `y`.
+- **The step 4 cross-environment proof**, through `simulate` rather than a
+  probe. Prepared and priced; needs a typed `y`.
+  `sessions/029-determinism-proof.yaml`, with
+  `requirements.arxiv-150k.determinism.pod.yaml` and
+  `corpora/run_029_proof.sh`. It runs the real command on the pod with
+  `deterministic: true` written out explicitly, and brings back
+  `simulate.json`, `simulate_info.json` and the centroids, so the two machines
+  compare through the product path. It also runs `ldd` on the installed
+  `_swigfaiss*.so` and lists the bundled libs — closing the gap the first
+  session left. **`pod plan`: RTX PRO 4000 (Blackwell), EU-RO-1,
+  $0.50–$0.57/hr confirmed at the top of the range, up to $0.57 against the
+  one-hour cap, inside `max_usd $2.00`; uploads 3.81 MB.** The claim: with the
+  timing fields masked, `simulate.json` byte-identical between the two
+  machines and the centroids bitwise equal. If it does not hold, the residual
+  is the finding and gets reported as one.
+
+- ~~The first pod session~~ **— done.** `20260918-201437`, pod
+  `p30fscsf4at179`, ~$0.07 of a $0.57 cap, terminated, `pod ls` 0 oneground
+  pods.
   `sessions/029-kmeans-second-environment.yaml` with
   `corpora/run_029_kmeans.sh` and `tasks/scratch/029_pod_kmeans.py`. It runs
   the same 256-centroid k-means on the pod under all four `FAISS_OPT_LEVEL`
