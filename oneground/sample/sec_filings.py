@@ -401,3 +401,74 @@ def extract(part):
         return None, "sections_empty"
     return dict(text=text, sections=sections, chars=len(text),
                 prose_sections=prose), None
+
+
+# ------------------------------------------------------- the baseline chunking
+
+CHUNK_TOKENS = 512
+CHUNK_OVERLAP = 64
+CHUNK_STRIDE = CHUNK_TOKENS - CHUNK_OVERLAP
+CHUNK_MIN_TOKENS = 32
+
+BASELINE_CHUNKING_IS_NOT_A_RECOMMENDATION = """\
+Fixed-size, section-blind, 512 tokens with 64 of overlap.
+
+This fixture ships one chunking because the five standard measures need a
+vector set, and shipping one is not endorsing it. It is a **baseline for
+comparison**: the thing a strategy has to beat, chosen to be the obvious
+naive default rather than a good idea.
+
+Section-blind on purpose. The fixture publishes every document's section
+offsets precisely so a strategy can be scored on whether it cut through one;
+a baseline that respected those boundaries would already be the treatment.
+This one knows nothing about Item headings and will cut through them, and how
+often it does is a number task 031 can report against.
+
+512 tokens because that is `bge-base-en-v1.5`'s `max_seq_length`, so no chunk
+is truncated at embedding time and chunk size is not confounded with
+truncation. 64 tokens of overlap because some overlap is near-universal in
+practice and zero would make the baseline a straw man. Neither number was
+tuned against any measurement, and neither should be read as advice.
+
+The rule is deterministic: the tokenizer is the embedding model's own, the
+stride is fixed, and the cut points are a function of the text alone. No seed
+enters here. The seed in the spec governs which chunks are *sampled* down to
+the fixture's 150,000, which is a separate step.
+"""
+
+
+def chunk_document(text, offsets, n_tokens):
+    """Fixed-size chunks over a tokenised document, as character spans.
+
+    `offsets` is the tokenizer's offset mapping for `text` (fast tokenizers
+    return it); `n_tokens` its length. Returns dicts with the token range and
+    the character range, so a chunk can be tied back to the section offsets
+    the fixture publishes.
+
+    The last chunk is kept only if it carries CHUNK_MIN_TOKENS, so a document
+    whose length lands just past a stride boundary does not contribute a
+    two-token fragment to the corpus.
+    """
+    out = []
+    for lo in range(0, max(n_tokens, 1), CHUNK_STRIDE):
+        hi = min(lo + CHUNK_TOKENS, n_tokens)
+        if hi - lo < CHUNK_MIN_TOKENS and out:
+            break
+        out.append(dict(token_start=lo, token_end=hi,
+                        char_start=int(offsets[lo][0]),
+                        char_end=int(offsets[hi - 1][1])))
+        if hi >= n_tokens:
+            break
+    return out
+
+
+def sections_spanned(chunk, sections):
+    """Which Items a chunk overlaps, and whether it cuts through a boundary.
+
+    A chunk that overlaps more than one section crossed a heading. This is
+    the per-chunk fact the fixture publishes so that a chunking strategy can
+    be scored on boundary alignment without re-deriving the sections.
+    """
+    hit = [s["item"] for s in sections
+           if s["start"] < chunk["char_end"] and s["end"] > chunk["char_start"]]
+    return dict(items=hit, crosses_boundary=len(hit) > 1)
