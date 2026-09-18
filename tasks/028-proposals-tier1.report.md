@@ -272,6 +272,29 @@ configurations at `1fe8e26`, which separates "the code moved" from "the run
 does not reproduce". The first two are minutes of compute on this machine;
 the third is one sweep row.
 
+**Task 029's brief cites this sighting as the k-means defect, and the
+decomposition says it is not.** `tasks/029-kmeans-determinism.md` (`7c13582`,
+committed onto this branch while 028 was being written) lists under *Why*:
+*"The proposals stream, on one machine: `epsilon=0.2,probe=2` measured twice
+differed by 0.00005 of recall@10 … under a seeded k-means and a deterministic
+build."* That is the sighting, and the attribution is the part the table
+above contradicts — the four routing values a k-means difference moves first
+are identical here, in both configurations. The pod's own numbers separate
+the two the same way: there `ceiling_at_10` moved, 0.9324 against 0.9323,
+which is routing; here it did not move at all.
+
+Read as evidence, this sighting supports the *other* half of that brief's own
+paragraph: task 012 converted `single_node_hnsw` to a deterministic build and
+left `hash_sharded` and `semantic_sharded` unconverted, and an unconverted
+HNSW build is what an index-layer difference under a stable routing looks
+like. Both defects are real on this evidence and they are in different
+layers; 029's step 3 (both sharded families, by construction) and step 4
+(two local runs byte-identical) already cover both, and its step 1 asks to
+reproduce a k-means divergence locally, which this sighting gives no reason
+to expect. None of that is mine to change: the brief is the developer's, and
+this paragraph is here so that whoever runs 029 reads the decomposition
+before spending a day on thread settings.
+
 **A caveat about my own numbers.** The 2026-09-09 rows were measured by code
 at an unknown revision — `simulate_info.json` records library versions and no
 oneground version, which is item 3 of *Observed, not done*. Until a run
