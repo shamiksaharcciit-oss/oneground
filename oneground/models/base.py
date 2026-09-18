@@ -49,8 +49,31 @@ at efSearch=10. `single_node_hnsw` therefore builds single-threaded by
 default (`deterministic=True`, via `single_threaded_faiss`), and pays a
 measured build-time penalty for it -- see `docs/MODELS.md`.
 
-`hash_sharded` and `semantic_sharded` build `IndexHNSWFlat` per shard and have
-not been converted; they take the same helper when someone does.
+`hash_sharded` and `semantic_sharded` build `IndexHNSWFlat` per shard and were
+converted the same way by task 015 (`dc85609`): both wrap their build in
+`single_threaded_faiss(det)`. All three families are deterministic by default.
+Task 029 measured what that is worth on one shard: two builds of 20,000
+vectors differ in 691 of 20,000 returned ids at four threads and in none at
+one, at 2.6x the build time.
+
+This paragraph said "have not been converted" until task 029, which was true
+at task 012b and stopped being true when 015 landed and did not update it.
+Two streams read it as current and went looking for an HNSW defect that had
+already been fixed. A stale claim in the place people check claims costs more
+than it looks.
+
+WHAT DETERMINISM DOES NOT COVER
+-------------------------------
+Single threading fixes the order of work *within* a machine. It does not make
+a build reproduce *across* machines. faiss selects kernels at run time by
+instruction set, so the same wheel on a different CPU can sum the same floats
+in a different order. Task 027 measured the consequence for the k-means that
+decides `semantic_sharded`'s regions: between this laptop and a pod, centroid
+distances differed by up to 0.004463, 35 of 150,000 vectors changed home
+region, and eight published values moved in the sixth decimal -- while every
+run on each machine reproduced bitwise. Task 029 is establishing the cause;
+until it reports, treat cross-environment byte-identity as unproven and
+per-machine byte-identity as measured.
 """
 
 import contextlib
