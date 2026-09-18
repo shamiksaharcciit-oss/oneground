@@ -33,6 +33,28 @@ the ones someone chose to show.
 
 ## 2. What a card must carry, and why
 
+### 2.0 A corpus is not a workdir
+
+The definition everything below turns on. **A corpus is identified by its
+vectors' sha256**, which every card already carries, and a workdir is one
+run against one. The two are not the same thing and the library must never
+treat them as one: on the machine that produced the first cards, a single
+vectors digest is the sample of two different workdirs, and a second corpus's
+digest is the sample of two more.
+
+It matters wherever the library says "this corpus" — most sharply in §2.4,
+where a denominator counted per workdir is right about the workdir and wrong
+about the corpus, and where two implementers reading "proposals run on this
+corpus" without this definition would publish different numbers from the same
+disk.
+
+It is a weaker identity than it looks, and the paper would rather say so: two
+corpora embedded from the same documents by different models have different
+digests and are correctly different corpora; the same vectors re-saved by a
+tool that rewrites the file are one corpus with two digests, and the library
+will read them as two. Nothing here resolves that, and a card carries the
+digest rather than a claim about what it means.
+
 The first cards carry citations that prove internal consistency and
 almost nothing a stranger can check: digests of files they cannot obtain,
 a workdir name in place of a corpus description, a local Windows path.
@@ -48,9 +70,45 @@ absent from the card. Without them a reader cannot tell whether a result
 from a corpus at crispness 0.011 says anything about theirs at 0.036 —
 which is the whole question.
 
-Also required: the embedding model and dimensionality; what the documents
-are (domain, language, typical length); the full corpus size against the
-sample size; and the sampling rule with its seed.
+**The minimum honest subset**, because a partial characterization is worse
+than none:
+
+| field | why it is in the minimum |
+|---|---|
+| `intrinsic_dimensionality` | one of the five |
+| `boundary_crispness` | one of the five |
+| `skew_top10_share` | one of the five |
+| `ambiguous_query_rate` | one of the five |
+| `drift_before` / `drift_after` / `cutoff` | the fifth; it is a pair, and the cutoff is what splits it |
+| `definitions.crispness_ratio` | crispness means nothing without it |
+| `definitions.ambiguity_ratio` | the same, for the ambiguity rate |
+| `definitions.centroids` | both are computed over these regions |
+| `definitions.seed` | the regions are seeded |
+| `dimension` | the vectors' width |
+| `n_base` / `n_queries` | what the measures were measured over |
+
+The `definitions` block is not decoration. The measures are parameterised —
+crispness at ratio 1.2 is not the same quantity as crispness at another
+ratio — and the five numbers published without it **look comparable and are
+not**, which is worse than omitting them. A card carrying the numbers alone
+invites exactly the false comparison this section exists to make honest.
+
+Carrying it costs a read: `propose` already refuses a workdir without a
+`characterization.json`, so the file is there when the card is built.
+
+Also required: dimensionality, above; what the documents are (domain,
+language, typical length); the full corpus size against the sample size; and
+the sampling rule with its seed.
+
+**The embedding model is a publisher assertion, marked declared.** oneground
+knows it only when oneground did the embedding. For a corpus supplied as
+vectors — `source_kind: vectors`, which is what a user with their own
+embeddings produces — `build_info.embedding_model` is `null`, and it is null
+for every such run this project has made, including both public fixtures'
+runs through the product path. The model is recoverable from a fixture's
+spec and not from a run. A requirement that refuses most cards is a defect in
+the requirement, so the field is the publisher's statement, carried as
+**declared** rather than measured, and a reader can see which it is.
 
 **Resolvability, stated either way.** A public fixture gives its id and
 URL. A private corpus says *private corpus, digests only* — which is
@@ -71,12 +129,51 @@ or an explicit statement that this installation never measured its own
 error, which the first cards do carry and do well.
 
 **Required:** an explicit **comparability verdict** for the two
-configurations — same code, same run-level settings, same environment —
-rather than the ingredients for one. The first cards carry a nine-day gap
-between baseline and change, two different library-version blocks, and a
-run-level setting given as the phrase "family default", and leave the
-reader to work out whether the subtraction is valid. That is a claim the
-card must make or refuse, not delegate.
+configurations, rather than the ingredients for one. The first cards carry a
+nine-day gap between baseline and change, two different library-version
+blocks, and a run-level setting given as the phrase "family default", and
+leave the reader to work out whether the subtraction is valid. That is a
+claim the card must make or refuse, not delegate.
+
+**It has three values, not two: `comparable`, `not_comparable`,
+`couldnt_check`** — the same three outcomes this project keeps apart
+everywhere else, and for the same reason. A verdict with only two values
+forces an unknown into one of them, and an unknown rounded up is the failure
+the whole product exists to refuse. **Today the honest value is
+`couldnt_check`, on the code**, because no artifact records the oneground
+version that measured a row.
+
+What a card **may assert**, from what a run already records:
+
+- the two rows were measured under the **same pinned libraries** — the run
+  refuses otherwise, naming both versions, so a card that exists has passed
+  this;
+- on the **same sample** — the corpus files' digests are checked against what
+  `characterize` recorded;
+- at the **same seed**;
+- under the **same run-level settings**, naming them and where they came
+  from;
+- in the **same OS and architecture**, or on the same pod where a pod id was
+  recorded.
+
+What a card **must refuse to assert**:
+
+- **the same code.** Nothing records the version. Task 028c settled one such
+  case only by re-measuring a configuration at three revisions: today's build
+  answers `recall_at_1` 0.874 deterministically where the recorded row says
+  0.875, and a process that always answers 0.874 did not produce 0.875. **No
+  ingredient on the card could have said that** — a card inferring
+  `comparable` from matching library versions would have asserted something
+  false about exactly those two rows.
+- **the same machine.** The environment id is `local:<os>-<arch>` by
+  construction, a class rather than an identity, so two different laptops
+  share one.
+- **`comparable` unqualified**, which is the conjunction of both.
+
+So a card published today carries `couldnt_check` with the reason, and it
+carries it on its face rather than in a footnote. The way to earn
+`comparable` is to record the version that measured each row — a change to
+`simulate`, not to this document.
 
 ### 2.3 The finding, so it can be read rather than decoded
 
@@ -100,8 +197,36 @@ of anything.
 **Required, and new:** `proposals_run_on_this_corpus` and
 `proposals_published`. A card that is one of three published from
 seventeen run says so on its face. A library that cannot show its
-denominator cannot be read as evidence, only as advertising — and the
-number is trivially available to the tool that ran them.
+denominator cannot be read as evidence, only as advertising.
+
+**It is not trivially available, and pretending otherwise would put a soft
+number beside hard ones.** Nothing counts proposals today: a proposal writes
+into a directory under one workdir, nothing enumerates them, and publication
+happens outside the tool entirely, so no artifact records that a card was
+ever published.
+
+**Where the numbers have to come from.** A **ledger**: append-only, keyed by
+the corpus's vectors digest, written by `propose` on every run that produces
+a card, and living **beside the corpus rather than inside a workdir**, since
+it has to outlive any one of them. Publication needs a second record, written
+by whatever submits a card, because only that step knows a card was
+published; the natural shape is that submission returns a receipt the
+publisher keeps. The card then cites the ledger rather than restating a
+number out of the air.
+
+**And the caveat, stated here rather than discovered later.** A denominator
+counted from directories can be lowered by deleting one, which makes it
+exactly as trustworthy as the good faith it exists to stop needing.
+Append-only, digested, and cited is the difference between a denominator and
+a claim about one.
+
+**This number is weaker evidence than the rest of the card, and the library
+says so where it is shown.** Every other field on a card is the presence of a
+record — a measurement, a digest, a verdict computed from rows. The
+denominator is an *absence* of records: it asserts that nothing else was run
+and not shown. Absence is not provable from the artifact, only from the
+discipline of whoever kept the ledger, and a reader is entitled to weigh it
+that way.
 
 A publisher who will not disclose the denominator may publish, with
 `denominator: withheld` on every card. A reader can then weigh it
@@ -159,10 +284,19 @@ Two refusals worth naming:
 - **A card whose prediction digest is not cited by the run that produced
   it.** The pre-registration is the whole claim; a card that cannot show
   the prediction preceded the measurement is not a card.
-- **A card whose comparability verdict is negative.** If the baseline and
-  the change were not measured by the same code in the same environment,
-  the card says so and is not published as a result. It may be published
-  as an *observation*, in a separate, clearly labelled place.
+- **A card whose comparability verdict is `not_comparable`.** If the
+  baseline and the change are *known* to have been measured by different
+  code or in different environments, the card says so and is not published
+  as a result. It may be published as an *observation*, in a separate,
+  clearly labelled place.
+
+  **`couldnt_check` is not a refusal.** It is today's honest value for every
+  card, since no artifact records the version that measured a row (§2.2), and
+  a rule that refused it would refuse everything — which would not be
+  caution, it would be the unknown rounded down instead of up. A
+  `couldnt_check` card publishes **as a result, with the verdict and its
+  reason on its face**, and stops being couldn't-check on the day a run
+  records what built it.
 
 ---
 
