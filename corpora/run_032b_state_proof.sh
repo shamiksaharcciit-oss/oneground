@@ -29,6 +29,35 @@ echo "  commit      : $(git rev-parse HEAD 2>/dev/null || echo unknown)"
 echo "  started     : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "--------------------------------------------------------------"
 
+# THE PIN. Both halves of this comparison must run the same code, or it
+# measures the revision rather than the environment -- which is exactly what
+# task 028c spent three measurements untangling for the arxiv workdir, where a
+# row from one commit was subtracted from a row from another. The laptop half
+# ran at $ONEGROUND_PINNED_COMMIT; this refuses unless the code here is that
+# code. It compares `oneground/`, not HEAD: a later commit that touches only a
+# report or a session spec is the same simulator, and saying so is the honest
+# check rather than the convenient one.
+PIN="${ONEGROUND_PINNED_COMMIT:-}"
+if [ -z "$PIN" ]; then
+  echo "ERROR: ONEGROUND_PINNED_COMMIT is not set. The session spec pins the" >&2
+  echo "       commit the laptop half ran at; without it this run cannot show" >&2
+  echo "       the two halves measured the same simulator." >&2
+  exit 1
+fi
+if ! git cat-file -e "$PIN^{commit}" 2>/dev/null; then
+  echo "ERROR: pinned commit $PIN is not in this checkout (shallow clone?)." >&2
+  echo "       Fetch it before running: git fetch --unshallow, or clone deep." >&2
+  exit 1
+fi
+if ! git diff --quiet "$PIN" HEAD -- oneground/; then
+  echo "ERROR: oneground/ differs from the pinned commit $PIN:" >&2
+  git diff --stat "$PIN" HEAD -- oneground/ >&2
+  echo "       The laptop half ran the pinned code. Check it out, or re-run" >&2
+  echo "       the laptop half at this commit and re-pin." >&2
+  exit 1
+fi
+echo "  pinned  : $PIN  (oneground/ identical to the laptop half's)"
+
 [ -x .venv/bin/python ] || { echo "ERROR: no venv at $REPO/.venv" >&2; exit 1; }
 PY=.venv/bin/python
 $PY --version

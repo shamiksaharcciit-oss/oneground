@@ -182,22 +182,91 @@ the subprocess and never printed:
     COST CAP   : 1 h x up to $0.57/hr = up to $0.57   within max_usd $2.00
     Nothing was created. This is a dry run.
 
+### The laptop half, run
+
+`requirements.arxiv-150k.determinism.local.yaml` is the pod file's twin,
+differing in exactly two things — where the corpus is and where the run
+writes — so any difference between the two halves' state is a difference
+between the environments rather than between two requirements files. The six
+inputs the session uploads were copied from `runs/020-ref-arxiv` first, so
+both halves simulate the same sample against the same ground truth.
+
+    oneground simulate requirements.arxiv-150k.determinism.local.yaml --emit-state
+    2 configurations measured in 9.7 min
+
+at commit **`b0bfb11`**, which is what the session now pins. What it wrote:
+
+| file | bytes | sha256 |
+|---|---|---|
+| `semantic_sharded__018da1b7.state.npz` | 18,025,619 | `34a15b42456934f2…` |
+| `semantic_sharded__c95327ef.state.npz` | 18,025,573 | `77e369d411c05d8d…` |
+
+Those two digests are the laptop's side of the claim. `corpora/compare_state.py`
+takes the two `state/` directories and reports, per shared file, whether the
+bytes match and — where they do not — which column differs, by how many
+elements, and with what maximum delta. It judges nothing and exits 1 on a
+residual.
+
+### Two findings from the laptop half alone
+
+**1. The two rows are the same build, and the state proves it.** The pod
+file's `simulate` block produces two configurations: its `include` entry
+writes `deterministic: true` explicitly and its grid does not, and a build
+setting is deliberately not canonicalised into one label (§2). Comparing the
+two files column by column: **23 of 24 entries identical, the exception being
+`header.json`**, which records the configuration label. So the duplicate row
+is duplicate work — about five minutes of it on the pod, inside the cap and
+not worth changing the frozen pod file for, but worth knowing it is there.
+
+**2. Today's state does not match the 15 September reference run's, and the
+artifacts say why.** The same configuration's state file, same name, same
+size, different bytes:
+
+    today   (b0bfb11)        18,025,573   77e369d411c05d8d…
+    15 Sept (020-ref-arxiv)  18,025,573   a965dc2987e8b825…
+
+**18 of 24 columns differ**, including `partition.centroids` (126,720 of
+196,608 elements), `assignment.home_region` (982 of 150,000 vectors) and
+`assignment.copy_count` (899 of 150,000). The cause is recorded in the two
+runs' own `simulate_info.json`: the 15 September run has no
+`deterministic_note` at all, and this one says *"faiss pinned to one OpenMP
+thread and its distance computations kept off the BLAS path"* — the rule that
+`4cc4869` (task 029 step 3, 18 September) introduced. The old state is
+therefore **not a valid baseline** for this comparison; only a pod run at the
+pinned commit is.
+
+That is the same lesson task 028c had to establish by measurement, arriving
+unbidden: a state file from one commit subtracted from a state file from
+another measures the commit. It is why the session pins, and why the runner
+refuses to run unpinned.
+
+### The pin
+
+`sessions/032b-state-proof.yaml` sets
+`ONEGROUND_PINNED_COMMIT: b0bfb118322409b1e4ec9cfaa1177ad3f17734bf`, and
+`corpora/run_032b_state_proof.sh` refuses to measure anything unless
+`git diff --quiet $PIN HEAD -- oneground/` is clean, naming the differing
+files if it is not. It compares the package rather than `HEAD` on purpose: a
+later commit that touches only a report or the session file is the same
+simulator, and saying so is the honest check rather than the convenient one.
+A pinned commit missing from a shallow clone is a refusal with what to run.
+
 ## Blocked on developer
 
-1. **`oneground pod up sessions/032b-state-proof.yaml` is yours to start.**
-   Up to $0.57, `max_usd` $2.00, and it needs a typed `y`.
-2. **It must be launched from the worktree that holds `runs/020-ref-arxiv`**
-   — the second one. That reference run is where the session's six uploaded
-   inputs come from, `runs/` is gitignored, and this checkout does not have
-   it. The alternative is copying those six files here first.
-3. **Both halves must be at the same commit**, or the comparison measures the
-   code rather than the environments — which is precisely what task 028c had
-   to untangle for the arxiv workdir. Say which commit and I will match the
-   laptop side to it.
-4. **Shall I run the laptop half now?** It is free, about six minutes, and it
-   is needed whatever the pod does. I have not, because if the spec changes —
-   a different configuration to save money, say — the laptop run would have to
-   be redone to match.
+1. **`oneground pod up sessions/032b-state-proof.yaml` is yours to start**,
+   and I have not launched it. Up to $0.57 against a `max_usd` of $2.00, and
+   it needs a typed `y`.
+2. **Sequence it against the lab stream's task-030 work in that worktree.**
+   The session must be launched from the worktree holding
+   `runs/020-ref-arxiv`, because that is where its six uploaded inputs live
+   and `runs/` is gitignored — and only one session should be in that
+   directory at a time.
+3. **The pod checkout must contain `b0bfb11`.** The runner checks
+   `oneground/` against it and refuses otherwise; a shallow clone needs a
+   deeper fetch first.
+4. When the tarball is back: `python corpora/compare_state.py
+   runs/032b-state-local/state <fetched>/state` is the whole comparison, and
+   I will read the residual if there is one.
 
 ## Observed, not done
 

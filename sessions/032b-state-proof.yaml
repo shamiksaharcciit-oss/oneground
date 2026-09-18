@@ -47,6 +47,14 @@ env:
   ONEGROUND_WORKDIR: runs/032b-state
   ONEGROUND_VECTORS: /workspace/arxiv-150k/vectors.npy
   ONEGROUND_REQUIREMENTS: requirements.arxiv-150k.determinism.pod.yaml
+  # THE PIN. The laptop half ran at this commit, and the runner refuses
+  # unless `oneground/` here is identical to it. Both halves must be the same
+  # simulator or the comparison measures the revision instead of the
+  # environment -- task 028c's finding, which cost three measurements to
+  # untangle after a row from one commit was subtracted from a row from
+  # another. It compares the package rather than HEAD, so a later commit that
+  # touches only a report or this file is still the pinned simulator.
+  ONEGROUND_PINNED_COMMIT: b0bfb118322409b1e4ec9cfaa1177ad3f17734bf
 
 setup: corpora/POD_SETUP.md
 run: bash corpora/run_032b_state_proof.sh
