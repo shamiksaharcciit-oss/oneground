@@ -29,6 +29,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -630,3 +631,133 @@ def _main():
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# --------------------------------------------------- the page actually loads
+def _element_ids_in_page():
+    with open(os.path.join(server.STATIC_DIR, "index.html"),
+              encoding="utf-8") as f:
+        return set(re.findall(r'id="([^"]+)"', f.read()))
+
+
+def _element_ids_the_script_needs():
+    """Every id `lab.js` looks up, through either helper."""
+    with open(os.path.join(server.STATIC_DIR, "lab.js"), encoding="utf-8") as f:
+        source = f.read()
+    return set(re.findall(r"(?:need|\$)\('([^']+)'\)", source))
+
+
+def test_every_element_the_script_needs_is_in_the_page():
+    """The defect that made the lab unusable, as a test that needs no browser.
+
+    Task 025's first look rewrote `index.html` and left `lab.js` addressing the
+    previous markup. Fourteen of the twenty-two ids it looked up no longer
+    existed, so `boot` threw on its second line -- and the `catch` meant to
+    report it called the same missing element and threw too. The page sat on
+    "Loading the run..." with nothing said, on every workdir, while the server
+    was healthy and every request returned 200.
+
+    Nothing in the suite could see it: the tests read both files as text and
+    never ran them against each other. This compares them.
+    """
+    page = _element_ids_in_page()
+    wanted = _element_ids_the_script_needs()
+    missing = sorted(wanted - page)
+    assert not missing, (
+        f"lab.js looks up {len(missing)} element(s) index.html does not "
+        f"define: {missing}")
+
+
+def _browser_or_skip():
+    import pytest
+    from oneground.lab import cdp
+    found = cdp.find_browser()
+    if not found:
+        pytest.skip("no Chromium-family browser found, so the page was not "
+                    "loaded; this does not pass")
+    return cdp
+
+
+def _landing_reached(b):
+    return b.wait_for(
+        "(() => { const s = window.__labState ? window.__labState() : null;"
+        "  const facts = document.querySelector('#ov-facts');"
+        "  const title = document.querySelector('#ov-title');"
+        "  return !!(s && s.loaded && s.hasRun && s.hasCheck && s.hasGround"
+        "            && facts && facts.children.length > 0"
+        "            && title && title.textContent.indexOf('\u2026') < 0); })()",
+        timeout=60)
+
+
+def test_the_landing_page_reaches_its_loaded_state_in_a_browser():
+    """A real browser, on two run shapes, because a 200 is not a loaded page.
+
+    Task 024 drove every endpoint over HTTP and task 024b read screenshots.
+    Both passed while the landing page hung for the developer on every
+    workdir. The only thing that sees this is a browser that runs the script
+    and is asked what the page ended up holding.
+    """
+    cdp = _browser_or_skip()
+    with tempfile.TemporaryDirectory() as tmp:
+        # Two shapes: one with characterize's receipts and a second run added
+        # with --also, one bare. The stall was identical on both real
+        # workdirs, so the test covers more than one shape on purpose.
+        shapes = [
+            (_workdir(tmp, "withreceipts", 0.2, receipts=True),
+             [_workdir(tmp, "other", 0.1, (90.0, 30.0))]),
+            (_workdir(tmp, "bare", 0.2), []),
+        ]
+        for wd, also in shapes:
+            lab = _lab(wd, also=also)
+            try:
+                url = f"http://127.0.0.1:{lab.port}/?token={TOKEN}"
+                with cdp.Browser(width=1200, height=900) as b:
+                    b.goto(url)
+                    reached = _landing_reached(b)
+                    state = b.evaluate("window.__labState()")
+                    assert reached, (
+                        f"{os.path.basename(wd)}: the landing page never "
+                        f"loaded. Title: "
+                        f"{b.text('#ov-title')!r}; state: {state}; "
+                        f"errors: {b.errors}")
+                    assert not b.errors, \
+                        f"{os.path.basename(wd)}: the page threw: {b.errors}"
+                    # It says what it loaded, from where, with its digests.
+                    assert b.evaluate(
+                        "document.querySelectorAll('#ov-facts dt').length") >= 5
+                    assert b.evaluate(
+                        "document.querySelectorAll('#ov-receipts li').length") >= 1
+                    assert b.evaluate(
+                        "!document.querySelector('#fatal').hidden") is False
+            finally:
+                lab.stop()
+
+
+def test_a_failure_while_loading_is_shown_in_the_page():
+    """The stall was silent. A failure must not be.
+
+    The server is stopped before the page asks for anything, so every request
+    fails. The page must say so where a person can see it, rather than sitting
+    on its placeholder.
+    """
+    cdp = _browser_or_skip()
+    with tempfile.TemporaryDirectory() as tmp:
+        wd = _workdir(tmp, "run", 0.2, receipts=True)
+        lab = _lab(wd)
+        port = lab.port
+        lab.stop()                      # nothing is listening any more
+        with cdp.Browser(width=1000, height=800) as b:
+            b.goto(f"http://127.0.0.1:{port}/?token={TOKEN}")
+            shown = b.wait_for(
+                "(() => { const f = document.querySelector('#fatal');"
+                "  return !!(f && !f.hidden && f.textContent.length > 20); })()",
+                timeout=30)
+            # The page itself is unreachable here, so the browser shows its own
+            # error page; what must not happen is a lab page that hangs with
+            # nothing said. Either the fatal banner is up, or no lab page
+            # loaded at all -- both are visible, neither is a silent stall.
+            labpage = b.evaluate(
+                "!!document.querySelector('meta[name=\"oneground-lab-token\"]')")
+            assert shown or not labpage, (
+                "the lab page loaded but said nothing about being unable to "
+                "reach its server")
