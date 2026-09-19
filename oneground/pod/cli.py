@@ -922,53 +922,94 @@ def provenance_warning(tarball, root):
     return lines
 
 
+def _fetch_one(ssh, o, root):
+    """One declared output. Returns the number of failures it represents.
+
+    Raises on anything that goes wrong with the transport; the caller turns
+    that into one failed output rather than the end of the fetch. See
+    `_fetch_outputs`.
+    """
+    remote, local = o["remote"], o["local"]
+    dest_dir = os.path.normpath(os.path.join(root, local))
+    name = os.path.basename(remote)
+    dest = dest_dir if not os.path.splitext(dest_dir)[1] else dest_dir
+    if os.path.isdir(dest) or local.endswith(("/", "\\")) or local in (".", "./"):
+        dest = os.path.join(dest_dir, name)
+    print("fetching %s" % remote)
+
+    # An output that is not there is couldn't-check, not a transport failure,
+    # and the two are kept apart because they mean different things: the first
+    # says the run did not get that far, the second says we could not look.
+    if not ssh.exists(remote):
+        print("  couldn't-check: not present on the pod")
+        return 1
+
+    ssh.get(remote, dest, timeout=3600)
+    print("  -> %s  (%d bytes)" % (dest, os.path.getsize(dest)))
+    if not o.get("extract"):
+        return 0
+
+    for line in provenance_warning(dest, root):
+        print(line)
+    # Into the directory the tarball was fetched into -- which is the
+    # output's own `local`, resolved against the repo root. Extracting
+    # into `root` regardless is how session 20260909-220900's result
+    # ended up in a stray `<repo>/arxiv-smoke/` while `report` went on
+    # reading the stale file in `runs/arxiv-smoke/`. For an output
+    # that says `local: ./` this is still the repo root, so the
+    # arxiv-build session is unaffected.
+    extract_dir = os.path.dirname(os.path.abspath(dest))
+    os.makedirs(extract_dir, exist_ok=True)
+    print("  extracting into %s" % extract_dir)
+    p = subprocess.run(["tar", "-xzf", dest, "-C", extract_dir],
+                       capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    if p.returncode != 0:
+        print("  extract FAILED: %s" % (p.stderr or "")[:300])
+        return 1
+    print("  extracted")
+    return 0
+
+
 def _fetch_outputs(ssh, rec, root):
+    """Every declared output, each one independent of the others.
+
+    **One output's failure must not cost the others** (task 030c). The probe,
+    the transfer, the size read and the extract each used to sit at a
+    different level of protection -- `ssh.exists` outside any try at all, and
+    `ssh.get` inside one that caught only `SshError` -- so a transient ssh
+    failure on the FIRST output raised straight out of the loop and every
+    later output was skipped without being attempted or mentioned.
+
+    That is the same failure task 030b fixed one layer up, and it had been
+    made worse by 030b's own remedy: the run log is deliberately declared
+    first so a run that never reached its MANIFEST still comes home with its
+    phase timings, which means a flaky probe on the log would have cost both
+    tarballs. The fix that protected the evidence had put it in front of the
+    bus.
+
+    So each output is attempted inside its own try, any failure is reported
+    against that output by name, and the loop continues. The exit code still
+    says whether everything arrived.
+    """
     outputs = rec.get("outputs") or []
     if not outputs:
         print("session %s declares no outputs" % rec["id"])
         return 0
     failures = 0
     for o in outputs:
-        remote, local = o["remote"], o["local"]
-        dest_dir = os.path.normpath(os.path.join(root, local))
-        name = os.path.basename(remote)
-        dest = dest_dir if not os.path.splitext(dest_dir)[1] else dest_dir
-        if os.path.isdir(dest) or local.endswith(("/", "\\")) or local in (".", "./"):
-            dest = os.path.join(dest_dir, name)
-        print("fetching %s" % remote)
-        if not ssh.exists(remote):
-            print("  couldn't-check: not present on the pod")
-            failures += 1
-            continue
         try:
-            ssh.get(remote, dest, timeout=3600)
-        except sshx.SshError as e:
+            failures += _fetch_one(ssh, o, root)
+        except Exception as e:
+            # Deliberately broad. Everything in `_fetch_one` is I/O against a
+            # machine that may be half gone, and the whole point of this loop
+            # is that it keeps going.
             print("  FAILED: %s" % api.redact(str(e))[:300])
+            print("  continuing with the remaining outputs")
             failures += 1
-            continue
-        size = os.path.getsize(dest)
-        print("  -> %s  (%d bytes)" % (dest, size))
-        if o.get("extract"):
-            for line in provenance_warning(dest, root):
-                print(line)
-            # Into the directory the tarball was fetched into -- which is the
-            # output's own `local`, resolved against the repo root. Extracting
-            # into `root` regardless is how session 20260909-220900's result
-            # ended up in a stray `<repo>/arxiv-smoke/` while `report` went on
-            # reading the stale file in `runs/arxiv-smoke/`. For an output
-            # that says `local: ./` this is still the repo root, so the
-            # arxiv-build session is unaffected.
-            extract_dir = os.path.dirname(os.path.abspath(dest))
-            os.makedirs(extract_dir, exist_ok=True)
-            print("  extracting into %s" % extract_dir)
-            p = subprocess.run(["tar", "-xzf", dest, "-C", extract_dir],
-                               capture_output=True, text=True,
-                               encoding="utf-8", errors="replace")
-            if p.returncode != 0:
-                print("  extract FAILED: %s" % (p.stderr or "")[:300])
-                failures += 1
-            else:
-                print("  extracted")
+    if failures:
+        print("%d of %d declared output(s) did not arrive."
+              % (failures, len(outputs)))
     return 1 if failures else 0
 
 
@@ -1053,8 +1094,14 @@ def cmd_watch(args):
             # endpoint, and `PodSsh.from_pod` raises when the port mapping is
             # gone. `_finish` catches that, says so, and terminates anyway,
             # which is the same behaviour every other exit path already gets.
-            print("\nPOD STOPPED UNEXPECTEDLY: desiredStatus is %s. Fetching "
-                  "what exists, then terminating." % pod.get("desiredStatus"))
+            # Says what was observed, not what was intended. "UNEXPECTEDLY"
+            # asserted that no deliberate stop exists, which is true only
+            # while `pod down` terminates rather than stops -- a claim about
+            # the rest of the tool that this line is in no position to make,
+            # and one that would quietly become false.
+            print("\nPOD IS NO LONGER RUNNING: desiredStatus is %s, and "
+                  "nothing in this session asked for that. Fetching what "
+                  "exists, then terminating." % pod.get("desiredStatus"))
             _finish(client, rec, root, args, reason="pod_stopped")
             return 0
 

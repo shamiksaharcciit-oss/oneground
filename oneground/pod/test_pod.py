@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import contextlib
 import pathlib
 import tempfile
 import time
@@ -3437,7 +3438,7 @@ def test_watch_fetches_when_the_pod_stops_unexpectedly():
     fetch. Before task 030b this path returned without fetching anything."""
     with tempfile.TemporaryDirectory() as tmp:
         code, out, deleted = _watch_with_status(tmp, "EXITED")
-        assert "POD STOPPED UNEXPECTEDLY" in out, out
+        assert "POD IS NO LONGER RUNNING" in out, out
         assert "fetching" in out.lower(), out
         assert deleted, "an unexpectedly stopped pod was not terminated"
 
@@ -3449,7 +3450,7 @@ def test_watch_still_terminates_when_the_stopped_pod_cannot_be_reached():
     with tempfile.TemporaryDirectory() as tmp:
         code, out, deleted = _watch_with_status(tmp, "EXITED", sid="stopped2",
                                                 ssh_raises=True)
-        assert "POD STOPPED UNEXPECTEDLY" in out, out
+        assert "POD IS NO LONGER RUNNING" in out, out
         assert "fetch failed" in out, out
         assert deleted, "the pod was left alive after a failed fetch"
 
@@ -3478,3 +3479,98 @@ def test_watch_fetch_order_puts_the_log_first():
         i_tgz = out.find("big.tgz")
         assert i_log != -1 and i_tgz != -1, out
         assert i_log < i_tgz, "the log was not fetched first"
+
+
+# -- task 030c: one output's failure must not cost the others ---------------
+
+class _FakeSshFlakyProbe(_FakeSshWithFiles):
+    """Fails the probe on the first output only, the way a transient ssh
+    failure does. Everything after it must still arrive."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.probes = []
+
+    def exists(self, remote):
+        self.probes.append(remote)
+        if len(self.probes) == 1:
+            raise sshx.SshError("ssh -p 22 -> exit 255")
+        return True
+
+
+def _fetch_with(tmp, ssh, outputs, sid="f1"):
+    _seed_session(tmp, pod_id="pod-1", sid=sid, hours_ago=0.01)
+    statemod.mark(sid, "running", tmp, outputs=outputs)
+    rec = statemod.load(sid, tmp)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = cli._fetch_outputs(ssh, rec, tmp)
+    return code, buf.getvalue()
+
+
+THREE_OUTPUTS = [
+    {"remote": "/workspace/oneground-session.log", "local": "logs/",
+     "extract": False},
+    {"remote": "/workspace/small.tgz", "local": "bundle/", "extract": False},
+    {"remote": "/workspace/large.tgz", "local": "asset/", "extract": False},
+]
+
+
+def test_a_failed_probe_on_the_first_output_does_not_skip_the_rest():
+    """The 030c failure, and it is 030b's fix one layer down: the run log is
+    declared FIRST so a capped run still comes home with its timings, so a
+    flaky probe on the log used to cost both tarballs."""
+    with tempfile.TemporaryDirectory() as tmp:
+        ssh = _FakeSshFlakyProbe([10])
+        code, out = _fetch_with(tmp, ssh, THREE_OUTPUTS)
+        assert "FAILED" in out, out
+        assert "continuing with the remaining outputs" in out, out
+        assert ssh.fetched == ["/workspace/small.tgz",
+                               "/workspace/large.tgz"], ssh.fetched
+        assert code == 1, "a failed output must still be reported in the code"
+
+
+def test_every_output_is_probed_even_when_an_earlier_one_fails():
+    with tempfile.TemporaryDirectory() as tmp:
+        ssh = _FakeSshFlakyProbe([10])
+        _fetch_with(tmp, ssh, THREE_OUTPUTS, sid="f2")
+        assert len(ssh.probes) == 3, ssh.probes
+
+
+def test_a_missing_output_is_couldnt_check_not_a_transport_failure():
+    """The two are kept apart: absent says the run did not get that far,
+    failed says we could not look."""
+    class _Absent(_FakeSshWithFiles):
+        def exists(self, remote):
+            return False
+    with tempfile.TemporaryDirectory() as tmp:
+        code, out = _fetch_with(tmp, _Absent([10]), THREE_OUTPUTS, sid="f3")
+        assert "couldn't-check: not present on the pod" in out, out
+        assert "FAILED" not in out, out
+        assert code == 1
+
+
+def test_all_outputs_arriving_is_a_clean_exit():
+    with tempfile.TemporaryDirectory() as tmp:
+        ssh = _FakeSshWithFiles([10])
+        code, out = _fetch_with(tmp, ssh, THREE_OUTPUTS, sid="f4")
+        assert code == 0, out
+        assert "did not arrive" not in out, out
+        assert len(ssh.fetched) == 3, ssh.fetched
+
+
+def test_a_transfer_failure_on_one_output_does_not_cost_the_others():
+    """ssh.get used to be guarded, but only against SshError -- an OSError
+    from the local disk escaped the loop exactly as the probe did."""
+    class _BadGet(_FakeSshWithFiles):
+        def get(self, remote, local, timeout=None):
+            if remote.endswith("small.tgz"):
+                raise OSError(28, "No space left on device")
+            return super().get(remote, local, timeout)
+    with tempfile.TemporaryDirectory() as tmp:
+        ssh = _BadGet([10])
+        code, out = _fetch_with(tmp, ssh, THREE_OUTPUTS, sid="f5")
+        assert "No space left on device" in out, out
+        assert ssh.fetched == ["/workspace/oneground-session.log",
+                               "/workspace/large.tgz"], ssh.fetched
+        assert code == 1
