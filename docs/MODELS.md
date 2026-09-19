@@ -70,6 +70,68 @@ distribution, and — since task 034 — `index_bytes`, `vector_bytes` and
 
 ---
 
+## The rerank stage (task 035)
+
+A production pipeline often retrieves `k x n` approximately, scores those
+candidates exactly, and keeps the best `k`. `rerank: none | exact` is a
+declared parameter of every family; `none` is the default and does not
+re-label, so a configuration written before task 035 is the configuration it
+was. `candidates` is a **multiplier of k**, refused when reranking is off.
+
+The exact pass is task 034's `flat` index applied to a candidate set rather
+than to the corpus: the same inner product over the same float32 vectors,
+restricted to the ids the first retrieval returned.
+
+### Recall splits three ways, and only one of them is recoverable
+
+    routing_loss    1 - ceiling                      never reachable
+    candidate_loss  ceiling - candidate_recall       reachable, not retrieved
+    ordering_loss   candidate_recall - recall        retrieved, ranked out
+
+The three decompose what the **first retrieval** lost and sum to
+`1 - recall_before_rerank`. That is not a detail: after an exact rescore
+ordering loss is zero by construction, so a decomposition of the post-rerank
+recall would print `ordering_loss: 0` on every reranked row and hide the one
+term the stage exists to expose.
+
+**Exact reranking recovers the ordering term and nothing else**, and this is
+mechanical rather than empirical. A true top-k neighbour present in the
+candidate set is scored by its true score, and the only vectors that can
+outrank it have higher true scores — so they are themselves in the true top-k.
+The reranked recall is therefore `1 - routing_loss - candidate_loss`, exactly.
+
+**A corpus whose loss is mostly candidate loss cannot be helped by reranking,
+however it is tuned.** Only a larger `candidates` reaches that term, and that
+is bought with latency.
+
+### Which indexes have any ordering to recover, and why
+
+This follows from what each index returns, not from any corpus:
+
+| index | scores it returns | ordering loss possible |
+|---|---|---|
+| `flat` | exact, over everything | none — it is already the answer |
+| `hnsw` | **true** inner products of the nodes it visited | **none** |
+| `ivf` | **true** inner products of the cells it probed | **none** |
+| `ivf_pq` | **approximate**, computed from quantised codes | **yes** |
+
+An index that returns true scores for what it found cannot have mis-ordered
+what it holds; its loss is entirely in what it did not find, which is
+candidate loss. Only a quantised index scores from codes and can rank a
+neighbour it already retrieved below one it should not have.
+
+So for three of the four declared algorithms, **reranking buys latency and
+nothing else** — and the report prices it in the same row as the recall it
+recovers, precisely so that a zero gain appears beside its cost.
+
+### Do not approximate at all, when that is the answer
+
+`flat` over the whole corpus is one of the four algorithms rather than a
+separate mode, so every sweep reports it. At 150,000 vectors of 768
+dimensions it answers exactly, and a report that treated approximation as the
+premise would never have shown that it is sometimes both faster and better
+than an approximate index with reranking on top. The sweep says which.
+
 ## The index algorithm
 
 Until task 034 every family built HNSW underneath, and `M`, `efConstruction`

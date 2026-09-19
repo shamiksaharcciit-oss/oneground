@@ -178,6 +178,7 @@ is the honest answer to "what do I have to do to get a real answer?"
 | `latency_p95`, `qps` | more than a sample: a real engine in an environment where the round trip is small relative to the query. That is `oneground verify` with `verify.target: runpod`. See [VERIFY.md](VERIFY.md). |
 | `span_survival`, `self_retrieval` | **text and chunk offsets.** The chunker emits them as it cuts; chunks brought from elsewhere have them derived by an ordered search, and a chunk that is not a verbatim substring is couldn't-check on these two with the reason. Vectors alone: couldn't-check. |
 | `length_distribution`, chunk `near_duplicate_rate`, `unresolved_references` | the chunks' text. **No offsets needed** — these three are unaffected by a chunk whose position is unknown. |
+| `rerank` recall recovery | **text or vectors, and a latency budget with room in it.** Reranking is bought with latency, so the constraint set now has a second thing competing for the same budget: a candidate multiplier of 32 multiplied one fixture's query time by 17.8 for no recall at all. The report never shows the gain without the cost. |
 | `monthly_budget` | stays declared either way. The price table is list prices with an error band, and the budget verdict uses the **upper** bound. |
 
 ---

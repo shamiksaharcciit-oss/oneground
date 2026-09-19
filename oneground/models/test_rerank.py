@@ -232,3 +232,65 @@ def test_the_decomposition_describes_the_first_pass_not_the_rescored_result():
 
 def test_the_note_says_which_recall_the_terms_sum_to():
     assert "recall_before_rerank" in R.DECOMPOSITION_NOTE
+
+
+# ------------------------- what the report may not say (task 035 step 7)
+
+def test_no_forbidden_claim_in_the_rerank_module():
+    """Tested as the claim invariant is: the sentence must be impossible to
+    construct, not merely absent today.
+
+    The module may not recommend reranking, may not carry a candidate
+    multiplier from one corpus to another, and may not report a recall gain
+    without its cost.
+    """
+    import ast
+    import pathlib
+    src = pathlib.Path(R.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    strings = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) \
+                and isinstance(node.value.value, str):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    strings.append((t.id, node.value.value))
+    for name, value in strings:
+        low = value.lower()
+        for word in ("we recommend", "you should enable", "recommended",
+                     "always rerank", "best multiplier", "optimal candidates"):
+            assert word not in low, f"{name} contains {word!r}"
+
+
+def test_the_note_never_states_a_gain_without_naming_its_cost():
+    """A gain shown alone is the kind of number this product exists to
+    refuse, so the caption that explains the terms names the latency."""
+    note = R.DECOMPOSITION_NOTE.lower()
+    assert "latency" in note
+    assert "bought with latency" in note
+
+
+def test_the_module_does_not_carry_a_default_multiplier_as_advice():
+    """`candidates` has a declared default so a config is complete, and the
+    note says what the floor value means rather than what to choose."""
+    from oneground.models.base import parameter_table
+    note = parameter_table("single_node_hnsw")["candidates"].note.lower()
+    assert "multiplier of k" in note
+    assert "recommend" not in note and "should" not in note
+
+
+def test_candidates_of_one_rescores_a_set_it_cannot_improve():
+    """Measured, not asserted: rescoring exactly k candidates cannot move a
+    neighbour into the top k that was not already there."""
+    x = corpus(n=400, dim=24, seed=9)
+    q = x[:20].copy()
+    gt = np.argsort(-(x @ q.T).T, axis=1)[:, :10].astype(np.int64)
+    cand = np.empty((20, 10), dtype=np.int64)
+    rng = np.random.default_rng(2)
+    for i in range(20):
+        cand[i] = rng.permutation(np.argsort(-(x @ q[i]))[:10])
+    before = R.present_at(cand, gt, 10)
+    ids, _ = R.rescore(x, cand, q, k=10)
+    after = R.present_at(ids, gt, 10)
+    assert after == pytest.approx(before), (
+        "a rescore of exactly k candidates changed which ids are present")
