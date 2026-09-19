@@ -8,6 +8,7 @@ __pycache__/
 # Small artifacts (MANIFEST.sha256, characterization.json, query_ids.json,
 # ground_truth.npy) ARE committed.
 fixtures/*/vectors.npy
+fixtures/*/queries.npy
 fixtures/*/projection.npy
 fixtures/*/sample.jsonl.zst
 
@@ -67,3 +68,7 @@ tasks/scratch/
 
 # sec-filings-10k ships its corpus as a release asset (692 MB compressed).
 fixtures/*/documents.jsonl.zst
+
+# Session tarballs fetched into the repo root; their contents are extracted
+# beside them and committed, the archive itself is not.
+/*-small.tgz
