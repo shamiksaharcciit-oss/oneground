@@ -951,6 +951,35 @@ def provenance_warning(tarball, root):
     return lines
 
 
+def extract_collisions(tarball, extract_dir):
+    """Files the tarball would write over. Sorted, relative to `extract_dir`.
+
+    `tar -xzf` replaces what it lands on without a word, and a session's
+    output directory is exactly where a previous session's output already is.
+    Task 032b's third session extracted into `runs/032b-state-pod/` and
+    destroyed the second session's state files -- the only copy of the
+    measurement the report was written from. The counts survived because they
+    had been written down; the bytes did not.
+
+    This is the complement of `provenance_warning`, which names files present
+    locally that the tarball does NOT carry. Those are a mixed-provenance
+    warning. These are a deletion, and they refuse.
+    """
+    import tarfile
+
+    try:
+        with tarfile.open(tarball, "r:gz") as tf:
+            members = [m.name for m in tf.getmembers() if m.isfile()]
+    except (tarfile.TarError, OSError):
+        return []
+    hits = []
+    for name in members:
+        target = os.path.normpath(os.path.join(extract_dir, name))
+        if os.path.isfile(target):
+            hits.append(os.path.relpath(target, extract_dir))
+    return sorted(hits)
+
+
 def _fetch_one(ssh, o, root):
     """One declared output. Returns the number of failures it represents.
 
@@ -989,6 +1018,28 @@ def _fetch_one(ssh, o, root):
     # arxiv-build session is unaffected.
     extract_dir = os.path.dirname(os.path.abspath(dest))
     os.makedirs(extract_dir, exist_ok=True)
+
+    # A fetch never extracts over an existing run directory. The tarball is
+    # already on disk, so nothing is lost by stopping here -- and something
+    # is lost by going on.
+    collisions = extract_collisions(dest, extract_dir)
+    if collisions:
+        print("  REFUSED: extracting would overwrite %d existing file(s) in "
+              "%s:" % (len(collisions), extract_dir))
+        for name in collisions[:10]:
+            print("    %s" % name)
+        if len(collisions) > 10:
+            print("    ... and %d more" % (len(collisions) - 10))
+        print("  The tarball is fetched and kept at the path above. Move the "
+              "existing")
+        print("  directory aside and extract it yourself, or delete it if you "
+              "are sure:")
+        print("    tar -xzf %s -C %s" % (os.path.basename(dest), extract_dir))
+        print("  There is no flag for this. A session's output is the only "
+              "copy of a")
+        print("  measurement, and one was destroyed this way (task 032b).")
+        return 1
+
     print("  extracting into %s" % extract_dir)
     p = subprocess.run(["tar", "-xzf", dest, "-C", extract_dir],
                        capture_output=True, text=True,

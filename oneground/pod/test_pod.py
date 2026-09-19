@@ -136,6 +136,96 @@ def _spec_file(tmp, text=SPEC_YAML, name="arxiv-build.yaml", extra=None):
     return p
 
 
+# ------------------- a fetch never extracts over an existing run (035b)
+# Task 032b's third session extracted into `runs/032b-state-pod/` and
+# destroyed the second session's state files -- the only copy of the
+# measurement its report was written from.
+
+def _tarball(tmp, names, body=b"from the pod"):
+    import tarfile
+    src = os.path.join(tmp, "src")
+    os.makedirs(src, exist_ok=True)
+    for n in names:
+        p = os.path.join(src, n)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(body)
+    path = os.path.join(tmp, "out.tgz")
+    with tarfile.open(path, "w:gz") as tf:
+        for n in names:
+            tf.add(os.path.join(src, n), arcname=n)
+    return path
+
+
+def test_an_extract_that_would_overwrite_is_named_before_it_happens():
+    with tempfile.TemporaryDirectory() as tmp:
+        tar = _tarball(tmp, ["runs/x/simulate.json", "runs/x/state/a.npz"])
+        dest = os.path.join(tmp, "dest")
+
+        # nothing there yet: no collision
+        os.makedirs(dest, exist_ok=True)
+        assert cli.extract_collisions(tar, dest) == []
+
+        # one of the two already exists: named, and only that one
+        p = os.path.join(dest, "runs", "x", "simulate.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(b"the previous session's")
+        got = cli.extract_collisions(tar, dest)
+        assert got == [os.path.join("runs", "x", "simulate.json")], got
+
+
+def test_a_refused_extract_leaves_the_existing_file_untouched():
+    """The whole point: the bytes already on disk survive."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tar = _tarball(tmp, ["runs/x/simulate.json"], b"pod bytes")
+        dest = os.path.join(tmp, "dest")
+        p = os.path.join(dest, "runs", "x", "simulate.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(b"laptop bytes")
+
+        class _Ssh:
+            def exists(self, remote):
+                return True
+
+            def get(self, remote, local, timeout=None):
+                import shutil
+                shutil.copyfile(tar, local)
+
+        failures = cli._fetch_one(
+            _Ssh(), {"remote": "/workspace/out.tgz", "local": "dest/",
+                     "extract": True}, tmp)
+        assert failures == 1, "a refused extract is a failed output"
+        with open(p, "rb") as f:
+            assert f.read() == b"laptop bytes", "the existing file was replaced"
+        # and the tarball is still there, so nothing has to be re-run
+        assert os.path.isfile(os.path.join(dest, "out.tgz"))
+
+
+def test_an_extract_with_no_collision_still_extracts():
+    """The negative control: the guard must not block an ordinary fetch."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tar = _tarball(tmp, ["runs/y/simulate.json"], b"pod bytes")
+        dest = os.path.join(tmp, "dest")
+        os.makedirs(dest, exist_ok=True)
+
+        class _Ssh:
+            def exists(self, remote):
+                return True
+
+            def get(self, remote, local, timeout=None):
+                import shutil
+                shutil.copyfile(tar, local)
+
+        failures = cli._fetch_one(
+            _Ssh(), {"remote": "/workspace/out.tgz", "local": "dest/",
+                     "extract": True}, tmp)
+        assert failures == 0
+        with open(os.path.join(dest, "runs", "y", "simulate.json"), "rb") as f:
+            assert f.read() == b"pod bytes"
+
+
 # ------------------------ two places naming the same thing (task 034)
 # Twice a session has failed after the pod existed because a value was
 # written in two places and only one was read: ONEGROUND_ENGINES in 015, and
