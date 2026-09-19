@@ -149,8 +149,10 @@ def test_only_the_ordering_term_is_named_recoverable():
     d = R.decomposition(ceiling=0.9, candidate_recall=0.8,
                         first_pass_recall=0.7)
     assert d["recoverable_by_rerank"] == d["ordering_loss"]
-    assert "ONLY term exact reranking recovers" in d["decomposition_note"]
-    assert "mostly candidate_loss cannot be helped" in d["decomposition_note"]
+    assert "decomposition_note" not in d, (
+        "a row carries measurements; the caption belongs in the report")
+    assert "ONLY term exact reranking recovers" in R.DECOMPOSITION_NOTE
+    assert "mostly candidate_loss cannot be helped" in R.DECOMPOSITION_NOTE
 
 
 def test_exact_reranking_drives_ordering_loss_to_zero_synthetic():
@@ -229,5 +231,4 @@ def test_the_decomposition_describes_the_first_pass_not_the_rescored_result():
 
 
 def test_the_note_says_which_recall_the_terms_sum_to():
-    d = R.decomposition(1.0, 0.65, 0.31)
-    assert "recall_before_rerank" in d["decomposition_note"]
+    assert "recall_before_rerank" in R.DECOMPOSITION_NOTE
