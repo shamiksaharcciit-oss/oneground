@@ -3,6 +3,13 @@
 # Twelve quarters, 2022-01-01 to 2024-12-31, streamed and digested
 # 2026-09-19 without being stored. These twelve files are the declared
 # source: everything the build fetches is named by them.
+#
+# NOT IMMUTABLE. Measured 2026-09-19: EDGAR regenerates its recent quarterly
+# indexes. Between 00:00 and 10:30 UTC the bytes of six of these twelve moved
+# -- 2023/QTR3 through 2024/QTR4 -- while every 10-K row count stayed the same
+# and the accession set was identical: 21,287, none added, none removed. These
+# digests are therefore an observation of one moment, not a contract. The
+# fixture's contract is source.selection_sha256, over the accession list.
 # snapshot_sha256 = oneground.receipts.manifest_digest over these lines
 #   114f40559fb7354ec0eb0d14aa3015dbc796a312cb69ef74aa34c0bb35ada159
 

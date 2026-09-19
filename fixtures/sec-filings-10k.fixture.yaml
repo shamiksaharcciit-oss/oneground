@@ -105,14 +105,32 @@ source:
     differing only in the CIK directory — so the selection dedupes by
     accession. 749 of 22,036 index rows are these.
   filings_by_year: {2022: 7538, 2023: 7118, 2024: 6631}
-  # manifest_digest over the twelve quarterly index files; see
-  # sessions/sec-filings-quarters.sha256. Computed by the project's own
-  # oneground.receipts.manifest_digest so a disk read and a network read
-  # cannot disagree about it.
+  # manifest_digest over the twelve quarterly index files, as
+  # oneground.receipts.manifest_digest computes it, so a disk read and a
+  # network read cannot disagree about it. See
+  # sessions/sec-filings-quarters.sha256 for the per-quarter values.
+  #
+  # RECORDED, NOT A GATE, and the reason is measured rather than assumed.
+  # EDGAR regenerates its recent quarterly indexes: between 00:00 and 10:30
+  # UTC on 2026-09-19 the bytes of six of these twelve moved -- 2023 QTR3
+  # through 2024 QTR4 -- while every 10-K row count stayed the same and the
+  # accession set was identical, 21,287 with none added and none removed. A
+  # form.idx names every filing of every type made that quarter, so its digest
+  # answers to the whole of EDGAR and not to this corpus. Gating on it failed
+  # session 20260919-101123 for a reason that had nothing to do with the
+  # fixture. A build reports a moved snapshot and continues.
   snapshot_sha256: 114f40559fb7354ec0eb0d14aa3015dbc796a312cb69ef74aa34c0bb35ada159
+  snapshot_sha256_volatile: true
+  snapshot_sha256_observed:
+    - {at: '2026-09-19T00:00Z', value: 114f40559fb7354ec0eb0d14aa3015dbc796a312cb69ef74aa34c0bb35ada159}
+    - {at: '2026-09-19T10:30Z', value: 0ba50ce465c4f8e4293e939cac6c1a782f4fadcc36ff715b2e1e3c9a85ef95c1}
   quarter_digests: sessions/sec-filings-quarters.sha256
   # sha256 over the sorted list of the 21,287 selected accession numbers, one
   # per line. Re-derivable from the twelve indexes, so a receipt.
+  #
+  # THIS IS THE GATE. It moves exactly when the set of 10-K filings the
+  # fixture draws from changes, which is the only change that can alter the
+  # corpus. It held across the snapshot move above.
   selection_sha256: 59f847d74d0167950169ffb633ac960b9ec31f391aa04dc1e9a001701fb6ab3f
   resolved_on: '2026-09-19'
   access: streamed

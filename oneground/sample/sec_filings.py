@@ -600,13 +600,27 @@ def resolve_source(spec, log=None):
     """The declared filings, verified against the spec's digests before any
     filing content is read.
 
-    Two digests are checked and they catch different things.
-    `snapshot_sha256` is `manifest_digest` over the twelve index files, so it
-    moves if any index byte changes -- EDGAR restating a quarter, a filing
-    added or withdrawn. `selection_sha256` is over the sorted accession list,
-    so it moves if the set of 10-K filings in the range changes even where the
-    index bytes happen not to. A build against a moved source is refused and
-    reported, never worked around.
+    Two digests, and only one of them is a gate.
+
+    `selection_sha256`, over the sorted accession list, IS the gate. It moves
+    exactly when the set of 10-K filings this fixture draws from changes, and
+    a build against a changed corpus is refused and reported, never worked
+    around.
+
+    `snapshot_sha256`, `manifest_digest` over the twelve index files, is
+    recorded and reported but does not refuse the build. Measured: EDGAR
+    regenerates its recent quarterly indexes. Between 2026-09-19 00:00 and
+    10:30 UTC the bytes of six of the twelve moved -- 2023 QTR3 through 2024
+    QTR4 -- while every 10-K row count stayed the same and the accession set
+    was identical, 21,287 with none added and none removed. A form.idx names
+    every filing of every type made that quarter, so its bytes answer to the
+    whole of EDGAR; this corpus is the 10-K rows in it.
+
+    Gating on the file digest therefore fails a build for a reason that has
+    nothing to do with the corpus, which is what it did to session
+    20260919-101123. The gate is on the selection now, which is what it was
+    always meant to protect. A moved snapshot is a fact about EDGAR and is
+    published as one.
     """
     import hashlib
     src = spec["source"]
@@ -629,16 +643,26 @@ def resolve_source(spec, log=None):
     selection = hashlib.sha256(
         "\n".join(sorted(by_acc)).encode("ascii")).hexdigest()
 
-    for name, got, want in (
-            ("snapshot_sha256", snapshot, src.get("snapshot_sha256")),
-            ("selection_sha256", selection, src.get("selection_sha256"))):
-        if want and want != got:
-            raise SourceError(
-                f"source.{name} does not match the live EDGAR indexes: the "
-                f"spec pins {want} and the source is now {got}. The declared "
-                f"source has moved; that is reported, not worked around.")
+    want_sel = src.get("selection_sha256")
+    if want_sel and want_sel != selection:
+        raise SourceError(
+            f"source.selection_sha256 does not match the live EDGAR indexes: "
+            f"the spec pins {want_sel} and the source is now {selection}. "
+            f"The set of 10-K filings in the declared range has changed; that "
+            f"is reported, not worked around.")
+
+    want_snap = src.get("snapshot_sha256")
+    if want_snap and want_snap != snapshot:
+        _say(log, f"  NOTE: source.snapshot_sha256 has moved. The spec pins "
+                  f"{want_snap[:16]} and the indexes now digest to "
+                  f"{snapshot[:16]}.")
+        _say(log, "  The SELECTION is unchanged, so the corpus is the same "
+                  "one: EDGAR regenerates its recent quarterly indexes, whose "
+                  "bytes answer to every form type filed that quarter, not to "
+                  "this fixture's 10-K rows. Recorded, not fatal.")
+
     _say(log, f"  source verified: {len(by_acc):,} distinct accessions, "
-              f"snapshot {snapshot[:16]}")
+              f"selection {selection[:16]}, snapshot {snapshot[:16]}")
     return by_acc, snapshot, selection
 
 
