@@ -70,7 +70,39 @@ FORBIDDEN = (
     "on the full corpus",
     "will hold at",
     "scales to",
+    # that one index algorithm is better than another (task 034). They trade
+    # differently and the trade is the finding: flat is exact and expensive,
+    # ivf_pq is small and lossy, and which of those is right is a question
+    # about a deployment rather than about an algorithm.
+    "better algorithm",
+    "better index",
+    "the right index",
+    "the right algorithm",
+    "outperforms",
+    "beats hnsw",
+    "beats ivf",
+    "beats flat",
+    # that a memory figure for one corpus transfers to another (task 034).
+    # PQ's error and PQ's size both depend on the distribution it trained on.
+    "same memory on",
+    "memory transfers",
+    "this memory figure applies",
 )
+
+# What a card must say when it reports a quantised index, beside the sample
+# caveat (task 034). The families whose error depends on the distribution the
+# quantiser trained on.
+QUANTISED_FAMILIES = ("ivf_pq",)
+
+
+def quantised_in(*params):
+    """The quantised index families named by any of these params dicts."""
+    out = []
+    for p in params:
+        name = str((p or {}).get("index") or "")
+        if name in QUANTISED_FAMILIES and name not in out:
+            out.append(name)
+    return tuple(out)
 
 # The sentences that report one judged row each.
 ROW_KINDS = ("proposal_metric", "proposal_budget", "proposal_unchecked")
@@ -197,6 +229,18 @@ def build_claims(card, judgement, from_label, to_label):
     out.append(cl.Claim(kind="proposal_limits", predicate="limits",
                         extra=dict(common)))
 
+    # Task 034: beside the sample caveat, not instead of it. A product
+    # quantiser's error depends on the distribution it trained on, so a
+    # quantisation result is bounded twice over -- by this sample, and by
+    # this sample's distribution.
+    quantised = quantised_in(
+        (card.get("configurations") or {}).get("changed", {}).get("params"),
+        (card.get("configurations") or {}).get("baseline", {}).get("params"))
+    if quantised:
+        out.append(cl.Claim(kind="quantisation_limits",
+                            predicate="quantisation",
+                            extra={"families": quantised}))
+
     for c in out:
         cl.render(c)
     return out
@@ -283,14 +327,20 @@ def _predicted(card, metric, where):
 # the forbidden claims
 # --------------------------------------------------------------------------
 
-def scannable_text(card):
-    """Every sentence a card asserts, minus the limits sentence.
+# The caveats, which are exempt from the scan and only they. Each names the
+# boundary it draws, and scanning a caveat for the words it must use is a rule
+# answered by deleting the caveat.
+CAVEAT_KINDS = ("proposal_limits", "quantisation_limits")
 
-    See the module docstring: the caveat names the boundaries it draws, so
+
+def scannable_text(card):
+    """Every sentence a card asserts, minus the caveats.
+
+    See the module docstring: a caveat names the boundaries it draws, so
     scanning it for the words it must use is a rule that deletes caveats.
     """
     return [c["text"] for c in card.get("claims") or ()
-            if c.get("kind") != "proposal_limits"]
+            if c.get("kind") not in CAVEAT_KINDS]
 
 
 def limits_text(card):
@@ -298,6 +348,11 @@ def limits_text(card):
         if c.get("kind") == "proposal_limits":
             return c["text"]
     return ""
+
+
+def caveat_texts(card):
+    return [c["text"] for c in card.get("claims") or ()
+            if c.get("kind") in CAVEAT_KINDS]
 
 
 def forbidden_in(text):
@@ -314,8 +369,7 @@ def card_violations(card, html=""):
             bad.append("card sentence says %r: %s" % (phrase, sentence[:120]))
     if html:
         page = html
-        caveat = limits_text(card)
-        if caveat:
+        for caveat in caveat_texts(card):
             page = page.replace(_html.escape(caveat, quote=True), " ")
             page = page.replace(caveat, " ")
         for phrase in forbidden_in(page):

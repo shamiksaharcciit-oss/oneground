@@ -287,6 +287,90 @@ def test_pgvector_conformance_live():
     run_conformance("pgvector", lambda: get("pgvector")(), url, verbose=False)
 
 
+def test_every_adapter_declares_what_index_families_it_builds():
+    """Task 034. The declaration is a protocol requirement, not a courtesy.
+
+    Four algorithms in `simulate` and two engines that between them build
+    fewer: a user who takes an `ivf_pq` result to `verify` has to learn that
+    before a run, not after. So an adapter answers for every declared family,
+    an approximate mapping says what differs, and an adapter that has never
+    asked a running engine says `not_resolved` rather than shipping a table
+    copied out of a release note.
+    """
+    from oneground.adapters import engines as registered
+    from oneground.adapters import index_families as IF
+
+    for engine_name in registered():
+        adapter = get(engine_name)()
+        assert callable(getattr(adapter, "index_families", None)), (
+            f"{engine_name}: index_families() is a required protocol method. "
+            "An engine that builds one family says so; it does not omit the "
+            "question.")
+        coverage = getattr(adapter, "INDEX_COVERAGE", None)
+        assert isinstance(coverage, IF.IndexCoverage), (
+            f"{engine_name} declares no INDEX_COVERAGE; a declaration that is "
+            "absent is indistinguishable from an engine that builds nothing")
+        assert coverage.engine == engine_name, coverage.engine
+        problems = IF.problems(coverage)
+        assert not problems, f"{engine_name}: " + "; ".join(problems)
+
+
+def test_a_resolution_answers_for_every_family_and_is_checked():
+    """The stub resolves in-process, so this runs on every machine.
+
+    It is also the negative control for the declaration rules: a resolution
+    that named an approximate mapping and said nothing about what differs
+    must be refused rather than recorded.
+    """
+    from oneground.adapters import index_families as IF
+
+    engine = _connect("stub", lambda: get("stub")())
+    coverage = engine.index_families()
+    assert coverage.kind == IF.RESOLVED
+    assert coverage.engine_version, "a resolution names the version that "\
+                                    "answered or it is a guess"
+    assert set(coverage.families) == set(IF.INDEX_ALGORITHMS)
+    assert coverage.buildable() == [IF.FLAT], coverage.buildable()
+    assert not IF.problems(coverage)
+
+    try:
+        IF.resolved("nowhere", "1.0", {IF.IVF: IF.FamilySupport(
+            family=IF.IVF, status=IF.BUILDS, engine_name="ivfflat",
+            approximate=True)}, how="made up")
+    except IF.CoverageError as e:
+        assert "what differs" in str(e), str(e)
+        return
+    raise AssertionError("an approximate mapping with nothing said about it "
+                         "was accepted")
+
+
+def test_a_live_engines_index_families_are_resolved_not_documented():
+    """Runs only where a live engine is reachable. Never faked.
+
+    The declaration shipped in each adapter is `not_resolved` on purpose --
+    nobody has a Qdrant or a Postgres on the machine that wrote it -- and
+    this is the check that turns a reachable engine into an answer.
+    """
+    from oneground.adapters import index_families as IF
+
+    reached = []
+    for engine_name, var in LIVE_ENGINES:
+        url = os.environ.get(var)
+        if not url:
+            continue
+        engine = _connect(engine_name, lambda n=engine_name: get(n)())
+        coverage = engine.index_families()
+        assert coverage.kind == IF.RESOLVED, coverage.kind
+        assert coverage.engine_version not in (None, "", "unknown"), (
+            f"{engine_name}: a resolution that cannot name the engine version "
+            "is not a resolution")
+        assert not IF.problems(coverage)
+        reached.append(engine_name)
+    if not reached and pytest is not None:
+        pytest.skip("no live engine reachable; index coverage stays "
+                    "not_resolved, which is a couldn't-check and not a pass")
+
+
 def test_every_registered_adapter_implements_the_whole_protocol():
     """The protocol is a list of methods, and this is what makes it one.
 
@@ -299,7 +383,7 @@ def test_every_registered_adapter_implements_the_whole_protocol():
 
     required = ("connect", "create_namespace", "upsert", "search", "describe",
                 "scroll", "delete_namespace", "namespace_exists",
-                "wait_for_index")
+                "wait_for_index", "index_families")
     for engine_name in registered():
         adapter = get(engine_name)()
         missing = [m for m in required

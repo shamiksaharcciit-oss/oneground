@@ -47,8 +47,8 @@ from ..calibrate.history import _portable_source
 from ..environment import PINNED
 from ..models import get as get_model
 from ..proposals import card as card_mod
-from ..receipts import (library_versions, round_floats, sha256_file,
-                        write_json_stable, write_manifest)
+from ..receipts import (library_versions, producing_version, round_floats,
+                        sha256_file, write_json_stable, write_manifest)
 from ..report.verdict import CALIBRATION_TOLERANCE
 from .policy import PolicyError, canonical_json, load_policy
 from .prediction import PREDICTION_NAME, PredictionError, write_prediction
@@ -569,6 +569,18 @@ def build_card(plan, prediction, pred_sha, changed_row, judgement,
                 # library differs from this, so a reader can see the two rows
                 # were produced by the same versions rather than take it.
                 library_versions=plan.simulate_info.get("library_versions"),
+                # And which oneground produced it (task 033). A card is the
+                # one receipt that must carry two of these -- the baseline
+                # row's and the changed row's -- because a comparability
+                # verdict is a statement about both, and a card with one of
+                # them cannot support one (docs/LIBRARY.md §2.2). A workdir
+                # written before 033 has none, and says so rather than
+                # reading as a match.
+                oneground=plan.simulate_info.get("oneground") or {
+                    "version": None, "commit": None, "dirty": None,
+                    "source": "unknown",
+                    "note": "the run that measured this row was written "
+                            "before task 033, so it recorded no version"},
                 re_run=False),
             "changed": {
                 "label": to_label,
@@ -576,6 +588,9 @@ def build_card(plan, prediction, pred_sha, changed_row, judgement,
                 "measured_here": failure is None,
                 "shard_depth": plan.shard_depth,
                 "shard_depth_source": plan.shard_depth_source,
+                # This run's, against the baseline's above: the two a
+                # comparability verdict is about (task 033).
+                "oneground": producing_version(),
             },
         },
         "sample": plan.sample,
@@ -671,6 +686,7 @@ def _info(plan, pred_sha, failure, elapsed, timing=None):
         "shard_depth": plan.shard_depth,
         "shard_depth_source": plan.shard_depth_source,
         "library_versions": versions,
+        "oneground": producing_version(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "torch_cuda": torch_info["torch_cuda"],

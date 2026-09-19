@@ -1,0 +1,155 @@
+# oneground requirements — the stackexchange-150k fixture, measured through
+# the product path.
+#
+# Mirrors requirements.arxiv-150k.yaml so the two decisions can be read side
+# by side. Everything that differs, differs because the corpus does:
+#
+#   * the timestamp field is `creation_date`, not `update_date`, and the
+#     cutoff is 2017-01-01 rather than 2019-01-01 -- the year boundary that
+#     splits this corpus closest to 60/40 (see the fixture spec).
+#   * the category field is the post's first tag, not an arXiv category.
+#   * **no latency constraint.** arxiv-150k's p95/qps figures came from a
+#     matched two-engine pod run (task 011/015). Nothing of the kind has been
+#     measured on this corpus, and a latency constraint with no matched run
+#     behind it can only produce couldnt_check -- which is honest but adds a
+#     row of nothing to the decision. It is omitted rather than declared and
+#     left unmeasured. When a matched run exists, it goes back in.
+#
+# It points at the release asset, which is NOT in the repository:
+#
+#     ~/oneground-assets/stackexchange-150k/
+#         vectors.npy         (150000, 768) float32
+#         queries.npy         (2000, 768)   float32
+#         sample.jsonl.zst    the source records
+#
+# base_meta.parquet and queries_meta.parquet are derived from
+# sample.jsonl.zst by tasks/scratch/016-se-metadata.py -- a format conversion
+# of the `creation_date` and `categories` columns, not a recomputed
+# measurement.
+
+oneground: 1
+
+run:
+  name: 034-index-stackexchange-150k
+  mode: measure
+  # The fixture's own sampling seed, as in the arXiv file: `characterize`
+  # uses it for the k-means, the LID subsample and the draw.
+  seed: 20260911
+  workdir: ./runs/034-index-stackexchange-150k
+
+corpus:
+  sample:
+    kind: receipt
+
+    vectors:
+      path: ~/oneground-assets/stackexchange-150k/vectors.npy
+      # Normalized at embed time (normalize_embeddings=True), so a second
+      # pass over 460 MB would change nothing.
+      normalized: true
+
+    metadata:
+      path: ~/oneground-assets/stackexchange-150k/base_meta.parquet
+      timestamp_field: creation_date
+      category_field: category
+      # The fixture's drift definition trains the centroids on posts before
+      # this date. Given explicitly, because the point of this run is to
+      # compare against a published value measured at this cutoff.
+      timestamp_cutoff: "2017-01-01"
+
+    queries:
+      path: ~/oneground-assets/stackexchange-150k/queries.npy
+      count_min: 50
+      source: written
+      metadata:
+        path: ~/oneground-assets/stackexchange-150k/queries_meta.parquet
+        timestamp_field: creation_date
+
+    sampling:
+      method: stratified
+      stratify_by: creation_date
+      # Eligible questions across 2008-2023 after the spec's exclusions, as
+      # counted exactly by the build's own single pass over all 59 shards
+      # (session 20260911-220320): 20,388,803 of 58,329,355 posts, 35.0%.
+      # This is a count the streaming pass produced and the log records; it
+      # survives the fact that that run was killed at its cap before it could
+      # package anything.
+      full_corpus_size: 20388803
+
+    # The product's intended sample size. `oneground characterize` draws a
+    # stratified 20,000 from the 150,000 and everything downstream measures
+    # that draw -- which is what a user with a 20M-row corpus actually does,
+    # and what `simulate` is sized for. arxiv-150k's requirements file asks
+    # for the whole 150,000 because it was written to compare the product path
+    # against the fixture builder's own numbers, before this field meant what
+    # it now means.
+    #
+    # The consequence, stated so nobody reads across the two: the values from
+    # THIS file are measured on 20,000 vectors and are not the fixture's
+    # published values, which are measured on 150,000. The 150k reproduction
+    # was run separately and is reported in tasks/016-...report.md; it agreed.
+    target_sample_size: 150000
+
+# ------------------------------------------------------------------
+# simulate -- four index algorithms across the three families (task 034)
+# ------------------------------------------------------------------
+# The partition of each family is held at the configuration the fixture
+# publishes, and only the index algorithm varies. That is what makes the
+# routing-loss column a check rather than a number: routing loss is a
+# property of the partition, so the four rows of a family must agree on it,
+# and a disagreement would be a defect in the decomposition rather than a
+# finding about an algorithm.
+#
+# The HNSW rows are the published reference configurations, unchanged and
+# unlabelled by `index` -- which is the other thing this run proves.
+#
+# Knob choices, and why these:
+#   nlist is per index, and for a sharded family that means per shard.
+#   single_node_hnsw trains 1024 cells over 150,000 vectors;
+#   semantic_sharded's 256 regions hold a few thousand each after the
+#   epsilon closure, so 64; hash_sharded's three shards hold 50,000 each,
+#   so 256.
+#   m = 16 over dimension 768 gives 48 dimensions per sub-quantiser; the
+#   dimension must divide by m. nbits = 8 is 256 PQ centroids, which needs
+#   at least that many training points in every shard -- the smallest here
+#   holds thousands.
+simulate:
+  kind: declared
+  families: [single_node_hnsw, semantic_sharded, hash_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+  grid:
+    single_node_hnsw:
+      index: [flat, hnsw, ivf, ivf_pq]
+      M: [32]
+      efSearch: [128]
+      nlist: [1024]
+      nprobe: [8]
+      m: [16]
+      nbits: [8]
+    semantic_sharded:
+      index: [flat, hnsw, ivf, ivf_pq]
+      centroids: [256]
+      epsilon: [0.2]
+      probe: [2]
+      M: [32]
+      efSearch: [96]
+      nlist: [64]
+      nprobe: [4]
+      m: [16]
+      nbits: [8]
+    hash_sharded:
+      index: [flat, hnsw, ivf, ivf_pq]
+      shards: [3]
+      M: [32]
+      efSearch: [96]
+      nlist: [256]
+      nprobe: [8]
+      m: [16]
+      nbits: [8]
+
+  budget:
+    # A guard, not a plan. Twelve configurations on a 7.6 GB laptop, four of
+    # which rebuild 256 shards apiece. If this trips, the run says which
+    # configurations were not measured rather than pretending it was complete.
+    max_minutes: 240

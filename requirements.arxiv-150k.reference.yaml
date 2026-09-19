@@ -1,0 +1,78 @@
+# Task 034 step 11: the two published reference configurations, and nothing
+# else.
+#
+# This file exists to be run TWICE -- once at 034's parent and once at 034 --
+# so that the only difference between the two runs is the commit. Diffing
+# `runs/034-reference/simulate.json` between the two checkouts is what proves
+# that adding `index` as a parameter moved nothing.
+#
+# `runs/arxiv-150k-via-characterize` cannot serve as that baseline. It is a
+# real run of these two configurations, but of much older code: its sharded
+# rows predate the deterministic build (recorded in its own
+# simulate_info.json), its semantic row was measured at the family's default
+# per-shard depth rather than at `max(30, k_max)`, and its timings are still
+# inside the rows because it predates 020b. Diffing against it measures four
+# tasks at once, which is exactly the mistake 028c cost three measurements to
+# untangle.
+#
+# The corpus block is `requirements.arxiv-150k.yaml`'s, unchanged, so the
+# sample, the queries and the seed are the ones the published values are
+# about.
+
+oneground: 1
+
+run:
+  name: 034-reference
+  mode: measure
+  seed: 20260908
+  workdir: ./runs/034-reference
+
+corpus:
+  sample:
+    kind: receipt
+
+    vectors:
+      path: ~/oneground-assets/arxiv-150k/vectors.npy
+      normalized: true
+
+    metadata:
+      path: ~/oneground-assets/arxiv-150k/base_meta.parquet
+      timestamp_field: update_date
+      category_field: category
+      timestamp_cutoff: "2019-01-01"
+
+    queries:
+      path: ~/oneground-assets/arxiv-150k/queries.npy
+      count_min: 50
+      source: written
+      metadata:
+        path: ~/oneground-assets/arxiv-150k/queries_meta.parquet
+        timestamp_field: update_date
+
+    sampling:
+      method: stratified
+      stratify_by: update_date
+      full_corpus_size: 2100000
+
+    target_sample_size: 150000
+
+simulate:
+  kind: declared
+  families: [single_node_hnsw, semantic_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+  # The two configurations the fixture publishes reference_results for, and
+  # only those. No `index` key anywhere: the point of the comparison is that a
+  # requirements file written before 034 produces the same rows after it.
+  grid:
+    single_node_hnsw: {M: [32], efSearch: [128]}
+    semantic_sharded:
+      centroids: [256]
+      epsilon: [0.2]
+      probe: [2]
+      M: [32]
+      efSearch: [96]
+
+  budget:
+    max_minutes: 60

@@ -1,4 +1,12 @@
-# oneground 0.1.0
+# oneground — release body (draft, superseded)
+
+> **This was drafted for a dated `0.1.0` that was dropped.** There is no
+> dated release: the product ships once, when it is ready and tested, and
+> `main` is the product. The version, the tag and the digests below belong to
+> the run that drafted this and are not what the next release will carry.
+> Kept as the draft it is, because its shape — what a release body says and
+> what it refuses to say — is the part worth reusing. The wheel and sdist
+> digests are the ones that were built; re-derive them when it ships.
 
 Measure a retrieval architecture decision on your own vectors, against exact
 k-NN ground truth, and keep the receipt.

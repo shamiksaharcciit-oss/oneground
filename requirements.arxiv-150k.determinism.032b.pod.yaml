@@ -1,0 +1,79 @@
+# Task 032b: the pod half of the state proof.
+#
+# The twin of `requirements.arxiv-150k.determinism.local.yaml`, differing in
+# exactly two things -- where the corpus is, and where the run writes -- so
+# that the two halves of the comparison measure the same configurations of the
+# same sample under the same seed, and any difference between their emitted
+# state is a difference between the environments rather than between two
+# requirements files.
+#
+# WHY THIS FILE EXISTS AT ALL, rather than reusing
+# `requirements.arxiv-150k.determinism.pod.yaml`. Session 20260919-144616 used
+# that file and failed before it measured anything:
+#
+#     SimulateError: no characterization in /workspace/oneground/runs/029-proof
+#
+# The session spec uploads this run's inputs to `runs/032b-state/` and sets
+# `ONEGROUND_WORKDIR` to match, but `simulate` takes its workdir from the
+# requirements file, and 029's file says `runs/029-proof`. The inputs landed
+# in one directory and `simulate` looked in another. The refusal was correct
+# -- it is 022's precondition rule -- and the defect was in the session spec
+# pointing at a file whose workdir it had assumed rather than read.
+#
+# 029's file is not edited to fix that: it is 029's receipt, and the run it
+# describes happened. This is 032b's own file, and its workdir is the one the
+# session spec uploads into.
+#
+# The simulate block below is byte-for-byte 029's, and therefore byte-for-byte
+# the laptop half's: the two halves must measure the same configurations or
+# the comparison is between two sweeps rather than between two environments.
+
+oneground: 1
+
+run:
+  name: 032b-state
+  mode: measure
+  seed: 20260908
+  workdir: ./runs/032b-state
+
+corpus:
+  sample:
+    kind: receipt
+
+    vectors:
+      path: /workspace/arxiv-150k/vectors.npy
+      normalized: true             # the builder normalized at embed time
+
+    queries:
+      path: /workspace/arxiv-150k/queries.npy
+      count_min: 50
+      source: written
+
+    target_sample_size: 150000
+
+# ------------------------------------------------------------------
+# simulate -- the reference configuration only, deterministic
+# ------------------------------------------------------------------
+simulate:
+  kind: declared
+  families: [semantic_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+  include:
+    # `deterministic: true` is the default; written out because this run
+    # exists to prove what that default now guarantees, and a reader should
+    # not have to know the default to read the receipt.
+    - {family: semantic_sharded, centroids: 256, epsilon: 0.2, probe: 2,
+       M: 32, efSearch: 96, deterministic: true}
+
+  grid:
+    semantic_sharded:
+      centroids: [256]
+      epsilon: [0.2]
+      probe: [2]
+      M: [32]
+      efSearch: [96]
+
+  budget:
+    max_minutes: 45

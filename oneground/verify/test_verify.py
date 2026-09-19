@@ -140,6 +140,121 @@ def test_unsupported_target_is_refused_by_name():
         raise AssertionError("an unsupported target was accepted")
 
 
+# -------------------------------------- what the engine can build (task 034)
+# `simulate` measures four index families and no engine offers all of them. A
+# user who takes an `ivf_pq` result to `verify` has to learn that before the
+# run, and has to be able to tell "nobody ran it" from "it cannot be run
+# here" -- the remedy for the second is a different engine, not a command.
+
+def _stub_coverage():
+    engine = get_engine("stub")()
+    engine.connect("memory://")
+    return engine.index_families()
+
+
+def test_an_index_the_engine_cannot_build_is_refused_before_anything_exists():
+    from oneground.adapters import index_families as IF
+
+    with pytest.raises(verify.VerifyError) as e:
+        verify.plan_index_families({"index": IF.IVF_PQ}, ["stub"],
+                                   [_stub_coverage()])
+    msg = str(e.value)
+    assert "cannot build index=ivf_pq" in msg, msg
+    assert "it offers flat" in msg, msg          # and what it does offer
+    assert "Nothing has been created" in msg, msg
+    # the remedy is not a command
+    assert "different engine" in msg, msg
+
+
+def test_a_family_the_engine_builds_is_planned_rather_than_refused():
+    from oneground.adapters import index_families as IF
+
+    got = verify.plan_index_families({"index": IF.FLAT}, ["stub"],
+                                     [_stub_coverage()])
+    assert [d.state for d in got] == [IF.VERIFIABLE], got
+    assert got[0].remedy == ""
+
+
+def test_an_unresolved_coverage_is_couldnt_check_and_not_a_refusal():
+    """The distinction the whole feature turns on: nobody asked is not
+    cannot be done, and only the second may refuse a run."""
+    from oneground.adapters import index_families as IF
+
+    got = verify.plan_index_families(
+        {"index": IF.IVF}, ["stub"], [IF.unresolved("stub", "nobody asked")])
+    assert [d.state for d in got] == [IF.COVERAGE_UNRESOLVED], got
+    assert "has not been asked" in got[0].reason
+    assert "resolve the coverage" in got[0].remedy
+
+
+def test_an_unknown_index_family_is_refused_with_the_declared_list():
+    from oneground.models.base import INDEX_ALGORITHMS
+
+    with pytest.raises(verify.VerifyError) as e:
+        verify.plan_index_families({"index": "annoy"}, ["stub"],
+                                   [_stub_coverage()])
+    for name in INDEX_ALGORITHMS:
+        assert name in str(e.value), str(e.value)
+
+
+def test_every_engine_that_cannot_build_it_is_named_at_once():
+    """022's precondition rule: one refusal teaches the whole shape."""
+    from oneground.adapters import index_families as IF
+
+    a = _stub_coverage()
+    b = IF.resolved("other", "9", {}, how="asked")
+    with pytest.raises(verify.VerifyError) as e:
+        verify.plan_index_families({"index": IF.HNSW}, ["stub", "other"],
+                                   [a, b])
+    assert "stub" in str(e.value) and "other" in str(e.value), str(e.value)
+
+
+def test_the_refusal_happens_before_a_pod_session_is_prepared():
+    """A refusal that arrives after a run has been paid for is not one.
+
+    A recorded resolution beside the requirements file says the engine cannot
+    build the declared family; `verify` must stop without writing a session
+    spec, whatever `target` says.
+    """
+    from oneground.adapters import index_families as IF
+
+    with tempfile.TemporaryDirectory() as tmp:
+        req = _prepared(tmp, verify_block={
+            "kind": "declared", "target": "runpod", "engine": "stub",
+            "endpoint": "memory://", "ks": [10], "index": "ivf_pq",
+            "engine_params": {"m": 32, "hnsw_ef": 128}})
+        os.makedirs(os.path.join(tmp, "adapters"), exist_ok=True)
+        IF.write(os.path.join(tmp, "adapters", "index-coverage.json"),
+                 [_stub_coverage()])
+        try:
+            verify.run(req, log_fn=_quiet)
+        except verify.VerifyError as e:
+            assert "cannot build index=ivf_pq" in str(e), str(e)
+            wd = os.path.join(tmp, "out")
+            assert not os.path.exists(os.path.join(wd, "verify.json"))
+            sessions = os.path.join(tmp, "sessions")
+            assert not os.path.isdir(sessions) or not os.listdir(sessions)
+            return
+        raise AssertionError("a pod session was prepared for an index no "
+                             "engine can build")
+
+
+def test_the_receipt_records_what_each_engine_could_build_synthetic():
+    from oneground.adapters import index_families as IF
+
+    with tempfile.TemporaryDirectory() as tmp:
+        req = _prepared(tmp)
+        wd, _ = _capture(verify.run, req, log_fn=_quiet)
+        doc = json.load(open(os.path.join(wd, "verify.json"), encoding="utf-8"))
+        block = doc["index"]
+        assert block["family"] == "hnsw"
+        assert block["kind"] == "declared"
+        # The stub ships an unresolved declaration, so the honest answer here
+        # is couldn't-check -- not a capability and not a refusal.
+        assert [e["state"] for e in block["engines"]] == [
+            IF.COVERAGE_UNRESOLVED], block
+
+
 # ----------------------------------------------------------------- end to end
 def test_verify_writes_receipts_that_verify_synthetic():
     with tempfile.TemporaryDirectory() as tmp:

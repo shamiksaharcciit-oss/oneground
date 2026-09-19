@@ -46,10 +46,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..base import (BUILD, CONSTANT, BuiltIndex, Candidates, Config,
-                    Footprint, Param, declare_parameters,
-                    estimate_memory_bytes, exact_over, merge_candidates,
-                    resolve_deterministic, deterministic_faiss)
+from .. import indexes
+from ..base import (BUILD, CONSTANT, HNSW, HNSW_ONLY, BuiltIndex, Candidates,
+                    Config, Footprint, Param, coherent, declare_parameters,
+                    deterministic_faiss, estimate_memory_bytes, exact_over,
+                    index_combinations, index_params, merge_candidates,
+                    resolve_deterministic)
 
 NAME = "hash_sharded"
 
@@ -63,12 +65,12 @@ DEFAULT_GRID = {"M": (32,), "efSearch": (96,)}
 # per-shard depth is max(SHARD_DEPTH, k), computed in `search`. The simulator
 # used to add the key anyway, where it was ignored.
 PARAMETERS = declare_parameters(NAME, (
-    Param("shards", int, minimum=1, swept=True,
+    Param("shards", int, minimum=1, swept=True, default=3,
           note="N shards by seeded hash; every query fans out to all"),
-    Param("M", int, minimum=1, swept=True,
-          note="HNSW links per node, per shard"),
-    Param("efSearch", int, minimum=1, swept=True,
-          note="search beam width, per shard"),
+    Param("M", int, minimum=1, swept=True, default=32,
+          belongs_to=HNSW_ONLY, note="HNSW links per node, per shard"),
+    Param("efSearch", int, minimum=1, swept=True, default=96,
+          belongs_to=HNSW_ONLY, note="search beam width, per shard"),
     Param("shard_depth", int, role=CONSTANT,
           fixed=f"max({SHARD_DEPTH}, k), computed per search",
           note="not read from the config"),
@@ -76,7 +78,17 @@ PARAMETERS = declare_parameters(NAME, (
           note="every shard is built at EF_CONSTRUCTION"),
     Param("deterministic", bool, role=BUILD,
           note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
-))
+) + index_params())
+
+
+def _d(key):
+    """This family's declared default for `key` (task 032).
+
+    Read from the parameter table rather than repeated at each call site, so
+    the value a config is labelled with and the value the build uses are the
+    same one by construction.
+    """
+    return PARAMETERS[key].default
 
 
 def shard_of(vector_id, n_shards, seed):
@@ -106,23 +118,28 @@ class HashSharded:
     # -- sweep -------------------------------------------------------------
     def configs(self, space):
         grid = {**DEFAULT_GRID, **space.for_family(NAME)}
+        # `grid`, not a config: the fallback is the run's node counts, not
+        # this family's default number of shards.
         node_counts = grid.get("shards", space.node_counts)
         seen, out = set(), []
         for params in space.included_for(NAME):
-            p = {"shards": 3, "M": 32, "efSearch": 96}
-            p.update(params)
-            c = Config.make(NAME, p)
+            # No seed dict of defaults since task 032: `Config.make` fills
+            # what an include entry leaves out, from the declared table.
+            c = Config.make(NAME, dict(params))
             if c.label not in seen:
                 seen.add(c.label)
                 out.append(c)
-        for n in node_counts:
-            for M in grid["M"]:
-                for ef in grid["efSearch"]:
-                    c = Config.make(NAME, {"shards": int(n), "M": int(M),
-                                           "efSearch": int(ef)})
-                    if c.label not in seen:
-                        seen.add(c.label)
-                        out.append(c)
+        # The index axis is the outer one (task 034); see single_node_hnsw's
+        # `configs` for why `coherent` and the dedupe do the work.
+        for idx in index_combinations(NAME, grid):
+            for n in node_counts:
+                for M in grid["M"]:
+                    for ef in grid["efSearch"]:
+                        c = Config.make(NAME, coherent(NAME, dict(
+                            idx, shards=int(n), M=int(M), efSearch=int(ef))))
+                        if c.label not in seen:
+                            seen.add(c.label)
+                            out.append(c)
         return out
 
     # -- build -------------------------------------------------------------
@@ -136,10 +153,9 @@ class HashSharded:
         assignment was already seeded and deterministic; the graphs inside the
         shards were not.
         """
-        import faiss
         t0 = time.time()
         det = resolve_deterministic(config, deterministic)
-        n_shards = int(config.get("shards", 3))
+        n_shards = int(config.get("shards", _d("shards")))
         ids = (context or {}).get("ids")
         assign = assign_shards(len(vectors), n_shards, seed, ids)
 
@@ -149,13 +165,15 @@ class HashSharded:
                 member = np.where(assign == r)[0].astype(np.int64)
                 if len(member) == 0:
                     continue
-                s = faiss.IndexHNSWFlat(vectors.shape[1],
-                                        int(config.get("M", 32)),
-                                        faiss.METRIC_INNER_PRODUCT)
-                s.hnsw.efConstruction = EF_CONSTRUCTION
-                s.add(vectors[member])
-                s.hnsw.efSearch = int(config.get("efSearch", 96))
-                shards[r], ids_of[r] = s, member
+                # Task 034: the algorithm is the configuration's, one index
+                # per shard. `hnsw` is the default and takes exactly the path
+                # it took before, because every published value was measured
+                # under it.
+                shards[r] = indexes.build(
+                    vectors[member], config, seed=seed, deterministic=det,
+                    dim=vectors.shape[1], where=f"shard {r}",
+                    knobs={"efConstruction": EF_CONSTRUCTION})
+                ids_of[r] = member
 
         return BuiltIndex(
             family=NAME, config=config, n_base=len(vectors),
@@ -168,7 +186,7 @@ class HashSharded:
     def search(self, built, queries, k, config):
         shards, ids_of = built.state["shards"], built.state["ids_of"]
         for s in shards.values():
-            s.hnsw.efSearch = int(config.get("efSearch", 96))
+            indexes.set_search(s, config)
 
         ids = np.full((len(queries), k), -1, dtype=np.int64)
         scores = np.full((len(queries), k), -np.inf, dtype=np.float32)
@@ -192,14 +210,21 @@ class HashSharded:
 
     # -- footprint ---------------------------------------------------------
     def footprint(self, built):
-        M = int(built.config.get("M", 32))
-        n_shards = int(built.config.get("shards", 3))
+        # The estimate stays and stays labelled one; beside it, what faiss
+        # reports for the indexes actually built, summed over shards (034).
+        M = int(built.config.get("M", _d("M"))) \
+            if indexes.algorithm_of(built.config) == HNSW else 0
+        n_shards = int(built.config.get("shards", _d("shards")))
         return Footprint(
             stored_vectors=built.n_base,          # no replication
             amplification=1.0,
             memory_bytes=estimate_memory_bytes(built.n_base, built.dim, M),
             fanout=float(n_shards),               # the cost this family shows
             shards=len(built.state["shards"]),
+            index_bytes=sum(indexes.measured_bytes(s)
+                            for s in built.state["shards"].values()),
+            vector_bytes=indexes.stored_vector_bytes(
+                built.config, built.n_base, built.dim),
         )
 
     # -- state -------------------------------------------------------------
@@ -217,7 +242,7 @@ class HashSharded:
         st = built.state
         n, dim = st["vectors"].shape
         nq = len(queries)
-        n_shards = int(config.get("shards", 3))
+        n_shards = int(config.get("shards", _d("shards")))
         assign = st["assign"].astype(np.int32)
         shards, ids_of = st["shards"], st["ids_of"]
 
@@ -243,7 +268,7 @@ class HashSharded:
                                  dtype=np.uint8))
 
         for s in shards.values():
-            s.hnsw.efSearch = int(config.get("efSearch", 96))
+            indexes.set_search(s, config)
         per_query, padded = S.collect_candidates(
             shards, ids_of, queries, probed, max(SHARD_DEPTH, k))
         candidates = S.build_candidates(per_query, gt_ids,

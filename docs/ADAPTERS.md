@@ -38,6 +38,7 @@ class VectorEngine(Protocol):
     def delete_namespace(self, ns) -> None
     def namespace_exists(self, ns) -> bool
     def wait_for_index(self, ns, timeout, poll) -> (indexed, points, seconds)
+    def index_families(self) -> IndexCoverage        # task 034
 ```
 
 `UpsertStats`, `Candidates` and `EngineFacts` are dataclasses in
@@ -85,6 +86,82 @@ with managed_namespace(engine, ns, dim, metric, index_params):
 Two reasons the prefix is enforced in code rather than by convention: a run can
 never write over a collection someone actually uses, and an abandoned run is
 identifiable by name afterwards.
+
+---
+
+## Index families
+
+`simulate` measures four index algorithms against exact ground truth —
+`flat`, `hnsw`, `ivf`, `ivf_pq` (see
+[MODELS.md](MODELS.md#the-index-algorithm)). Those are faiss's four. **Engines
+offer something else**, and a user who simulates `ivf_pq`, learns what it
+costs on their corpus, and takes it to `verify` has to find that out before
+the run rather than after.
+
+So each adapter answers the question, in
+[`oneground/adapters/index_families.py`](../oneground/adapters/index_families.py)'s
+shape: which families it builds, what the engine calls each one, and which of
+the family's declared parameters maps to which of the engine's.
+
+**Three states, not two.**
+
+| state | meaning | what it does |
+|---|---|---|
+| `builds` | the engine builds this family | `verify` proceeds |
+| `cannot_build` | it does not, and an engine was asked | `verify` **refuses at plan time**, before a container is started or a pod session is prepared |
+| `unresolved` | no engine has been asked | couldn't-check. Never a refusal, and never a capability |
+
+The distinction between the last two is the point. `cannot_build` means
+*choose a different engine*; `unresolved` means *nobody has run the
+resolution yet*. Collapsing them would let a reader think a missing run was
+the only thing in the way.
+
+**Resolved, not documented.** A declaration counts as resolved only when it
+came from a running engine, and it records the version that answered:
+
+```
+oneground adapters coverage                       # every reachable engine
+oneground adapters coverage --engine pgvector --endpoint postgresql://...
+```
+
+It writes `adapters/index-coverage.json`, which `verify` and `report` read.
+An engine that is not reachable is **skipped and reported as skipped** — a
+table typed in from a release note is a guess about a version nobody ran, and
+it would be indistinguishable in a report from an answer an engine gave. The
+conformance suite enforces the declaration on every machine and the
+resolution wherever an engine is reachable.
+
+**Approximate is a state, not a footnote.** pgvector's `ivfflat` and faiss's
+`IndexIVFFlat` are both an inverted file over k-means cells and they are not
+the same index. A mapping that is not exact is recorded `approximate` with
+`differs` saying what, and `differs` is required: an approximate mapping with
+nothing said about it reads as a correspondence, and a correspondence is what
+would let a measurement of one settle a question about the other.
+
+### Coverage today
+
+| index family | stub | qdrant | pgvector |
+|---|---|---|---|
+| `flat` | builds (exact scan) | unresolved | unresolved |
+| `hnsw` | cannot build | unresolved | unresolved |
+| `ivf` | cannot build | unresolved | unresolved |
+| `ivf_pq` | cannot build | unresolved | unresolved |
+
+Every `unresolved` cell above is a couldn't-check, not a claim about the
+engine. The machine this table was written on has no Docker and no reachable
+Qdrant or Postgres, so neither adapter has been asked; `oneground adapters
+coverage` against a pinned engine is what replaces a column, and the record it
+writes names the version that answered. The stub is in-process, so its column
+is resolved on every machine — and it is not an engine anyone deploys on.
+
+**A note on what this does not do.** It does not make a simulation result less
+valid. An `ivf_pq` row measured against exact ground truth is a true statement
+about that algorithm on that corpus, and it stays in the report with its
+recall and its measured memory. What changes is that the report no longer
+implies it is a deployable option without saying where it could be deployed.
+It also does not add engine-specific index families to `simulate`: if an
+engine builds something faiss cannot, that is a gap in what the simulator can
+predict and it is named as one.
 
 ---
 
@@ -144,7 +221,7 @@ the change was an improvement. Recall goes **up**. Latency goes **down**.
 Expect every engine to have one of these. Find it, document it in
 `ADAPTER.md` with the measurement that found it, and make the suite defeat it.
 
-### Two methods that are required *because* they are skippable
+### Three methods that are required *because* they are skippable
 
 `wait_for_index` and `namespace_exists` were optional, duck-typed methods
 while Qdrant was the only adapter: the suite probed with `getattr` and skipped
@@ -158,6 +235,12 @@ That is exactly the check that must not be skippable. An engine that is
 genuinely always ready (the stub) returns `(points, points, 0.0)` and says so
 in its `ADAPTER.md`. That is a claim it makes, not a method it omits.
 
+`index_families` is the third, promoted by task 034 for the same reason. An
+adapter that did not answer would be indistinguishable from an engine that
+builds nothing, and the plan-time refusal — the one that has to arrive before
+a pod is paid for — would have nothing to refuse against. An engine that
+builds one family says so; it does not omit the question.
+
 **The general rule, from the brief that forced it:** if a conformance check
 needs an adapter-specific step, it becomes a required protocol method, not a
 special case in the suite.
@@ -166,8 +249,9 @@ special case in the suite.
 
 ## Adding an adapter
 
-1. `oneground/adapters/<engine>/adapter.py` implementing the seven methods;
-   call `register(NAME, YourAdapter)` at import.
+1. `oneground/adapters/<engine>/adapter.py` implementing every protocol
+   method, `index_families` among them; call `register(NAME, YourAdapter)` at
+   import.
 2. `oneground/adapters/<engine>/__init__.py` re-exporting it.
 3. Import it from `oneground/adapters/__init__.py` — lazily, inside a
    `try`, so a machine without that engine's client can still run the stub

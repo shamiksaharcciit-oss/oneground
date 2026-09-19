@@ -27,31 +27,129 @@ costing a quarter and producing an argument.
 
 ### 2.1 Which model, and where does it run
 
-**Answer: the translation runs wherever the user says, and the default is
-nowhere.**
+**Answer: there are two paths to a policy, both first class, and they are
+told apart everywhere the result is seen.** *(Ruled 19 September 2026,
+replacing this section's earlier answer.)*
 
-oneground is local-first, and a proposal loop that silently sends a
-description of the user's corpus to a hosted model breaks that in the one
-place a user would least expect it. So:
+A proposal reaches the simulator as a **policy** — a small structured
+document naming a shipped family and a change to one of its declared
+parameters (§2.2). There are two ways to produce one.
 
-- **No model is bundled and none is default.** The command refuses
-  without an explicit `--model` naming a provider and a model, or a local
-  endpoint. A user who has not chosen gets a refusal, not a surprise.
-- **A local endpoint is a first-class option**, not a fallback:
-  `--model ollama:<name>` or any OpenAI-compatible URL. The quality will
-  be worse and the report says which model was used, so the difference is
-  visible rather than hidden.
-- **What leaves the machine is recorded verbatim.** Every prompt sent and
-  every response received is written to the run's workdir as a *declared*
-  record, digested in its manifest. Declared, not a receipt: a model's
-  response cannot be re-derived from seeds and rules, so its bytes are
-  frozen and hashed rather than reproduced. A user can read exactly what
-  was transmitted. This is not optional and there is no quiet mode.
-- **Nothing about the corpus contents is sent.** The model sees the
-  characterization (five measures, six numbers — drift is a pair), the
-  current configuration, the
-  constraint set, and the user's sentence. Not vectors, not text, not
-  ids. That is a hard boundary, tested.
+**Path 1 — write the policy.**
+
+    oneground propose <workdir> --policy policy.yaml --prediction pred.yaml
+
+No model is involved, no network is touched, and nothing about the corpus
+leaves the machine. This is what tier 1 built and what runs today. The card
+records `authored_by: user`.
+
+**Path 2 — describe it.** Two phases, and the translation is written down
+between them:
+
+    oneground propose translate <workdir> \
+        --describe "probe a second region for the ambiguous queries" \
+        --model <provider:name>            # writes policy.yaml, and stops
+
+    oneground propose <workdir> --policy policy.yaml --prediction pred.yaml
+
+A model translates the sentence into a policy. The command **refuses
+without an explicit `--model`**: no model is bundled, none is default, and
+a local endpoint (`ollama:<name>`, or any OpenAI-compatible URL) is as
+first class as a hosted one. A user who has not chosen gets a refusal,
+never a surprise.
+
+**The user approves the policy, not the sentence.** `translate` writes the
+policy to a file and stops; the second phase runs a policy the user has
+read. Approval is that act — reading what was written and choosing to run
+it — not a prompt to click through, and a translation the user would not
+have approved cannot run because the sentence sounded reasonable.
+
+**After translation, path 2 *is* path 1.** The second phase is the command
+tier 1 built: it takes a policy file and a prediction file, and contains no
+model, no network and no sentence. The model's involvement is recorded in
+the artifact, not carried in the mechanism — which is why the disclosure
+below travels on the card rather than being inferable from how the run was
+invoked.
+
+**`--dry-run` is not the approval step.** It keeps the meaning it has:
+validate everything, print what would run, write nothing. A step that
+writes nothing cannot be the one that persists a translation for a user to
+approve, and a flag is not an approval in any case.
+
+#### What path 2 must disclose, and where
+
+The disclosure travels with the artifact, not with the documentation. A
+card that leaves this machine carries, on its face:
+
+- `authored_by: model`, with the provider, the model name and version, and
+  the sampling parameters used;
+- the sentence as typed;
+- the policy as produced, verbatim;
+- the prompt sent and the response received, recorded as **declared**
+  receipts in the proposal's directory — a model's output is not
+  re-derivable, so it is declared, not a receipt;
+- the fact that the user approved this policy before it ran.
+
+**An unreported version is `null` with a stated reason, not a refusal.**
+Providers report versions inconsistently and a local endpoint may report
+none at all. The couldn't-check habit applies to provenance exactly as it
+applies to a measurement: the card says the version was not reported and
+by whom, rather than refusing a run over it or printing something that
+looks like a version and is not.
+
+**The sampling parameters are a closed list**: temperature, top-p, seed,
+max tokens, and a digest of the system prompt. Each is recorded, `null`
+where the provider has no such control, and adding to the list is a
+deliberate change to this document — not whatever an implementation
+happens to have logged. The point of the list is that two cards from the
+same model are comparable, which an open-ended bag of provider fields
+would not give.
+
+A reader must never have to wonder how a policy came to exist. This is the
+same rule as the lab's projection caption: the disclosure is part of the
+artifact, because a screenshot separates a claim from its footnote and a
+forwarded card separates it from its documentation.
+
+**What the model is shown, and nothing else:** the corpus's
+characterization (five measures, six numbers — drift is a pair), the
+current configuration, the constraint set, and the user's sentence. Not
+vectors, not text, not ids, not filenames. That boundary is tested, and a
+card records that it held.
+
+#### What path 2 must refuse
+
+- **To invent a family or a parameter.** The output is validated against
+  each family's declared parameter table before the user sees it; an
+  unknown name is refused with the declared list, not repaired.
+- **To express what the simulator cannot represent.** Most genuinely new
+  ideas come back as *this requires a family that does not exist* — the
+  honest answer, and the common one. A plausible-looking policy for an idea
+  the simulator cannot represent is the failure mode to refuse, not to
+  accommodate.
+- **To run without approval.** There is no `--yes`, and there is no
+  non-interactive translation path. The money-boundary rule from the pod
+  helper applies here for the same reason: the step that commits you to a
+  result is the step a human takes.
+- **To be trusted about its reasons.** The rationale is quoted on the card
+  as the model's stated reason, marked as such, and is never an input to a
+  verdict.
+
+#### Why both paths, rather than one
+
+Path 1 alone makes the product honest and small: no model, no network, no
+question about what was sent where. It also asks a user to learn a YAML
+schema and a family's parameter names before they can ask a question, which
+is the barrier the feature exists to remove.
+
+Path 2 alone makes the product useful and unfalsifiable: every result
+carries a translation step nobody can audit, and the tool's central claim —
+that you can check it — weakens at exactly the point a user is least able
+to.
+
+Both, told apart on every artifact, keeps each claim intact. A card from
+path 1 is as checkable as anything else the tool produces. A card from path
+2 is checkable too, with one more declared step in its provenance that the
+reader can see and weigh.
 
 ### 2.2 What the policy language may express
 
@@ -146,7 +244,32 @@ A card carries: the plain sentence, the policy, the prediction with its
 hash, the measured result per predicted metric, the side-effect budget
 against its bounds, and one of three outcomes — **held**, **did not
 hold**, **couldn't check** — computed by a two-run verdict rule of its own,
-under the same claim invariant. A prediction is about a difference between
+under the same claim invariant.
+
+**And how the policy came to exist** (ruled 19 September 2026, with §2.1's
+two paths). Every card carries `authored_by`: `user` for a policy its user
+wrote, `model` for one a model translated.
+
+**It is a checked claim, not a field beside the claims.** A card's
+sentences are `Claim`s rendered from what they cite and checked against it
+before the card is written (`docs/CLAIMS.md`), and provenance is a sentence
+like any other: a `proposal_provenance` claim, citing the run's own
+`propose_info` record — the model named, the version or its absence, the
+sampling parameters, the approval. The invariant asks that a sentence be
+reconstructible from what it cites, not that what it cites be a
+measurement, so a record of how the policy was produced is a legitimate
+source for one. Metadata sitting beside the prose would be exactly what a
+screenshot drops, which is the failure §2.1's disclosure rule exists to
+prevent. A model-authored card carries,
+on its face, the provider, the model name and version, the sampling
+parameters used, the sentence as typed, the policy as produced verbatim,
+and the fact that the user approved that policy before it ran; the prompt
+sent and the response received are **declared** records in the proposal's
+directory, digested in its manifest, because a model's output cannot be
+re-derived from seeds and rules. A reader must never have to wonder how a
+policy came to exist, and the disclosure travels on the artifact rather
+than in this document — a forwarded card separates a claim from its
+footnote. A prediction is about a difference between
 two configurations measured in the same run, so the report's absolute
 thresholds do not apply to it: a delta within the calibration tolerance of
 the predicted threshold is *couldn't check*, as two recalls that close are
@@ -175,6 +298,14 @@ corpora like yours.
 - No corpus content is sent to any model, ever.
 - The model's output is never executed. It selects among shipped
   behaviours or it is rejected.
+- No translation runs without the user approving the **policy** it
+  produced: `translate` writes it and stops, no `--yes`, no
+  non-interactive translation path, and `--dry-run` is not the approval
+  step (§2.1).
+- No card without `authored_by` as a checked claim, and none from a model
+  without the provider, the model and version (or a stated reason there is
+  none), the five sampling parameters, the sentence, the policy verbatim,
+  and the prompt and response as declared records.
 - No scopes: a policy changes a whole configuration.
 - No prediction without a metric, a direction and a threshold, and none
   below the calibration tolerance.
@@ -186,9 +317,13 @@ corpora like yours.
 
 ## 4. The honest limits, stated before anyone asks
 
-- **The translation is a model's guess.** A sentence can be translated
-  into a policy the user did not mean. That is why the policy is approved
-  rather than the sentence, and why the policy appears in the card.
+- **A translation would be a model's guess.** Path 2 is not built, so
+  nothing translates anything today; the limit is stated because it is the
+  one the design is arranged around. A sentence can be turned into a policy
+  the user did not mean, which is why §2.1 has the user approve the
+  *policy* rather than the sentence, why the translation is written to a
+  file and read before it runs, and why the policy appears on the card
+  verbatim. How often a translation would be wrong is unmeasured — §5.
 - **A held prediction is not a good decision.** It says one change moved
   one metric as predicted on one sample. Whether to deploy is still a
   judgement, and oneground does not make it.
@@ -205,10 +340,18 @@ corpora like yours.
 ## 5. What is not settled here
 
 - Whether adversarial review is worth building at all, given 4's last
-  point.
+  point. §2.1's ruling does not decide it either: if built, it inherits
+  both models' blind spots and is advisory, coloured separately, never a
+  verdict.
+- **Whether a model's translation is good enough to be useful at all.**
+  That is measurable — the same sentence, several models, the policies
+  compared — and it has not been measured. Until it is, path 2 ships with
+  no claim about translation quality.
 - The public library: how a card from someone else's corpus is useful to
   you, and what it must carry to be comparable. That is its own position
-  paper.
+  paper. It includes whether a card whose policy was model-written should
+  be marked differently there: §2.1 requires the provenance on every card,
+  and whether readers may filter on it is the library's decision.
 - Tier-2 triage: which proposals are worth a developer's five hours.
   Unchanged from the original concept and unaddressed here.
 
@@ -216,9 +359,11 @@ corpora like yours.
 
 ## 5a. Tier 1: writing a policy yourself
 
-*Built in task 028. **The model-written tier is not built.** There is no
-`--model` flag, nothing sends anything anywhere, and §2.1 describes a design,
-not a command that exists.*
+*Built in task 028. Tier 1 is **path 1** of §2.1: you write the policy.
+**Path 2 — the model-written one — is not built.** There is no `--model`
+flag, no `--describe`, nothing sends anything anywhere, and §2.1's second
+path is a ruling about what it must do if it is built, not a command that
+exists. A card from tier 1 records `authored_by: user`.*
 
 Tier 1 is this loop with the model removed: you write the policy, you write
 the prediction, and the machinery does the rest. It exists so that the

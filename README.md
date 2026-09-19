@@ -205,7 +205,8 @@ never rounded up.
 
 ## What exists today
 
-Everything in this list is in `0.1.0` and has been run end to end.
+Everything in this list is on `main` and has been run end to end. There is no
+dated release: the product ships once, when it is ready and tested.
 
 **The four commands.**
 

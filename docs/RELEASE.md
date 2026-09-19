@@ -1,7 +1,17 @@
 # Releasing oneground
 
-The procedure as it was actually run for `0.1.0-preview` and again for
-`0.1.0`. Every command here was executed; nothing is aspirational.
+The procedure as it was actually run: twice, for `0.1.0-preview` and again
+for a dated `0.1.0`. Every command here was executed; nothing is
+aspirational.
+
+**Only the first of those two was published.** The `0.1.0` run built and
+checked the wheel and the sdist and produced the findings below, and then the
+dated release it was for was dropped — the product ships once, when it is
+ready and tested, with no date. Its tag has been deleted, because it named a
+commit that will never be published. The procedure is unaffected: it is what
+will be run when the product does ship, and the version columns below are a
+record of what was set on the run that exercised it, not a promise about what
+the next one will be called.
 
 **Run everything through the pinned interpreter.** On Windows that is
 `.venv\Scripts\python.exe`, explicitly — bare `python` is the system
@@ -25,7 +35,9 @@ interpreter is a release whose artifacts carry `pinned: false`.
 
 Two strings, deliberately:
 
-| where | `0.1.0-preview` | `0.1.0` | for |
+A record of the two runs, not a table of what comes next:
+
+| where | `0.1.0-preview` (published) | `0.1.0` (built, not published) | for |
 | --- | --- | --- | --- |
 | `oneground/__init__.py` `__version__` | `0.1.0rc1` | `0.1.0` | PEP 440; what pip compares and what the wheel is named |
 | `oneground/__init__.py` `__display_version__` | `0.1.0-preview` | `0.1.0` | what the release page, the teaser and `--version` say |
@@ -62,6 +74,16 @@ rm -rf dist build *.egg-info
 Both artifacts must pass `twine check`. `dist/`, `build/` and `*.egg-info/`
 are gitignored: the release attaches the ones you just built, not whatever is
 on disk from last time.
+
+**Build the wheel from the checkout, never from an unpacked sdist.** The build
+hook stamps the wheel with the commit it was built from, and an unpacked sdist
+is not a git checkout, so a wheel built from one carries
+`commit: null, note: "built from a tree with no readable git checkout"` — and
+every artifact that installation later writes says the same. It is honest and
+it is useless: the version and commit are what let a reader tell two artifacts
+from different weeks apart (`docs/VALIDATION.md`). Measured, not assumed: an
+sdist unpacked and built here produced exactly that, while the same wheel
+built from the checkout named its commit.
 
 ## 3. The stranger's path
 

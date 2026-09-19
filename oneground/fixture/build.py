@@ -47,7 +47,8 @@ from ..measures import (centroid_dists, drift_pair, kmeans, two_nn_lid)
 from ..measures.ambiguity import ambiguous_query_rate
 from ..measures.crispness import boundary_crispness
 from ..measures.skew import skew_top10_share
-from ..receipts import (append_manifest, library_versions, round_floats,
+from ..receipts import (append_manifest, library_versions,
+                        producing_version, round_floats,
                         sha256_array, sha256_file, write_json_stable,
                         write_manifest)
 from ..sample import sample_for_spec, split_queries
@@ -244,6 +245,7 @@ def build(spec_path, source=None, out="fixtures", skip_projection=False):
     build_info = {
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
+        "oneground": producing_version(),     # task 033
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "device": emb.get("device", "cpu"),

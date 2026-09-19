@@ -100,6 +100,87 @@ def test_simulate_refuses_without_a_characterization_and_names_the_command_synth
         raise AssertionError("simulate ran without a characterization")
 
 
+# ------------------------ a configuration this corpus cannot build (034)
+# A sweep that dies on one bad row loses every good row measured before it.
+# Eight were lost that way while task 034 was being written, on an IVF-PQ
+# configuration whose smallest shard could not train its codebook.
+
+def _unbuildable_block():
+    """Twelve configurations, one of which cannot be built on 2,000 vectors.
+
+    `nbits: 8` asks for 256 PQ centroids per sub-quantiser, and the hash
+    partition's shards hold about 1,000 vectors each -- fine -- while the
+    semantic one's hold far fewer. The `nlist` here is what does it: 4,096
+    cells cannot be trained on a 2,000-vector corpus, and faiss cannot train
+    more cells than it has points.
+    """
+    return {
+        "families": ["single_node_hnsw", "hash_sharded"],
+        "node_counts": [2],
+        "ground_truth_k": 20,
+        "grid": {
+            "single_node_hnsw": {"index": ["flat", "hnsw", "ivf"],
+                                 "M": [16], "efSearch": [64],
+                                 "nlist": [4096], "nprobe": [8]},
+            "hash_sharded": {"M": [16], "efSearch": [64]},
+        },
+    }
+
+
+def test_a_configuration_that_cannot_be_built_loses_only_itself_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        req = _prepared(tmp, _unbuildable_block())
+        wd, out = _capture(simulate.run, req, log_fn=_quiet)
+
+        doc = json.load(open(os.path.join(wd, "simulate.json"),
+                             encoding="utf-8"))
+        info = json.load(open(os.path.join(wd, "simulate_info.json"),
+                              encoding="utf-8"))
+        labels = [r["config"] for r in doc["rows"]]
+
+        # the buildable ones were measured and written
+        assert any("index=flat" in lb for lb in labels), labels
+        assert any("index=" not in lb and "single_node" in lb
+                   for lb in labels), labels
+        assert any(lb.startswith("hash_sharded") for lb in labels), labels
+
+        # the unbuildable one is named with its reason, not silently absent
+        dropped = info["dropped"]
+        assert len(dropped) == 1, dropped
+        assert "index=ivf" in dropped[0]["config"], dropped
+        assert dropped[0]["reason"].startswith("couldnt_check"), dropped
+        assert "nlist=4096" in dropped[0]["rule"], dropped
+        assert "4096 cells over 2000 vector" in dropped[0]["rule"], dropped
+
+        # the counts add up, and planned is not double-counted
+        assert info["configs_measured"] == len(labels)
+        assert info["configs_planned"] == len(labels) + len(dropped)
+
+
+def _simulate_exit_code(requirements):
+    """What `oneground simulate` would return, without the guard decorator."""
+    from oneground import cli
+
+    args = type("Args", (), {"requirements": requirements,
+                             "emit_state": False})()
+    return _capture(cli._cmd_simulate.__wrapped__, args, [])
+
+
+def test_the_run_exits_non_zero_when_a_configuration_was_not_measured():
+    """couldn't-check is never rounded up, including to an exit code."""
+    with tempfile.TemporaryDirectory() as tmp:
+        code, text = _simulate_exit_code(
+            _prepared(tmp, _unbuildable_block()))
+        assert code == 1, text
+        assert "1 of" in text and "were not measured" in text, text
+
+    # and a sweep with nothing dropped exits 0, so the code means something
+    with tempfile.TemporaryDirectory() as tmp:
+        code_ok, text_ok = _simulate_exit_code(_prepared(tmp))
+        assert code_ok == 0, text_ok
+        assert "were not measured" not in text_ok, text_ok
+
+
 # ----------------------------------------------------------------- end to end
 def test_simulate_writes_receipts_that_verify_synthetic():
     with tempfile.TemporaryDirectory() as tmp:

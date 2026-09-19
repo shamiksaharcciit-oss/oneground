@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from . import index_families as IF
 from .base import (AdapterError, Candidates, EngineFacts, NotConnected,
                    UpsertStats, register)
 
@@ -54,6 +55,31 @@ class StubEngine:
         if ns is not None and ns not in self._ns:
             raise AdapterError(f"stub: no namespace {ns!r}")
         return self._ns.get(ns)
+
+    # -- what this engine can build (task 034) ------------------------------
+    # The stub searches exhaustively and approximates nothing, so the one
+    # family it builds is `flat` and the honest answer for the other three is
+    # that it cannot build them. This is a real answer rather than a
+    # placeholder: an adapter whose coverage says "everything" would make the
+    # plan-time refusal untestable on a machine with no engine.
+    INDEX_COVERAGE = IF.unresolved(
+        NAME, "resolved by calling index_families(); the stub is in-process, "
+              "so the resolution costs nothing and is never skipped")
+
+    def index_families(self):
+        """The stub answers about itself directly: it is exact, and that is
+        the whole of what it builds."""
+        self._need()
+        return IF.resolved(
+            NAME, self._version,
+            {IF.FLAT: IF.FamilySupport(
+                family=IF.FLAT, status=IF.BUILDS, engine_name="exact scan",
+                params={},
+                note="the stub scores every vector; there is no index and "
+                     "nothing to tune")},
+            how="the stub's search is an exhaustive inner product, by "
+                "construction rather than by configuration",
+            raw={"exhaustive": True})
 
     # -- lifecycle ---------------------------------------------------------
     def connect(self, endpoint, credentials_env=None):

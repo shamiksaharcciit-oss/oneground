@@ -171,9 +171,9 @@ marked verified until it was.
 
 ## The second fixture, and why its claim is weaker
 
-`0.1.0` also ships `stackexchange-150k-v1.tgz`: 150,000 Stack Overflow
-questions, built to the same rules so the two read line for line. The same
-instruction works on it, with the id and the asset path changed:
+There is a second published asset, `stackexchange-150k-v1.tgz`: 150,000 Stack
+Overflow questions, built to the same rules so the two read line for line.
+The same instruction works on it, with the id and the asset path changed:
 
 ```
 oneground fixture verify stackexchange-150k --asset <path to the extracted folder>

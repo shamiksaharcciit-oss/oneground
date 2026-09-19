@@ -55,6 +55,14 @@ build, measure, and report. This file is the standing context for every task.
 8. Write tests for anything with a contract: adapter conformance, policy
    signatures, fixture verification. A test that only passes on synthetic
    data says so in its name.
+9. **An artifact a report cites lives in the main checkout's `runs/` before
+   the directory that produced it is reused or removed.** A worktree gets
+   deleted, a session's output directory gets extracted into twice, and the
+   evidence behind a claim is gone while the claim stays. This happened
+   twice in task 034 — once recoverably, once not: the pre-fix pod state was
+   overwritten by the next session's fetch and only its counts survive.
+   Copy first, verify the copy by digest rather than by assuming, then
+   remove.
 
 ## Environment
 
@@ -71,6 +79,16 @@ build, measure, and report. This file is the standing context for every task.
   inherit it, read it from that scope into a subprocess environment for the
   call — never from files, history, or by asking. Never print, log, or persist
   the value.
+- **A pod session's output is the only copy of a measurement.** A fetch never
+  extracts over an existing run directory: it refuses and names the
+  collision, and there is no flag (`oneground/pod/cli.py`,
+  `extract_collisions`). Before a session's directory is reused, move what it
+  holds into `runs/` under a name that says which run it was. Both halves of
+  a cross-environment comparison are evidence, not scratch.
+- **Worktrees are for isolation, not for storage.** A throwaway worktree's
+  `runs/` is deleted with it. Before `git worktree remove`, confirm nothing
+  is unpushed *and* that every artifact a report cites has been copied into
+  the main checkout and verified there by digest.
 - Canonical fixture builds run in the pinned environment (requirements.txt
   honoured exactly, isolated venv). The device is recorded in build_info.json
   and the spec; CPU is preferred, GPU is permitted when recorded. Artifact

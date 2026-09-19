@@ -387,6 +387,13 @@ FORBIDDEN_SENTENCES = (
     "This configuration is better and should be deployed.",
     "The same result will hold at full scale.",
     "It holds on any corpus like this one.",
+    # Task 034. Four algorithms trade differently and the trade is the
+    # finding, so ranking them is the same kind of claim as recommending a
+    # configuration; and a memory figure belongs to the corpus it was
+    # measured on, because a quantiser's codebook is learned from it.
+    "IVF-PQ outperforms HNSW here.",
+    "For this corpus, ivf is the right index.",
+    "The same memory on any corpus of this size.",
 )
 
 
@@ -426,6 +433,36 @@ def test_the_limits_sentence_may_say_what_it_rules_out_synthetic(run_dir):
                 encoding="utf-8").read()
     import html as _h
     assert _h.escape(limits, quote=True) in html
+
+
+# ---------------------------------------------- the quantisation caveat (034)
+def test_a_quantised_configuration_carries_its_own_caveat_synthetic():
+    """Beside the sample caveat, not instead of it.
+
+    A product quantiser's codebook is learned from the vectors it trained on,
+    so what it costs is a property of this corpus's distribution. The card has
+    to say so, and the scan must exempt that sentence for the reason it
+    exempts the sample caveat: it has to use the words it rules out.
+    """
+    from oneground.report import claims as cl
+
+    assert C.quantised_in({"index": "ivf_pq"}) == ("ivf_pq",)
+    assert C.quantised_in({"index": "hnsw"}, {"M": 32}) == ()
+
+    c = cl.Claim(kind="quantisation_limits", predicate="quantisation",
+                 extra={"families": ("ivf_pq",)})
+    cl.render(c)
+    text = c.text
+    assert "ivf_pq" in text and "codebook" in text, text
+    # it names what it rules out, which is why it is exempt
+    assert C.forbidden_in(text), text
+
+    card = {"claims": [{"kind": "proposal_outcome", "text": "The prediction "
+                                                            "held for x."},
+                       {"kind": "quantisation_limits", "text": text}]}
+    assert C.card_violations(card) == []
+    assert text in C.caveat_texts(card)
+    assert text not in C.scannable_text(card)
 
 
 def test_the_sample_is_named_in_the_cards_own_text_synthetic(run_dir):
