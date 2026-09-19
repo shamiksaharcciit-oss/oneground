@@ -259,6 +259,53 @@ def test_the_footprint_carries_measured_bytes_and_their_difference(family):
     assert "est_memory_bytes" in d, sorted(d)
 
 
+# --------------------------------------------------------------- the sweep
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_grid_that_never_names_index_sweeps_what_it_always_did(family):
+    """The other half of "does not re-label": the *set* of configurations a
+    requirements file written before 034 produces is unchanged."""
+    space = ConfigSpace(seed=1, node_counts=(1, 3, 5))
+    labels = [c.label for c in models.get(family).configs(space)]
+    assert labels == sorted(set(labels), key=labels.index)   # no duplicates
+    assert not any("index" in lb for lb in labels), labels
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_the_index_axis_is_swept_and_stays_coherent(family):
+    """Four algorithms from one grid, each carrying only its own knobs."""
+    space = ConfigSpace(seed=1, node_counts=(3,), grid={family: {
+        "index": list(INDEX_ALGORITHMS), "nlist": [16], "nprobe": [2, 4],
+        "m": [4], "nbits": [4]}})
+    labels = [c.label for c in models.get(family).configs(space)]
+    assert any(f"index={FLAT}" in lb for lb in labels), labels
+    assert any(f"index={IVF}," in lb for lb in labels), labels
+    assert any(f"index={IVF_PQ}," in lb for lb in labels), labels
+    # the HNSW rows are the ones with no `index` in the label at all
+    assert any("index=" not in lb for lb in labels), labels
+    # no configuration mixes an algorithm with another's knob
+    for lb in labels:
+        if "index=ivf" in lb:
+            assert "M=" not in lb and "efSearch" not in lb, lb
+        if f"index={FLAT}" in lb:
+            # flat has no knobs at all; what remains is the partition's
+            assert "M=" not in lb and "nlist" not in lb, lb
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_knob_no_swept_algorithm_reads_is_refused_in_a_grid(family):
+    """`nprobe: [4, 8]` with no IVF in the grid sweeps nothing -- the
+    accept-and-ignore defect 026 exists to stop, one key further out."""
+    with pytest.raises(ParameterError) as e:
+        models.get(family).configs(ConfigSpace(
+            seed=1, grid={family: {"nprobe": [4, 8]}}))
+    assert "would be ignored" in str(e.value), str(e.value)
+    with pytest.raises(ParameterError) as e:
+        models.get(family).configs(ConfigSpace(
+            seed=1, grid={family: {"index": [IVF], "nlist": [16],
+                                   "nprobe": [2], "M": [32]}}))
+    assert f"{family}.M is a hnsw setting" in str(e.value), str(e.value)
+
+
 def test_knobs_in_use_reports_only_what_the_algorithm_reads_synthetic():
     cfg = Config.make("single_node_hnsw", {"index": IVF, "nlist": 8,
                                            "nprobe": 2})

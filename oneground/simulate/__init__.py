@@ -719,26 +719,31 @@ def _table(simulate_json, dropped, workdir, elapsed, timings=None):
     verdict: no column says whether a row is good enough for anything."""
     rows = simulate_json["rows"]
     print()
-    print("=" * 118)
+    print("=" * 127)
     print(f"simulate — {simulate_json['run']}   "
           f"{simulate_json['n_base']:,} vectors, "
           f"{simulate_json['n_queries']:,} queries, seed "
           f"{simulate_json['seed']}")
-    print("=" * 118)
+    print("=" * 127)
     hdr = (f"{'configuration':<52} {'r@1':>6} {'r@10':>6} {'r@100':>6} "
            f"{'ceil':>6} {'route':>6} {'index':>6} {'1/rat':>6} "
-           f"{'ampl':>5} {'fan':>4} {'mem MB':>8} {'build s':>8} {'query s':>8}")
+           f"{'ampl':>5} {'fan':>4} {'est MB':>8} {'idx MB':>8} "
+           f"{'build s':>8} {'query s':>8}")
     print(hdr)
     print("-" * len(hdr))
     for r in rows:
         t = (timings or {}).get(r["config"], {})
+        # Measured index bytes are absent from a row written before task 034;
+        # an empty column says couldn't-check rather than implying zero.
+        measured = r.get("index_bytes")
+        measured = f"{measured / 1e6:>8.1f}" if measured is not None else " " * 8
         print(f"{r['config']:<52} "
               f"{r['recall_at_1']:>6.3f} {r['recall_at_10']:>6.3f} "
               f"{r['recall_at_100']:>6.3f} {r['ceiling_at_10']:>6.3f} "
               f"{r['routing_loss']:>6.3f} {r['index_loss']:>6.3f} "
               f"{r['inv_ratio_at_10']:>6.3f} "
               f"{r['storage_amplification']:>5.2f} {r['fanout']:>4.0f} "
-              f"{r['est_memory_bytes'] / 1e6:>8.1f} "
+              f"{r['est_memory_bytes'] / 1e6:>8.1f} {measured} "
               f"{t.get('build_seconds', float('nan')):>8.1f} "
               f"{t.get('query_seconds', float('nan')):>8.1f}")
     print()
@@ -748,7 +753,12 @@ def _table(simulate_json, dropped, workdir, elapsed, timings=None):
     print("  index  = ceil - r@10, reachable and not returned. efSearch might.")
     print("  1/rat  = mean (true k-th distance)/(returned k-th distance) at "
           "k=10; 1.0 is exact")
-    print("  mem MB = estimated, not observed")
+    print("  est MB = estimated from vectors x dimension x 4 plus a graph "
+          "term, not observed")
+    print("  idx MB = measured: what faiss reports for the index it built, "
+          "summed over shards.")
+    print("           With quantisation the estimate stops describing "
+          "anything; this is the number.")
     if dropped:
         print()
         print(f"  {len(dropped)} configuration(s) not measured "

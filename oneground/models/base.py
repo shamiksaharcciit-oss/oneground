@@ -346,7 +346,7 @@ def index_params():
     """
     return (
         Param("index", str, default=HNSW, in_label_at_default=False,
-              choices=INDEX_ALGORITHMS,
+              swept=True, choices=INDEX_ALGORITHMS,
               note="flat | hnsw | ivf | ivf_pq; hnsw is what every published "
                    "value was measured under, and naming it changes no label"),
         Param("nlist", int, minimum=1, swept=True, default=1024,
@@ -357,9 +357,59 @@ def index_params():
         Param("m", int, minimum=1, swept=True, default=16,
               belongs_to=PQ_ONLY,
               note="PQ sub-quantisers; the dimension must divide by it"),
-        Param("nbits", int, minimum=1, maximum=16, default=8,
+        Param("nbits", int, minimum=1, maximum=16, swept=True, default=8,
               belongs_to=PQ_ONLY, note="PQ bits per sub-quantiser"),
     )
+
+
+# The keys `index_params` adds beside `index` itself. A family's own HNSW
+# knobs are swept by its own `configs()` loops; these are crossed in by
+# `index_combinations` instead, because which of them exist depends on the
+# algorithm.
+INDEX_KNOB_KEYS = ("nlist", "nprobe", "m", "nbits")
+
+
+def index_combinations(family, grid):
+    """Every index setting a grid asks for, as coherent parameter dicts.
+
+    A grid that never names `index` yields exactly one combination at the
+    declared default, so a requirements file written before 034 produces the
+    configurations it produced before 034, under the labels it produced
+    before: `index` elides at its default (`in_label_at_default=False`).
+
+    A grid that does name it yields the cross product of the algorithms with
+    the knobs *that algorithm reads* -- `nlist x nprobe` for `ivf`, those two
+    plus `m x nbits` for `ivf_pq`, nothing for `flat`. Crossing every knob
+    with every algorithm would produce configurations that are refused on
+    sight, from a grid nobody wrote that way.
+    """
+    import itertools
+
+    table = parameter_table(family)
+    algorithms = list(grid.get("index") or (table["index"].default,))
+    combos = []
+    for algorithm in algorithms:
+        keys = [k for k in INDEX_KNOB_KEYS
+                if k in table and algorithm in tuple(table[k].belongs_to[1])]
+        axes = [[(k, v) for v in (grid[k] if k in grid
+                                  else (table[k].default,))] for k in keys]
+        for chosen in (itertools.product(*axes) if axes else [()]):
+            combos.append(dict(chosen, index=algorithm))
+    return combos
+
+
+def coherent(family, params):
+    """`params` with the keys the chosen algorithm does not read removed.
+
+    For a *generator*, not for a validator. `configs()` crosses a family's own
+    axes with the index axis, and `M` simply is not part of an IVF
+    configuration; dropping it there is not the same act as accepting it in a
+    configuration a user wrote, which is refused -- see `_belonging_problem`.
+    """
+    table = parameter_table(family)
+    return {k: v for k, v in params.items()
+            if k not in table
+            or _belonging_problem(family, table, table[k], params) is None}
 
 
 # family name -> {key: Param}. Filled by each family at import.
@@ -517,6 +567,33 @@ def _belonging_problem(family, table, param, params):
             + (", ".join(belongs) if belongs else "no knobs of its own"))
 
 
+def _grid_belonging_problems(family, table, grid):
+    """Swept keys in `grid` that no algorithm `grid` names would read (034).
+
+    `nprobe: [4, 8]` in a grid whose `index` list is `[hnsw]` -- or absent,
+    which means the same thing -- sweeps nothing: `configs()` crosses a knob
+    in only for the algorithms that read it. That is the accept-and-ignore
+    defect `for_family` exists to stop, one key further out.
+    """
+    owner = "index"
+    if owner not in table:
+        return []
+    chosen = set(grid.get(owner) or (table[owner].default,))
+    out = []
+    for key in sorted(grid):
+        param = table.get(key)
+        if param is None or not param.belongs_to:
+            continue
+        holder, wanted = param.belongs_to
+        if holder != owner or chosen & set(wanted):
+            continue
+        out.append(
+            f"{family}.{key} is a {' or '.join(tuple(wanted))} setting and "
+            f"this grid sweeps {owner}={sorted(chosen)}, so its values would "
+            f"be ignored. Name an {owner} that reads it, or drop the key.")
+    return out
+
+
 def validate_params(family, params):
     problems = parameter_problems(family, params)
     if problems:
@@ -655,6 +732,7 @@ class ConfigSpace:
                     problem = check_value(family, param, v)
                     if problem:
                         problems.append(problem)
+        problems.extend(_grid_belonging_problems(family, table, grid))
         if problems:
             raise ParameterError("; ".join(problems))
         return grid

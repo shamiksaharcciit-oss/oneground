@@ -20,12 +20,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from .. import indexes
-from ..base import (HNSW,
-                    BUILD, BuiltIndex, Candidates, Config, Footprint,
-                    Param, declare_parameters, estimate_memory_bytes,
-                    exact_over, resolve_deterministic, single_threaded_faiss,
-                    HNSW_ONLY,
-                    index_params)
+from ..base import (BUILD, HNSW, HNSW_ONLY, BuiltIndex, Candidates, Config,
+                    Footprint, Param, coherent, declare_parameters,
+                    estimate_memory_bytes, exact_over, index_combinations,
+                    index_params, resolve_deterministic)
 
 NAME = "single_node_hnsw"
 
@@ -74,14 +72,21 @@ class SingleNodeHNSW:
             if c.label not in seen:
                 seen.add(c.label)
                 out.append(c)
-        for M in grid["M"]:
-            for ef in grid["efSearch"]:
-                c = Config.make(NAME, {"M": int(M),
-                                       "efConstruction": EF_CONSTRUCTION,
-                                       "efSearch": int(ef)})
-                if c.label not in seen:
-                    seen.add(c.label)
-                    out.append(c)
+        # The index axis is the outer one (task 034). `coherent` drops this
+        # family's HNSW knobs from a configuration whose algorithm does not
+        # read them, so an IVF row is one configuration per (nlist, nprobe)
+        # rather than one per M -- the dedupe by label is what collapses the
+        # repetition, and it is also what keeps a grid that never names
+        # `index` producing exactly the configurations it produced before.
+        for idx in index_combinations(NAME, grid):
+            for M in grid["M"]:
+                for ef in grid["efSearch"]:
+                    c = Config.make(NAME, coherent(NAME, dict(
+                        idx, M=int(M), efConstruction=EF_CONSTRUCTION,
+                        efSearch=int(ef))))
+                    if c.label not in seen:
+                        seen.add(c.label)
+                        out.append(c)
         return out
 
     # -- build -------------------------------------------------------------

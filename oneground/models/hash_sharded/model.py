@@ -47,12 +47,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from .. import indexes
-from ..base import (BUILD, CONSTANT, BuiltIndex, Candidates, Config,
-                    Footprint, HNSW, Param, declare_parameters,
-                    estimate_memory_bytes, exact_over, merge_candidates,
-                    resolve_deterministic, deterministic_faiss,
-                    HNSW_ONLY,
-                    index_params)
+from ..base import (BUILD, CONSTANT, HNSW, HNSW_ONLY, BuiltIndex, Candidates,
+                    Config, Footprint, Param, coherent, declare_parameters,
+                    deterministic_faiss, estimate_memory_bytes, exact_over,
+                    index_combinations, index_params, merge_candidates,
+                    resolve_deterministic)
 
 NAME = "hash_sharded"
 
@@ -130,14 +129,17 @@ class HashSharded:
             if c.label not in seen:
                 seen.add(c.label)
                 out.append(c)
-        for n in node_counts:
-            for M in grid["M"]:
-                for ef in grid["efSearch"]:
-                    c = Config.make(NAME, {"shards": int(n), "M": int(M),
-                                           "efSearch": int(ef)})
-                    if c.label not in seen:
-                        seen.add(c.label)
-                        out.append(c)
+        # The index axis is the outer one (task 034); see single_node_hnsw's
+        # `configs` for why `coherent` and the dedupe do the work.
+        for idx in index_combinations(NAME, grid):
+            for n in node_counts:
+                for M in grid["M"]:
+                    for ef in grid["efSearch"]:
+                        c = Config.make(NAME, coherent(NAME, dict(
+                            idx, shards=int(n), M=int(M), efSearch=int(ef))))
+                        if c.label not in seen:
+                            seen.add(c.label)
+                            out.append(c)
         return out
 
     # -- build -------------------------------------------------------------
