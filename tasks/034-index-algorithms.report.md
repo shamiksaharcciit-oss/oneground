@@ -69,6 +69,17 @@ prints a remedy that is a different engine rather than a command.
 **10.** The quantisation caveat beside the sample caveat, and three new
 forbidden claim classes with negative controls.
 
+**A sweep no longer dies on one bad row.** An `IndexTooSmall` from one shard
+used to end the whole run and take every row already measured with it — eight
+were lost that way while this task was being written. A configuration the
+corpus cannot build is now recorded as `couldnt_check: not buildable on this
+corpus` with faiss's own reason, the sweep continues, and the command exits
+**non-zero** naming how many were not measured. The rows that were measured
+are written and valid; couldn't-check is not rounded up, including to an exit
+code. Two tests: that the eleven good rows survive and the twelfth is named
+with `nlist=4096` and its reason, and that the exit code is 1 with a drop and
+0 without one.
+
 **12. Docs.** `docs/MODELS.md` gains the four algorithms with their knobs,
 determinism status and measured cost; `docs/CHARTER.md` gains Phase 3d and
 Phase 3b stops being the only named index work; `docs/ADAPTERS.md` gains the
@@ -185,20 +196,67 @@ They do **not** agree about IVF without quantisation:
 | semantic ivf | 0.1882 | 0.2138 |
 
 At `nprobe=8` of `nlist=1024`, stackexchange loses roughly twice what arxiv
-loses on the two unsharded partitions. So the coarse quantiser's cell
-structure is corpus-dependent in a way the product quantiser's additional
-loss is not — the PQ error is large enough on both corpora to swamp the
-difference between them.
+loses on the two unsharded partitions. **That the corpora diverge here is
+the measurement. Why they diverge is a hypothesis**, and it is stated as one:
+that the coarse quantiser's cell structure is corpus-dependent in a way the
+product quantiser's additional loss is not, because the PQ error is large
+enough on both corpora to swamp the difference between them.
 
-**Quantisation does not survive sharding at this shard size.** The semantic
-IVF-PQ rows hold 8.9 MB (arxiv) and 9.4 MB (stackexchange) of codes and carry
-256.3 MB and 256.5 MB of overhead, because each of 256 shards trains and
-stores its own codebook: `64 × 768 × 4` = 197 KB of coarse quantiser plus
-`16 × 256 × 48 × 4` = 786 KB of PQ codebook, times 256, is ~252 MB. **The
-codebooks cost 29× more than the codes they compress.** A single index gets
-61× compression on the same corpus; cut into 256 pieces it gets 6.5×. Both
-corpora agree on this to within 0.2 MB, which is expected — it is a property
-of the partition and the knobs, not of the data.
+Nothing in this run tests that. Two facts are consistent with it and do not
+establish it — the IVF gap is 0.098 on single_node while the IVF-PQ gap is
+0.007, and stackexchange's semantic partition has twice arxiv's routing loss
+(0.1308 against 0.0672), so it is the less crisply clustered corpus of the
+two.
+
+**What would test it: sweep `nprobe` across both corpora.** If the hypothesis
+holds, the two corpora's IVF curves converge as `nprobe` rises — more cells
+probed, less of the cell structure mattering — and their IVF-PQ curves stay
+apart by the same small amount at every `nprobe`, because the PQ error does
+not depend on how many cells were read. If instead the gap is flat in
+`nprobe`, the cell structure is not what is doing it. The machinery exists:
+`index` and `nprobe` are both swept keys, so
+`grid: {index: [ivf, ivf_pq], nprobe: [1, 2, 4, 8, 16, 32, 64]}` is the whole
+change. **Not run** — it is 7× the configurations on each corpus, about
+six hours on this laptop, and it is a new measurement rather than part of
+this brief.
+
+### Quantisation does not survive sharding
+
+The most useful thing in the table, and it has its own section in
+`docs/MODELS.md` because a team walks into it.
+
+A single IVF-PQ index over arxiv-150k measures **7.5 MB** where the vectors
+would cost 460.8 MB — **61× compression**, the number anyone would quote. The
+same corpus, same algorithm, cut into the 256 regions the semantic partition
+uses, measures **265.2 MB** — **6.5×**.
+
+The codes did not change: 557,231 stored vectors at 16 bytes is 8.9 MB. What
+changed is that there are 256 codebooks instead of one.
+
+```
+        coarse quantiser    nlist × dim × 4   =  64 × 768 × 4      =  197 KB
+        PQ codebook         m × 2^nbits × (dim/m) × 4
+                                              =  16 × 256 × 48 × 4 =  786 KB
+                                                                  ----------
+        per shard                                                    983 KB
+        × 256 shards                                              ≈  252 MB
+
+        measured overhead                          256.3 MB
+        codes being compressed                       8.9 MB
+```
+
+**The codebooks cost 29× more than the codes they compress.** stackexchange
+agrees to within 0.2 MB — 256.5 MB against 9.4 MB of codes — as expected,
+since this is arithmetic over the knobs and not over the data.
+
+Per-shard overhead is `nlist × dim × 4 + m × 2^nbits × (dim/m) × 4`, which
+does not shrink as shards get smaller, while the codes in each shard do. So
+there is a shard size below which quantisation costs memory rather than
+saving it, and a team that read "60× smaller" from a single-index benchmark
+and then sharded 256 ways will walk into it. This is not an argument against
+sharding or against 256 regions; it is that the two interact, the interaction
+is measurable on your own corpus, and the number from one index is not the
+number from many.
 
 **Flat is not free, and where it costs is the query.** `hash_sharded[flat]`
 queries in 48.6 s (arxiv) and 68.3 s (stackexchange) against 4.3 s and 18.1 s
@@ -247,12 +305,6 @@ number was discarded and re-run; the stackexchange sweep was stopped at 3 of
 
 ## Observed, not done
 
-- **`simulate` aborts when a configuration cannot be built.** An
-  `IndexTooSmall` from one shard ends the whole sweep; eight measured rows
-  were lost that way during development. `simulate` already has a
-  dropped/couldn't-check mechanism for the budget, and an unbuildable
-  configuration belongs in it. Not done: it is a change to what a run does,
-  and that is a decision.
 - **`capacity.py`'s memory estimate is HNSW-only.** `_default_config` returns
   HNSW parameters for every family and `estimate_memory_bytes` takes an `M`.
   A Tier-2 sizing for a quantised index would be wrong by the 61× this task
@@ -378,9 +430,11 @@ mismatch (~$0.18, no output); 20260919-152147 measured the residual (~$0.09);
   couldn't-check and both adapters' resolvers are untested against a live
   engine.
 - **Cross-environment determinism for `ivf` and `ivf_pq`.** A session.
-- **The throwaway worktrees.** `git worktree remove
-  C:\Users\polo2\projects\oneground-032b` and `...\oneground-pre034` when you
-  are done with them. The first is on branch `task-032b-session`, which has
-  one commit (`682d820`) superseded by `24bc2a3` on this branch.
+- **The throwaway worktrees.** `git worktree list` shows two beside the main
+  checkout, `oneground-032b` (the 032b launcher, detached at `24bc2a3`) and
+  `oneground-pre034` (the step-11 baseline at `d5efd78`); `git worktree
+  remove <path>` for each when you are done with them. The first is on branch
+  `task-032b-session`, which has one commit (`682d820`) superseded by
+  `24bc2a3` on this branch.
 - **Whether `simulate` should drop an unbuildable configuration rather than
   abort.** See "Observed, not done".

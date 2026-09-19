@@ -114,6 +114,19 @@ def _cmd_simulate(args, rest):
         raise SystemExit(f"oneground simulate: unexpected arguments: "
                          f"{' '.join(rest)}")
     simulate.run(args.requirements, emit_state=args.emit_state)
+    # Task 034. A configuration that could not be built is reported and the
+    # sweep goes on, so the rows already measured are not lost -- but a run
+    # that did not measure what it planned to exits non-zero, because
+    # couldn't-check is never rounded up to success.
+    dropped = getattr(simulate.run, "last_dropped", None) or []
+    if dropped:
+        planned = getattr(simulate.run, "last_planned", len(dropped))
+        print(f"\n  exit 1: {len(dropped)} of {planned} planned "
+              f"configuration(s) were not measured. The rest were, and are in "
+              f"simulate.json;")
+        print("  each one that was not is named with its reason in "
+              "simulate_info.json:dropped.")
+        return 1
     return 0
 
 

@@ -37,13 +37,24 @@ Every row carries its ceiling, so the gap from perfect recall always splits:
 A recall number without this split cannot tell you whether to tune or to
 re-architect, which is the question the whole tool exists to answer.
 
-Budgets
--------
+Budgets, and configurations that cannot be built
+------------------------------------------------
 `simulate.budget.max_configs` truncates the sweep and `max_minutes` stops it.
 Neither silently drops work: the configurations not run are listed in
 `simulate_info.json` as `couldnt_check: budget` with the rule that dropped
 them, because a sweep that quietly measured less than it was asked to is a
 sweep whose absence of a row means nothing.
+
+A configuration the corpus cannot build is dropped the same way (task 034).
+`nlist` larger than a shard, or a product quantiser asking for more centroids
+than the shard has points, refuses at build time -- and until 034 that
+refusal ended the sweep and took every row already measured with it. **A run
+that dies on one bad row loses every good row before it**, which is the
+opposite of what a refusal is for. So it is recorded as
+`couldnt_check: not buildable on this corpus` with faiss's own reason, the
+sweep continues, and the command **exits non-zero** naming how many were not
+measured. The rows that were measured are still written and still valid;
+couldn't-check is never rounded up, including to an exit code.
 """
 
 import json
@@ -394,6 +405,12 @@ def run(requirements_path, log_fn=log, emit_state=False):
 
     # ---- the sweep ----
     kept, dropped = plan_sweep(req, seed)
+    # What the plan asked for, fixed before the sweep runs. `dropped` grows
+    # during the sweep now -- a budget deadline, and since task 034 a
+    # configuration this corpus cannot build -- and those later entries are
+    # configurations that WERE planned, so adding them to `kept` again would
+    # count them twice.
+    configs_planned = len(kept) + len(dropped)
     log_fn(f"{len(kept)} configurations across "
            f"{len(set(f for f, _ in kept))} families"
            + (f", {len(dropped)} dropped by max_configs" if dropped else ""))
@@ -488,10 +505,31 @@ def run(requirements_path, log_fn=log, emit_state=False):
                    f"{len(kept) - i + 1} configs not run")
             break
         log_fn(f"[{i}/{len(kept)}] {config.label}")
-        row, timing = measure_config(get_model(fam), config, base, queries,
-                                     gt_ids, gt_scores, seed,
-                                     context=context_for(config),
-                                     log_fn=log_fn, state_sink=state_sink)
+        try:
+            row, timing = measure_config(get_model(fam), config, base, queries,
+                                         gt_ids, gt_scores, seed,
+                                         context=context_for(config),
+                                         log_fn=log_fn, state_sink=state_sink)
+        except ParameterError as e:
+            # A configuration this corpus cannot build is one row's problem,
+            # not the run's (task 034). `nlist` larger than a shard, or a PQ
+            # asking for more centroids than the shard has points, refuses at
+            # build time -- and before this, that refusal killed the sweep and
+            # took every row already measured with it. Eight rows were lost
+            # that way while 034 was being written.
+            #
+            # So it is recorded the way a budget drop is recorded, with its
+            # own reason, and the sweep goes on. The run still exits non-zero
+            # at the end: a sweep that did not measure what it planned to has
+            # not succeeded, and `couldnt_check` is never rounded up.
+            dropped.append({
+                "config": config.label,
+                "reason": f"{COULDNT_CHECK}: not buildable on this corpus",
+                "rule": str(e),
+            })
+            log_fn(f"  {COULDNT_CHECK}: {e}")
+            log_fn("  not measured; the rest of the sweep continues")
+            continue
         rows.append(row)
         timings[config.label] = timing
 
@@ -559,7 +597,7 @@ def run(requirements_path, log_fn=log, emit_state=False):
                              "has no shards. The semantic_sharded default is "
                              "30, which is what published fixture values "
                              "were measured with."),
-        "configs_planned": len(kept) + len(dropped),
+        "configs_planned": configs_planned,
         "configs_measured": len(rows),
         "dropped": dropped,
         "budget": dict(budget),
@@ -621,6 +659,13 @@ def run(requirements_path, log_fn=log, emit_state=False):
                 "are listed as such in state/state_info.json.")
 
     _table(simulate_json, dropped, workdir, time.time() - t0, timings)
+    # A sweep that planned twelve configurations and measured eleven has not
+    # succeeded, whatever the eleven say. The eleven are written, the twelfth
+    # is named with its reason in simulate_info.json, and the caller is told
+    # (task 034). `run` returns the workdir as it always has; the count rides
+    # alongside so the CLI can exit non-zero without re-reading the receipt.
+    run.last_dropped = list(dropped)
+    run.last_planned = configs_planned
     return workdir
 
 
@@ -761,10 +806,10 @@ def _table(simulate_json, dropped, workdir, elapsed, timings=None):
           "anything; this is the number.")
     if dropped:
         print()
-        print(f"  {len(dropped)} configuration(s) not measured "
-              f"({COULDNT_CHECK}: budget):")
+        print(f"  {len(dropped)} configuration(s) not measured:")
         for d in dropped[:10]:
             print(f"    {d['config']}")
+            print(f"      {d['reason']}")
         if len(dropped) > 10:
             print(f"    ... and {len(dropped) - 10} more, listed in "
                   "simulate_info.json")

@@ -133,14 +133,52 @@ be wrong about a different `nprobe`.
 every single-node row, including the IVF-PQ one that measures 7.5 MB — wrong
 by 61×. That is the whole reason `footprint()` stopped being arithmetic.
 
-**Quantisation does not survive sharding at this shard size.** The semantic
-IVF-PQ rows hold 8.9 MB of codes and carry 256.3 MB of overhead, because each
-of the 256 shards trains and stores its own codebook: a coarse quantiser of
-`64 × 768 × 4` = 197 KB plus a PQ codebook of `16 × 256 × 48 × 4` = 786 KB,
-times 256, is ~252 MB. **The codebooks cost 29× more than the codes they
-compress.** The 61× compression a single index gets becomes 6.5× when the
-same corpus is cut into 256 pieces, and nothing about the algorithm warns
-you — it is a property of the partition it is paired with.
+---
+
+## Quantisation does not survive sharding
+
+**The compression a product quantiser gives you is a property of the
+partition it is paired with, not of the algorithm — and nothing in the
+algorithm warns you.**
+
+A single IVF-PQ index over arxiv-150k measures **7.5 MB** where the vectors
+would cost 460.8 MB: **61× compression**, which is the number anyone would
+quote. The same corpus under the same algorithm, cut into the 256 regions the
+semantic partition uses, measures **265.2 MB**: **6.5×**.
+
+The codes did not change. Every one of the 557,231 stored vectors is still 16
+bytes, and they total 8.9 MB. What changed is that there are now 256
+codebooks instead of one, and each shard trains and stores its own:
+
+```
+        coarse quantiser    nlist × dim × 4   =  64 × 768 × 4      =  197 KB
+        PQ codebook         m × 2^nbits × (dim/m) × 4
+                                              =  16 × 256 × 48 × 4 =  786 KB
+                                                                  ----------
+        per shard                                                    983 KB
+        × 256 shards                                              ≈  252 MB
+
+        measured overhead                          256.3 MB
+        codes being compressed                       8.9 MB
+```
+
+**The codebooks cost 29× more than the codes they compress.** Measured on
+stackexchange-150k too: 256.5 MB of overhead against 9.4 MB of codes, within
+0.2 MB of arxiv — as expected, because this is arithmetic over the knobs and
+not over the data.
+
+The shape of it: per-shard overhead is `nlist × dim × 4 + m × 2^nbits ×
+(dim/m) × 4`, which does not shrink as shards get smaller, while the codes in
+each shard do. There is a shard size below which quantisation costs memory
+rather than saving it, and a team that read "60× smaller" from a single-index
+benchmark and then sharded 256 ways will walk into it.
+
+What this does **not** say: that sharding is wrong, that 256 regions is too
+many, or that IVF-PQ should not be used with a partition. It says the two
+interact, that the interaction is measurable on your own corpus, and that the
+number you get from one index is not the number you get from many.
+
+---
 
 Three rules hold across the four:
 
