@@ -1,7 +1,17 @@
 # Releasing oneground
 
-The procedure as it was actually run for `0.1.0-preview` and again for
-`0.1.0`. Every command here was executed; nothing is aspirational.
+The procedure as it was actually run: twice, for `0.1.0-preview` and again
+for a dated `0.1.0`. Every command here was executed; nothing is
+aspirational.
+
+**Only the first of those two was published.** The `0.1.0` run built and
+checked the wheel and the sdist and produced the findings below, and then the
+dated release it was for was dropped — the product ships once, when it is
+ready and tested, with no date. Its tag has been deleted, because it named a
+commit that will never be published. The procedure is unaffected: it is what
+will be run when the product does ship, and the version columns below are a
+record of what was set on the run that exercised it, not a promise about what
+the next one will be called.
 
 **Run everything through the pinned interpreter.** On Windows that is
 `.venv\Scripts\python.exe`, explicitly — bare `python` is the system
@@ -25,7 +35,9 @@ interpreter is a release whose artifacts carry `pinned: false`.
 
 Two strings, deliberately:
 
-| where | `0.1.0-preview` | `0.1.0` | for |
+A record of the two runs, not a table of what comes next:
+
+| where | `0.1.0-preview` (published) | `0.1.0` (built, not published) | for |
 | --- | --- | --- | --- |
 | `oneground/__init__.py` `__version__` | `0.1.0rc1` | `0.1.0` | PEP 440; what pip compares and what the wheel is named |
 | `oneground/__init__.py` `__display_version__` | `0.1.0-preview` | `0.1.0` | what the release page, the teaser and `--version` say |

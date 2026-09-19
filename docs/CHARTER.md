@@ -49,12 +49,17 @@ their data, and the tinkerer who has an idea and wants it tested.
 
 ## What we are doing now
 
-**`0.1.0`, cut 13 September 2026, shipping 23 September.** Four commands that
-run end to end — characterize, simulate, verify, report — two engine adapters
-behind the `VectorEngine` protocol, two public fixtures with their receipts,
-and a calibration history every report cites. What is *not* in it is named
-here and in the README's "What is planned", with no date attached to anything
-unbuilt.
+**The product ships once, when it is ready and tested, with no date.** Four
+commands that run end to end — characterize, simulate, verify, report — two
+engine adapters behind the `VectorEngine` protocol, two public fixtures with
+their receipts, and a calibration history every report cites. What is *not*
+in it is named here and in the README's "What is planned", with no date
+attached to anything, built or unbuilt.
+
+`main` **is** the product. A task branch merges into it the moment its checks
+are green — the suite, the environment guard, the tracked-tree identifier
+scan confirmed to run rather than skip, and the hosted site byte-compared —
+rather than waiting for a window. The only public tag is `0.1.0-preview`.
 
 **Two checkable artifacts: the arXiv-150k and stackexchange-150k fixtures.**
 
@@ -112,7 +117,7 @@ Status of the build:
 | 017e | the third matched session: spread, `qps_max`, and the comparison sentence that was lying | done |
 | 017f | transport recording, runtime settings, the setup split, and the no-lent-outcome property | done |
 | 017g | gRPC negotiated and proved against a live engine; the port stated everywhere | done |
-| 018 | **`oneground 0.1.0`**: version, docs pass, release notes, fresh-machine check, tag | cut; ships 23 Sept |
+| 018 | **the release procedure run end to end**: version, docs pass, release notes, fresh-machine check, tag | done; the dated release it was cut for was dropped, and its tag with it |
 | 018b | the coverage walk widened to every rendering path; extras checked against what they install | done |
 | 018c | a spawn budget and a readiness budget are not the same number | done |
 | 019 | **the claim invariant**: every generated sentence checked against the rows it cites | done |
@@ -179,12 +184,18 @@ pass. The git log is the project's own receipt trail.
 - Cost model with error bands.
 - pgvector adapter. Second fixture (StackExchange, fuzzier boundaries) so
   the tool can show a corpus where semantic sharding loses.
-- **v0.1 release**: characterize + simulate three families + verify two
+- **The advisor**: characterize + simulate three families + verify two
   engines + report. The point at which oneground beats folklore for the
-  majority of RAG projects. **Cut** as `0.1.0` on 13 September 2026 and
-  **ships 23 September**: the wheel is built and checked, the tag exists
-  locally, and publishing — PyPI, the GitHub release, the two assets — is the
-  one step this project does not automate.
+  majority of RAG projects. Built and run end to end.
+
+  The release procedure was executed twice — once for `0.1.0-preview`, which
+  is public, and once for a dated `0.1.0`, which was not published. The wheel
+  and the sdist were built and checked and the findings from doing it are in
+  `docs/RELEASE.md`; the `0.1.0` tag has since been **deleted**, because it
+  named a commit that will never be published. **There is no dated release.**
+  The product ships once, when it is ready and tested, and publishing — PyPI,
+  the GitHub release, the assets — remains the one step this project does not
+  automate.
 
 ### Phase 3b — More engines (v0.2 onward)
 
