@@ -128,8 +128,9 @@ def test_rescore_handles_a_candidate_set_narrower_than_k():
 
 # ------------------------------------------------------- the decomposition
 
-def test_the_three_terms_sum_to_one_minus_recall():
-    d = R.decomposition(ceiling=0.90, candidate_recall=0.80, recall=0.70)
+def test_the_three_terms_sum_to_one_minus_the_first_pass_recall():
+    d = R.decomposition(ceiling=0.90, candidate_recall=0.80,
+                        first_pass_recall=0.70)
     total = d["routing_loss"] + d["candidate_loss"] + d["ordering_loss"]
     assert total == pytest.approx(1.0 - 0.70)
 
@@ -138,13 +139,15 @@ def test_without_reranking_it_reduces_to_the_old_two_way_split():
     """The candidate set IS the returned top-k, so ordering loss is zero and
     candidate loss is exactly what `index_loss` was. Published values do not
     move because the arithmetic did not."""
-    d = R.decomposition(ceiling=0.90, candidate_recall=0.70, recall=0.70)
+    d = R.decomposition(ceiling=0.90, candidate_recall=0.70,
+                        first_pass_recall=0.70)
     assert d["ordering_loss"] == 0.0
     assert d["candidate_loss"] == pytest.approx(0.90 - 0.70)
 
 
 def test_only_the_ordering_term_is_named_recoverable():
-    d = R.decomposition(ceiling=0.9, candidate_recall=0.8, recall=0.7)
+    d = R.decomposition(ceiling=0.9, candidate_recall=0.8,
+                        first_pass_recall=0.7)
     assert d["recoverable_by_rerank"] == d["ordering_loss"]
     assert "ONLY term exact reranking recovers" in d["decomposition_note"]
     assert "mostly candidate_loss cannot be helped" in d["decomposition_note"]
@@ -202,3 +205,29 @@ def test_present_at_asks_only_whether_the_set_contains_them():
     assert R.present_at(np.array([[9, 3, 8, 1, 2]], dtype=np.int64), gt, 3) == 1.0
     assert R.present_at(np.array([[9, 8, 7]], dtype=np.int64), gt, 3) == 0.0
     assert R.present_at(np.array([[1, 9, 8]], dtype=np.int64), gt, 3) == pytest.approx(1 / 3)
+
+
+def test_the_decomposition_describes_the_first_pass_not_the_rescored_result():
+    """The defect this catches made the whole measure useless.
+
+    After an exact rescore ordering loss is zero by construction, so a
+    decomposition of the POST-rerank recall reports `ordering_loss: 0` on
+    every reranked row and the one term the stage exists to expose is never
+    visible. Measured on a quantised index it did exactly that: recall rose
+    0.3133 to 0.6450 and ordering_loss read 0.0000 in both rows.
+    """
+    # a first pass that found the neighbours but ranked them badly
+    d = R.decomposition(ceiling=1.0, candidate_recall=0.65,
+                        first_pass_recall=0.31)
+    assert d["ordering_loss"] == pytest.approx(0.34), (
+        "the recovered term is invisible; the decomposition is describing "
+        "the rescored result instead of the first pass")
+    assert d["routing_loss"] + d["candidate_loss"] + d["ordering_loss"] == \
+        pytest.approx(1.0 - 0.31)
+    # and the reranked recall is what is left after the two it cannot recover
+    assert 1.0 - d["routing_loss"] - d["candidate_loss"] == pytest.approx(0.65)
+
+
+def test_the_note_says_which_recall_the_terms_sum_to():
+    d = R.decomposition(1.0, 0.65, 0.31)
+    assert "recall_before_rerank" in d["decomposition_note"]

@@ -141,17 +141,30 @@ def present_at(cand_ids, gt_ids, k):
     return hits / denom if denom else 0.0
 
 
-def decomposition(ceiling, candidate_recall, recall):
+def decomposition(ceiling, candidate_recall, first_pass_recall):
     """The three terms, and what each means for a decision.
 
-    They sum to `1 - recall` by construction. Without reranking the candidate
-    set IS the returned top-k, so candidate_recall == recall, ordering_loss is
-    zero, and this reduces exactly to the two-way split the simulator reported
-    before task 035 -- which is why published values do not move.
+    They decompose what **the first pass** lost, and sum to
+    `1 - first_pass_recall`. That is the subtlety, and getting it wrong makes
+    the whole measure useless: after an exact rescore ordering loss is zero by
+    construction, so a decomposition of the POST-rerank recall reports
+    `ordering_loss: 0` on every reranked row and the one term the stage exists
+    to expose is never visible. Measured on a quantised index it did exactly
+    that -- recall rose 0.3133 to 0.6450 and ordering_loss read 0.0000 in both
+    rows.
+
+    So `first_pass_recall` is the recall of the first pass's own top-k, before
+    rescoring reordered it, and `ordering_loss` is what the rescore recovered.
+    The reranked recall is then `1 - routing_loss - candidate_loss`, exactly.
+
+    Without reranking the candidate set IS the returned top-k, so
+    candidate_recall == first_pass_recall, ordering_loss is zero, and this
+    reduces to the two-way split the simulator reported before task 035 --
+    which is why no published value moves.
     """
     routing = 1.0 - ceiling
     candidate = ceiling - candidate_recall
-    ordering = candidate_recall - recall
+    ordering = candidate_recall - first_pass_recall
     return {
         "routing_loss": routing,
         "candidate_loss": candidate,
@@ -165,7 +178,9 @@ def decomposition(ceiling, candidate_recall, recall):
             "present in the candidate set and ranked out of the top k, and "
             "it is the ONLY term exact reranking recovers. A corpus whose "
             "loss is mostly candidate_loss cannot be helped by reranking "
-            "however it is tuned."),
+            "however it is tuned. The three decompose what the FIRST PASS "
+            "lost and sum to 1 - recall_before_rerank; the recall after an "
+            "exact rescore is 1 - routing_loss - candidate_loss."),
     }
 
 
