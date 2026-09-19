@@ -1,13 +1,19 @@
-# oneground 0.1.0
+# oneground — release notes
 
 Measure a retrieval architecture decision on your own vectors, against exact
 k-NN ground truth, and keep the receipt.
 
-This is the first release with a preview week behind it. Four commands are
-real and measured, two engines have adapters, two public fixtures are
-published with their receipts. Everything else in the charter is planned, has
-no date, and this release says so rather than implying otherwise — see
-[docs/CHARTER.md](docs/CHARTER.md).
+**These notes are not dated and do not name a version.** The product ships
+once, when it is ready and tested; `main` is the product, and the only public
+tag is `0.1.0-preview`. The version these notes describe is fixed when they
+are published, not before. They were first written for a dated `0.1.0` that
+was dropped, and what follows is what was true of the tree they were written
+against and is still true of `main`.
+
+Four commands are real and measured, two engines have adapters, two public
+fixtures are published with their receipts. Everything else in the charter is
+planned, has no date, and these notes say so rather than implying otherwise —
+see [docs/CHARTER.md](docs/CHARTER.md).
 
 ## What works today
 
@@ -213,8 +219,10 @@ stackexchange-150k  digests 11 verified, 0 contradicted, 0 couldnt_check
 ```
 
 The arXiv fixture on `main` carries 17 digests, because a published report
-(`fixtures/arxiv-150k/report/`, declared) was added after the `v0.1.0` tag; the
-tagged release carries the 11 above.
+(`fixtures/arxiv-150k/report/`, declared) was added after the 11 above were
+counted. A tree that carries the report counts 17 and a tree that does not
+counts 11; both are correct, and `oneground fixture verify` reports the
+count it found rather than a number written down here.
 
 `fixtures/arxiv-150k.fixture.yaml` carries `status: verified` because of that
 run — on Windows, against a build made on Linux with a CUDA GPU, under the
