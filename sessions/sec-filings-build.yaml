@@ -28,6 +28,14 @@
 # a hash and a line filter, and each submission's response is abandoned once
 # its 10-K part has been read. What lands on disk is the corpus, not the
 # source.
+#
+# ONE WATCHER PER SESSION. `oneground pod watch` is not read-only at its
+# edges: every exit path terminates the pod. Two watchers on one session means
+# two independent cap clocks and two things that will fetch and terminate, and
+# whichever fires first decides the session while the other is still polling a
+# pod that no longer exists. Session 20260918-233949 was watched twice, by
+# accident, and came to no harm only because the one that reached the cap did
+# the right thing. Stop a watcher before starting another.
 
 # The embedding phase wants a card; everything before it does not. The list is
 # the same as the arXiv and StackExchange builds so the three are comparable,
