@@ -2,8 +2,19 @@
 """
 Is the hosted copy of this page the repository's copy?
 
-    python site/teaser/check_hosted.py https://oneground.oneproof.dev
+    python site/teaser/check_hosted.py https://oneproof.dev/oneground/lab
     python site/teaser/check_hosted.py https://shamiksaharcciit-oss.github.io/oneground
+
+Both were fetched when this line was written and both read
+`9 verified, 0 contradicted`. **The two hosts serve this page at different
+paths** -- the first under `/oneground/lab`, the second under `/oneground` --
+so the base URL is not interchangeable between them: `/oneground/lab` on the
+second is a 404.
+
+An earlier example here named `oneground.oneproof.dev`, which has no A record
+on any resolver tried. That is not a stale host but a wrong one, and an
+example that does not resolve is worse than no example: it sends a reader
+looking for a mistake of their own.
 
 Fetches `data/MANIFEST.sha256` from the host, then every file it lists
 (including `inline.js`), then `index.html`, `app.js` and `style.css`, which no

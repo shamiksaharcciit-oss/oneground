@@ -228,7 +228,7 @@ document.
 ## Where the evidence lives
 
 Every artifact this report cites is in the **main checkout**, at
-`C:/Users/polo2/projects/oneground/runs/chunking-sec-filings-10k/`, copied
+`C:\Users\<developer>\projects\oneground\runs\chunking-sec-filings-10k\`, copied
 there from this worktree and **verified by digest after the copy** rather than
 assumed (CLAUDE.md rule 9):
 
@@ -250,6 +250,32 @@ never finished.
 
 **The copies in `oneground-v2/runs/` are no longer the ones cited.** That
 worktree is for isolation, not storage, and its `runs/` goes when it does.
+
+### This report carried the defect its own task was measuring against
+
+The path above was first written out in full, with the developer's home
+directory in it, and `test_no_tracked_file_carries_a_machine_identifier`
+failed on `main` because of it. It is redacted here in the form the scan's own
+comment names as correct -- the username position as `<developer>`, which the
+pattern deliberately does not match, because a scan that flagged the redacted
+form would be telling people to stop redacting.
+
+Two things are worth recording rather than quietly fixing.
+
+**It reached `main` because I pushed the section without running the suite.**
+The rule is full checks before a merge; I treated a prose addition as exempt,
+and prose is exactly where a pasted path lands. The guard would have caught it
+before the push. It instead caught it afterwards, on `main`, where it blocked
+another stream.
+
+**And the subject matter is the joke at my expense.** This is the report of a
+task whose entire method is that a number must carry what it is conditional
+on, and whose central finding is a measure that was silently wrong until an
+implausible value exposed it. The report then shipped a machine identifier in
+its own evidence section. **It is the fourth time this week a report has been
+caught by a guard its author did not write** -- and the pattern across all
+four is the same: the author checks the thing they were thinking about, and
+the guard checks the thing they were not.
 
 ## Observed, not done
 - **`sentence` and `structure` produce ~7,400 orphan chunks each** (under the
