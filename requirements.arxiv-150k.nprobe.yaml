@@ -1,0 +1,121 @@
+# oneground requirements — the arxiv-150k fixture, measured through the
+# product path.
+#
+# This file exists to compare two paths that have never been compared: the
+# fixture builder (corpora/run_arxiv_150k.sh -> oneground.fixture.build) and
+# `oneground characterize`. Both should produce the same five values from the
+# same vectors, because after task 007 they call the same measures.
+#
+# It points at the release asset, which is NOT in the repository — the three
+# large artifacts are published separately and extracted locally:
+#
+#     ~/oneground-assets/arxiv-150k\
+#         vectors.npy         (150000, 768) float32   460,800,128 bytes
+#         queries.npy         (2000, 768)   float32     6,144,128 bytes
+#         sample.jsonl.zst    the source records       49,920,799 bytes
+#
+# base_meta.parquet and queries_meta.parquet are derived from
+# sample.jsonl.zst by tasks/scratch/007-arxiv-metadata.py — a format
+# conversion of the `update_date` column, not a recomputed measurement. The
+# fixture keeps its metadata inside the compressed sample; the product path
+# reads a columnar sidecar, which is what a user would have.
+
+oneground: 1
+
+run:
+  name: 039-nprobe-arxiv-150k
+  mode: measure
+  # The fixture's own sampling seed. `characterize` uses it for the k-means,
+  # the LID subsample and (were it downsampling) the draw — the same three
+  # places oneground.fixture.build uses spec.sampling.seed.
+  seed: 20260908
+  workdir: ./runs/039-nprobe-arxiv-150k
+
+corpus:
+  sample:
+    kind: receipt
+
+    vectors:
+      path: ~/oneground-assets/arxiv-150k/vectors.npy
+      # The builder normalized at embed time (normalize_embeddings=True), so
+      # these are already unit vectors. Saying so avoids a second
+      # normalization pass over 460 MB that would change nothing.
+      normalized: true
+
+    metadata:
+      path: ~/oneground-assets/arxiv-150k/base_meta.parquet
+      timestamp_field: update_date
+      category_field: category
+      # The fixture's drift definition trains the centroids on records before
+      # 2019-01-01. Given explicitly rather than left to the median, because
+      # the point of this run is to compare against a published value that was
+      # measured at this cutoff.
+      timestamp_cutoff: "2019-01-01"
+
+    queries:
+      path: ~/oneground-assets/arxiv-150k/queries.npy
+      count_min: 50
+      source: written
+      metadata:
+        path: ~/oneground-assets/arxiv-150k/queries_meta.parquet
+        timestamp_field: update_date
+
+    sampling:
+      method: stratified
+      stratify_by: update_date
+      full_corpus_size: 2100000
+
+    # The whole corpus: no subsampling, so the comparison is against the same
+    # 150,000 vectors the fixture measured rather than a draw from them.
+    target_sample_size: 150000
+
+# ------------------------------------------------------------------
+# simulate -- nprobe swept, both IVF algorithms, both corpora (task 039)
+# ------------------------------------------------------------------
+# The test of the hypothesis 034 left marked as one. Every other knob is
+# 034's, so the nprobe=8 (single_node, hash) and nprobe=4 (semantic) rows
+# here should reproduce 034's -- which is itself a check.
+#
+# `flat` and `hnsw` are NOT re-measured. They are the reference points and
+# they are in runs/034-index-arxiv-150k/simulate.json; the report cites
+# them from there rather than spending an hour rebuilding them.
+#
+# `M` and `efSearch` are absent from every grid below because neither `ivf`
+# nor `ivf_pq` reads them, and a swept key no named algorithm reads is
+# refused at plan time.
+simulate:
+  kind: declared
+  families: [single_node_hnsw, semantic_sharded, hash_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+  grid:
+    single_node_hnsw:
+      index: [ivf, ivf_pq]
+      nlist: [1024]
+      nprobe: [1, 2, 4, 8, 16, 32, 64]
+      m: [16]
+      nbits: [8]
+    semantic_sharded:
+      index: [ivf, ivf_pq]
+      centroids: [256]
+      epsilon: [0.2]
+      probe: [2]
+      nlist: [64]
+      nprobe: [1, 2, 4, 8, 16, 32, 64]
+      m: [16]
+      nbits: [8]
+    hash_sharded:
+      index: [ivf, ivf_pq]
+      shards: [3]
+      nlist: [256]
+      nprobe: [1, 2, 4, 8, 16, 32, 64]
+      m: [16]
+      nbits: [8]
+
+  budget:
+    # 42 configurations. Each rebuilds its index even though `nprobe` is a
+    # search parameter and the build does not depend on it -- see the
+    # report's "observed, not done". Set high enough not to trip; the run
+    # reports its own elapsed time.
+    max_minutes: 300
