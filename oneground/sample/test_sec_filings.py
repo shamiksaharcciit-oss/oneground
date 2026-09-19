@@ -170,3 +170,75 @@ def test_synthetic_full_filing_is_accepted_with_its_sections():
     assert why is None, why
     assert [s["item"] for s in rec["sections"]] == items
     assert rec["prose_sections"] >= sf.MIN_PROSE_SECTIONS
+
+
+# ------------------------------------------------------- transport failures
+
+def test_a_truncated_transfer_is_retried_then_becomes_one_rejection(monkeypatch):
+    """http.client.IncompleteRead killed a build at 3,500 documents.
+
+    It derives from HTTPException and ValueError, so an enumerated except
+    clause listing URLError, TimeoutError and ConnectionError let it through
+    and out of the worker thread. A filing that cannot be fetched is a
+    rejection the corpus reports, never the end of the run.
+    """
+    import http.client
+
+    calls = []
+
+    def boom(url, timeout=300):
+        calls.append(url)
+        raise http.client.IncompleteRead(b"partial")
+
+    monkeypatch.setattr(sf, "_get", boom)
+    monkeypatch.setattr(sf.time, "sleep", lambda _s: None)
+    try:
+        sf.fetch_10k("edgar/data/1/x.txt", tries=3)
+    except sf.SourceError:
+        pass
+    else:
+        raise AssertionError("a transfer that never succeeds must raise SourceError")
+    assert len(calls) == 3, calls
+
+
+def test_a_403_is_not_retried(monkeypatch):
+    """403 means the user agent is not declared. Waiting does not fix it."""
+    import urllib.error
+
+    calls = []
+
+    def forbidden(url, timeout=300):
+        calls.append(url)
+        raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(sf, "_get", forbidden)
+    monkeypatch.setattr(sf.time, "sleep", lambda _s: None)
+    try:
+        sf.fetch_10k("edgar/data/1/x.txt", tries=4)
+    except urllib.error.HTTPError as e:
+        assert e.code == 403
+    assert len(calls) == 1, calls
+
+
+def test_the_rate_limiter_holds_the_aggregate_across_threads():
+    """Concurrency must never become a way to exceed a published limit."""
+    import threading
+    import time as _t
+
+    lim = sf._RateLimiter(50)          # 20 ms apart
+    stamps = []
+    lock = threading.Lock()
+
+    def worker():
+        lim.take()
+        with lock:
+            stamps.append(_t.monotonic())
+
+    ts = [threading.Thread(target=worker) for _ in range(10)]
+    t0 = _t.monotonic()
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    span = max(stamps) - t0
+    assert span >= 0.9 * (len(ts) - 1) * 0.02, span

@@ -643,7 +643,20 @@ def fetch_10k(path, tries=4, limiter=None):
     the first twelve filings probed -- but never retries a 403 or a 404,
     because neither clears by waiting and a 403 here means the user agent is
     not declared.
+
+    **Everything else that can go wrong in a transfer is retried**, rather
+    than an enumerated list of exception types. The enumerated version
+    (`URLError`, `TimeoutError`, `ConnectionError`) let
+    `http.client.IncompleteRead` through and killed the build at 3,500
+    documents in session 20260918-233949: a truncated chunked response, which
+    derives from `HTTPException` and `ValueError` and so matched none of them.
+    Serial fetching never saw one in 562 filings; eight concurrent connections
+    saw one in four thousand. The list was the wrong shape -- this function
+    does nothing but network I/O, so the right rule is that a transfer which
+    fails for any reason is retried, and the two statuses that never clear are
+    the exception to it.
     """
+    import http.client  # noqa: F401  (documented above; caught via Exception)
     url = ARCHIVES + path
     for attempt in range(tries):
         try:
@@ -669,7 +682,9 @@ def fetch_10k(path, tries=4, limiter=None):
             if e.code in (403, 404):
                 raise
             time.sleep(2 ** attempt)
-        except (urllib.error.URLError, TimeoutError, ConnectionError):
+        except Exception:
+            # Any other failure of the transfer. See the docstring: an
+            # enumerated list is the wrong shape here and cost a build.
             time.sleep(2 ** attempt)
     raise SourceError(f"gave up after {tries} attempts: {url}")
 
@@ -768,7 +783,7 @@ def collect_documents(source, spec, log=None, receipt=None):
         for acc in order:
             try:
                 res = _load(acc)
-            except (SourceError, urllib.error.HTTPError, OSError) as e:
+            except Exception as e:                     # counted, never fatal
                 res = e
             if _consume(acc, res):
                 break
@@ -792,7 +807,7 @@ def collect_documents(source, spec, log=None, receipt=None):
                 fut = inflight.pop(cursor)
                 try:
                     res = fut.result()
-                except (SourceError, urllib.error.HTTPError, OSError) as e:
+                except Exception as e:                 # counted, never fatal
                     res = e
                 done = _consume(order[cursor], res)
                 cursor += 1
