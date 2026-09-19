@@ -225,13 +225,33 @@ document.
 
 ---
 
-## Observed, not done
+## Where the evidence lives
 
-- **`chunking.json` and the strategy receipts live in this worktree's
-  `runs/`**, which is gitignored. CLAUDE.md rule 9 now says an artifact a
-  report cites must be copied into the main checkout's `runs/` first. That
-  collides with a standing instruction not to touch the main checkout, so I
-  have asked which governs rather than guessing. **Nothing has been moved.**
+Every artifact this report cites is in the **main checkout**, at
+`C:/Users/polo2/projects/oneground/runs/chunking-sec-filings-10k/`, copied
+there from this worktree and **verified by digest after the copy** rather than
+assumed (CLAUDE.md rule 9):
+
+| artifact | sha256 (first 16) | bytes |
+|---|---|---|
+| `chunking.json` | `8c69ebf44513370a` | 37,741 |
+| `recomputed-scoped.json` | `23440471fd88b7d6` | 1,887 |
+| `strategy-fixed.json` | `4e18cdb561ea6693` | 8,454 |
+| `strategy-sentence.json` | `19dc15ab8f4d8752` | 8,461 |
+| `strategy-structure.json` | `cd04f3a4b9b225fc` | 8,470 |
+| `session-20260919-171906.log` | `86cdc83accec1f92` | 290,998 |
+
+Provenance: `chunking.json` and the three `strategy-*.json` were produced by
+session 20260919-171906 and fetched by `pod watch`; `recomputed-scoped.json`
+was produced locally when the cross-document defect was corrected, and is the
+source of the corrected `span_survival` and `boundary_alignment` values; the
+log is the session's own, declared as an output so it would survive a run that
+never finished.
+
+**The copies in `oneground-v2/runs/` are no longer the ones cited.** That
+worktree is for isolation, not storage, and its `runs/` goes when it does.
+
+## Observed, not done
 - **`sentence` and `structure` produce ~7,400 orphan chunks each** (under the
   64-token floor) against `fixed`'s 60. Both merge short trailing material
   differently from `fixed`'s hard `min_final`. It does not trigger the
@@ -243,6 +263,44 @@ document.
   pieces each cut the span. Worth reporting per unit length.
 - **The near-duplicate measure runs over chunk texts at 158k–186k items** and
   took 257–300 s per strategy. At full corpus it would dominate path A.
+
+## Three instances of one merge shape, and the third is the interesting one
+
+Merging 031 into `main` produced the third example of a defect class this
+project keeps meeting, and with three data points it is an argument rather
+than a caution.
+
+**The shape:** two branches independently rewrite code that meets at one call
+site, in *different functions*, so git reports no conflict and merges cleanly.
+The diff cannot show it. Only running the suite can.
+
+1. **Release rehearsal.** Task 020b changed `simulate.measure_config` to
+   return `(row, timing)`; task 028's `propose.measure_changed` called it
+   expecting a row. No conflict -- different functions. 22 of 31 tests in
+   `test_propose.py` failed with `AttributeError: 'tuple' object has no
+   attribute 'get'`.
+
+2. **The 030 merge** (`6d3ca69`). Task 020 added a call site using
+   `single_threaded_faiss`; task 029 renamed that helper to
+   `deterministic_faiss`. No conflict; 8 tests raised `NameError`. And the
+   rename was not the whole fix: `state()` recomputes the closure and asserts
+   it equals what `build` produced, so it needed the same *arithmetic* path,
+   not merely the same-named helper.
+
+3. **This merge** (`0370dd5`). Task 030c restructured `_fetch_outputs` into a
+   per-output `_fetch_one` with its own `try`; task 035b independently added
+   `extract_collisions` to the same fetch path. Git composed them textually
+   with no conflict -- `_fetch_one` now calls `extract_collisions`.
+
+**And it composed correctly.** 1237 passed, 6 skipped.
+
+That is what makes the third instance worth recording rather than
+embarrassing. The shape does not predict breakage: two of three broke, one did
+not, and **nothing in the diff distinguished them**. The clean merge of 030c
+and 035b looked exactly like the clean merge of 020 and 029. If the rule were
+"this shape breaks things", the third case would refute it; the rule is that
+the outcome is unknowable from the merge output in either direction, which is
+why the full suite is a merge check and not a formality.
 
 ## Repo now contains
 
@@ -259,6 +317,7 @@ Changed: `oneground/cli.py` (the `chunk` command), `oneground/intake/`
 
 ## Blocked on developer
 
-One question, above: whether CLAUDE.md rule 9 or the standing "do not touch
-the main checkout" instruction governs the chunking artifacts in this
-worktree's `runs/`.
+None. The rule 9 question is resolved: the instruction not to touch the main
+checkout was scoped to a release freeze that no longer exists and to the
+proposals stream being mid-merge, neither of which holds. The artifacts are
+moved and verified -- see "Where the evidence lives".
