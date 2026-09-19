@@ -18,7 +18,7 @@ Five things follow, and the developer has ruled on each:
 
 | question | ruling |
 |---|---|
-| Does the UI launch pod sessions? | **Yes.** The typed `y` becomes a confirmation showing the same price card |
+| Does the UI launch pod sessions? | **No — reversed.** It prepares, prices and shows the card, then hands the user the `up` command to run at a terminal. See §4.3 |
 | Does it edit `requirements.yaml`? | **Yes, by writing the file.** The file stays the artifact |
 | Long-running jobs? | **Needed.** Job state, a log, cancellation, surviving a closed tab |
 | One run or many? | **Many.** A list of runs, each a workdir |
@@ -44,7 +44,34 @@ that disagree.
 
 The test that enforces it: for every UI action, the receipt names the CLI
 command that ran, and a test replays that command from the terminal and
-asserts the outputs are byte-identical.
+compares the outputs.
+
+Two corrections, both found by reading the tree rather than the paper.
+
+**The invocation is not recorded today.** No receipt writer captures
+`sys.argv` or an equivalent. `simulate_info.json` records the requirements
+file with its digest, `run_at`, `platform`, `python_version`,
+`library_versions` and — since 033 — `oneground` with its five keys; it does
+not record what was invoked. So a UI action would have nothing to replay
+*from*. The fix is additive and small: the invocation becomes a receipt
+field in the shape 033 established, recorded beside the version that
+produced the artifact, with the same null-and-a-reason rule where it cannot
+be known.
+
+**"Byte-identical" is a claim this tree already refutes.** The first draft of
+this paper asserted it; two runs of the same command differ in
+`simulate_info.json` at `run_at`, `elapsed_seconds`, `timings` and
+`oneground.dirty`, and `MANIFEST.sha256` covers both files, so it differs
+too. That is not a defect to fix — it is 020b's deliberate split, which
+moved facts about a run out of the rows precisely so that the rows would be
+byte-identical. Asserting identity over everything would fail on the design.
+
+So the test states **what must be identical and what may differ**, in the
+shape `corpora/compare_state.py` already uses: `simulate.json`, the state
+files and the other receipts byte-identical; the `_info.json` pair identical
+with the environment-dependent fields set aside, as `strip_environmental`
+sets them aside there. A test that names the exemption is a test; one that
+asserts identity and is then quietly loosened is not.
 
 ## 3. What today's lab already settled
 
@@ -90,21 +117,47 @@ survives a closed browser tab and a restarted server. A user who starts
 finished-with-a-refusal, when they return. The supervisor holds no state
 of its own beyond the job list; the truth is the workdir.
 
+**The supervisor is a second process, and the guard decides it** — this is
+not open. `oneground/lab/guard.py` lists `oneground.simulate`,
+`oneground.verify`, `oneground.report`, `oneground.models`, `oneground.pod`,
+`oneground.adapters` and `oneground.fixture` in `MEASURING`, and
+`server.py` runs `check_views()` and `check_transport()` over its own source
+and **refuses to start** if either is broken. A supervisor running jobs
+in-process would have to import exactly what the server may not, and the
+server would then not start. The architecture already answers the question,
+and it answers it the way the constraint wanted: a crash of the UI cannot
+kill a running `simulate`, because the UI was never the thing running it.
+
 Cancellation is a real stop with a receipt saying so. A cancelled job's
 partial outputs are kept and marked partial, never presented as complete.
 
-### 4.3 The money boundary moves, and does not weaken
+### 4.3 The money boundary does not move at all
 
-Launching a pod session from the UI shows the identical card the CLI
-prints — the resolved GPU, the datacenter derived from the volume, the
-live price range **confirmed at the top**, the caps, the cost ceiling —
-and waits for a click that is the same commitment as the typed `y`.
+**Reversed from this paper's first draft.** The UI does **not** launch pod
+sessions.
 
-Three rules carried over, none relaxed: nothing is created before the
-confirmation; any failure after creation terminates the pod; there is no
-"don't ask again". A confirmation dialog that can be dismissed by habit is
-not a boundary, so the dialog requires the user to type the cost ceiling
-they are accepting, as the CLI requires the letter.
+The draft said the typed `y` "becomes a confirmation showing the same price
+card", and required the user to type the cost ceiling "as the CLI requires
+the letter". That asserted an equivalence where it had made a substitution.
+A terminal prompt and a browser dialog are not the same boundary: a page can
+be scripted, automated, clicked through by a wrapper, or driven by something
+that is not a person, in ways a typed letter at a terminal cannot. `--yes`
+was refused when the pod helper was built, for that reason, and the reason
+has not changed. **A scriptable page is `--yes` with a nicer surface.**
+
+So the UI does what the agents do today, and no more: it resolves the
+session, runs the read-only plan, shows the card — the resolved GPU, the
+datacenter derived from the volume, the live price range **confirmed at the
+top**, the caps, the cost ceiling — and then **prints the `up` command for
+the user to run at a terminal**. The typed `y` stays where it is.
+
+This is less convenient and it is the point. The one operation that spends
+money keeps the one boundary that cannot be automated by accident, and the
+UI's job at that boundary is to make the decision well-informed rather than
+to take it.
+
+Everything else in the session is the UI's: `plan`, `status`, `watch`, the
+fetch, the comparison, and the receipts. Only the create is a terminal.
 
 The UI never holds the API key. It is read from the environment by the
 CLI process, as today; the browser never sees it.
@@ -176,9 +229,11 @@ caption, the projection's declared status — all as built.
 - Authentication beyond the loopback token, if the UI is ever exposed to
   a team rather than a person. Not designed, and the loopback default
   means it need not be yet.
-- Whether the supervisor is a second process or a mode of the same
-  server. A decision for the brief, with the constraint that a crash of
-  the UI must not kill a running `simulate`.
+- ~~Whether the supervisor is a second process or a mode of the same
+  server.~~ **Settled in §4.2**: a second process, decided by the lab's
+  import guard rather than by preference. Left here struck through because
+  the reason it was open — nobody had checked what the guard already
+  forbade — is the more useful record.
 - The visual design beyond the tokens already published. The workspace
   mockup of 17 September is a study, not a specification; what survives
   from it is the shape — a rail of stages, a main view, an evidence
@@ -188,15 +243,19 @@ caption, the projection's declared status — all as built.
 
 ## 8. Sequencing
 
-Three slices, each shippable alone:
+Two slices, each shippable alone:
 
 1. **Read.** Many runs, the report with its drawer, the lab reached from
    a run. No job runs from the UI yet. This is the lab's own machinery
    extended and it carries the lab's guarantees unchanged.
 2. **Configure and run.** The form that writes the file; jobs with the
-   supervisor; every stage but the pod. The receipt-replay test from §2
-   lands here and gates everything after.
-3. **Spend.** The pod session with its confirmation. Last, because it is
-   the only slice where a defect costs money rather than time.
+   supervisor; every stage. The receipt-replay test from §2 lands here and
+   gates everything after.
+
+There is no third slice. It was **Spend** — the pod session with its
+confirmation — and §4.3's reversal removes it: the UI never creates a pod,
+so there is nothing to sequence last. What remains of that work is session
+preparation and the card, which are reads, and they belong in slice 1 with
+everything else the UI only looks at.
 
 *The exam, before the code.*

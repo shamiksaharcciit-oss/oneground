@@ -46,6 +46,34 @@ reproduces pure dense retrieval — so the weighting that "wins" is always
 A report that did this would be confidently, plausibly wrong, which is
 the failure mode this product exists to prevent.
 
+### The claim invariant will not catch this, and it is worth saying why
+
+019 checks that a sentence follows from the rows it cites: that `holds_for`
+lies inside `scope`, that every member quantified over appears in the cited
+rows, that a number quoted in prose is one the claim cites. All of it is
+sentence-against-row consistency. A hybrid row carrying `recall_at_10: 0.97`
+computed against dense k-NN would make the sentence "recall@10 is 0.97"
+**true of its rows**, and the invariant would pass it — because the
+provenance of the ground truth is not one of the invariant's inputs. The
+forbidden-phrase scan does not reach it either: that matches wording —
+"better", "recommend", "outperforms" — and this trap is a correctly
+rendered number that means something other than a reader will assume.
+
+So the refusal is **structural, and it happens at construction rather than
+at rendering**, on the pattern 026 and 034 already established: 026 refuses
+a configuration key the family does not read; 034 refuses a knob the chosen
+index algorithm does not read.
+
+> **A recall field belongs to the ground truth it was computed against.** A
+> configuration with a sparse component may not carry a `recall_at_*`
+> computed from dense-only ground truth. Naming one is refused, with the
+> reason and with what the field would need in order to exist — labels, or
+> a ground truth the sparse side also had a hand in.
+
+Refusing it at construction is what makes it preventable rather than
+policed. A row that cannot hold the number cannot have the number rendered
+from it, and no reviewer has to notice.
+
 **Any figure that implies fusion helped.** Without labels, "helped" is
 unmeasurable here. The word does not appear in a hybrid result.
 
@@ -60,6 +88,13 @@ can matter on this corpus at all** — and that is answerable.
 
 For each query, the dense top-k and the sparse top-k, and their overlap.
 Reported as a distribution, not a mean.
+
+**At the same `k` on both sides**, stated with the figure. The two
+retrievers are asked for the same number of documents and the overlap is
+the size of the intersection of those two sets, so that a number in the
+report is comparable with another number in the report. Dense top-10
+against sparse top-100 is a different quantity wearing the same word, and
+two implementers reading "their overlap" would otherwise build the two.
 
 This is the headline measure, and its interpretation is the paper's main
 claim:
