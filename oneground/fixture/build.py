@@ -159,7 +159,13 @@ def build(spec_path, source=None, out="fixtures", skip_projection=False):
     # A streamed one has nothing to hash: the reader verifies the pinned
     # revision before it reads content and hands back the same manifest digest
     # through `receipt`. Either way `src_sha` is `source.snapshot_sha256`.
-    receipt = {}
+    # `outdir` is handed to the reader because a source can produce artifacts
+    # of its own. sec-filings-10k writes documents.jsonl.zst, its section
+    # statistics and its pre-chunking duplicate rate, none of which the
+    # generic builder knows about; the spec lists them under
+    # `artifacts.extra_receipts` and they join the manifest below. A spec that
+    # declares none behaves exactly as before, byte for byte.
+    receipt = {"outdir": outdir}
     if source:
         log("hashing source snapshot")
         receipt["snapshot_sha256"] = source_digest(source)
@@ -254,7 +260,8 @@ def build(spec_path, source=None, out="fixtures", skip_projection=False):
     # Written BEFORE the projection on purpose. Everything above is a receipt;
     # from here the fixture is complete and verifiable, and nothing the
     # projection does can take that away.
-    listed = write_manifest(outdir, RECEIPT_ARTIFACTS)
+    extra = list((spec.get("artifacts") or {}).get("extra_receipts") or [])
+    listed = write_manifest(outdir, RECEIPT_ARTIFACTS + extra)
     log(f"manifest written, {len(listed)} artifacts - "
         f"fixture is verifiable from here")
 

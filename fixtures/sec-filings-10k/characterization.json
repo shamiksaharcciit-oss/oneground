@@ -1,0 +1,30 @@
+{
+  "characterization": {
+    "ambiguous_query_rate": 0.6545,
+    "boundary_crispness": 0.107347,
+    "drift_after": 0.615873,
+    "drift_before": 0.631533,
+    "drift_n_after": 630,
+    "drift_n_before": 1370,
+    "intrinsic_dimensionality": 33.425537,
+    "skew_top10_share": 0.089107
+  },
+  "fixture": "sec-filings-10k",
+  "hot_categories": [
+    "1A"
+  ],
+  "reference_results": {
+    "semantic_sharded": {
+      "p50_copies": 4,
+      "p95_copies": 4,
+      "p99_copies_per_vector": 4,
+      "recall_at_10": 0.9289,
+      "routing_ceiling": 0.93005,
+      "storage_amplification": 3.43184
+    },
+    "single_node_hnsw": {
+      "recall_at_10": 0.9882
+    }
+  },
+  "version": 1
+}

@@ -15,6 +15,7 @@ receipt if the file says which 20,000.
 """
 
 from . import arxiv as _arxiv
+from . import sec_filings as _sec_filings
 from . import stackexchange as _stackexchange
 from .arxiv import (eligible, primary_category, sample_records, split_queries,
                     year_of)
@@ -29,6 +30,11 @@ from .loaders import (LoadError, load_ids, load_metadata, load_queries,
 READERS = {
     "arxiv_jsonl": _arxiv.sample_records,
     "stackexchange_parquet": _stackexchange.sample_records,
+    # Task 030. The only reader whose record is not a source row: a filing is
+    # far longer than the embedding model's window, so this one returns chunks
+    # under a declared baseline chunking and writes the documents they came
+    # from, with their section offsets, as artifacts of their own.
+    "sec_filings_edgar": _sec_filings.sample_records,
 }
 
 
