@@ -83,12 +83,64 @@ per algorithm. One builder, [`oneground/models/indexes.py`](../oneground/models/
 is used by all three families, because an algorithm and its knobs are a
 property of faiss rather than of a partition.
 
-| `index` | what it is | knobs | determinism | cost |
-|---|---|---|---|---|
-| `flat` | exact. Every vector scored. | none | byte-identical on one machine; no training, so nothing to diverge | the reference point: recall 1.0 by construction, and the memory and query cost of not approximating |
-| `hnsw` | a navigable small-world graph. **The default**, and what every published fixture value was measured under. | `M`, `efConstruction`, `efSearch` | byte-identical with `deterministic=True`; one thread is required (task 012b), no BLAS is required across machines (task 029) | measured per run; see the 034 report |
-| `ivf` | `nlist` k-means cells, `nprobe` of them searched | `nlist`, `nprobe` | trains a k-means, so it inherits task 029 exactly: seeded from the run's seed and trained under `deterministic_faiss` | measured per run |
-| `ivf_pq` | the same, with the residuals product-quantised | `nlist`, `nprobe`, `m`, `nbits` | trains a **second** clustering for the PQ, seeded the same way | an order of magnitude smaller, and lossy in a way that depends on the distribution it trained on |
+| `index` | what it is | knobs | determinism (measured, task 034) |
+|---|---|---|---|
+| `flat` | exact. Every vector scored. | none | byte-identical with the switch on **or off** — there is no training and no graph, so nothing to diverge |
+| `hnsw` | a navigable small-world graph. **The default**, and what every published fixture value was measured under. | `M`, `efConstruction`, `efSearch` | byte-identical **only** with `deterministic=True`; two builds differ otherwise (task 012b, re-confirmed) |
+| `ivf` | `nlist` k-means cells, `nprobe` of them searched | `nlist`, `nprobe` | trains a k-means, so it inherits task 029: seeded from the run's seed, trained under `deterministic_faiss`. Byte-identical either way at 2,000 vectors on one machine — which is not a claim about two machines |
+| `ivf_pq` | the same, with the residuals product-quantised | `nlist`, `nprobe`, `m`, `nbits` | trains a **second** clustering for the PQ, seeded the same way; same result as `ivf` |
+
+### What they cost, measured
+
+Both published fixtures, 150,000 vectors, 2,000 queries, one operating point
+per algorithm. `idx MB` is what faiss reports for the built index, summed over
+shards; `over MB` is that minus the vector data it holds.
+
+| corpus | family | index | recall@10 | routing loss | index loss | idx MB | over MB | build s |
+|---|---|---|---|---|---|---|---|---|
+| arxiv | single_node | flat | 1.0000 | 0.0000 | 0.0000 | 460.8 | 0.0 | 0 |
+| arxiv | single_node | hnsw | 0.9968 | 0.0000 | 0.0032 | 501.6 | 40.8 | 210 |
+| arxiv | single_node | ivf | 0.8569 | 0.0000 | 0.1431 | 465.2 | 4.4 | 250 |
+| arxiv | single_node | ivf_pq | 0.2872 | 0.0000 | 0.7128 | **7.5** | 5.1 | 427 |
+| arxiv | semantic | flat | 0.9328 | 0.0672 | 0.0000 | 1711.8 | 0.0 | 13 |
+| arxiv | semantic | hnsw | 0.9324 | 0.0672 | 0.0004 | 1863.2 | 151.3 | 322 |
+| arxiv | semantic | ivf | 0.7446 | 0.0672 | 0.1882 | 1766.8 | 55.0 | 116 |
+| arxiv | semantic | ivf_pq | 0.4324 | 0.0672 | 0.5004 | 265.2 | **256.3** | 630 |
+| arxiv | hash | flat | 1.0000 | 0.0000 | 0.0000 | 460.8 | 0.0 | 1 |
+| arxiv | hash | hnsw | 0.9984 | 0.0000 | 0.0016 | 501.6 | 40.8 | 135 |
+| arxiv | hash | ivf | 0.9397 | 0.0000 | 0.0603 | 464.4 | 3.6 | 62 |
+| arxiv | hash | ivf_pq | 0.2461 | 0.0000 | 0.7539 | 8.3 | 5.9 | 360 |
+| stackexchange | single_node | flat | 1.0000 | 0.0000 | 0.0000 | 460.8 | 0.0 | 0 |
+| stackexchange | single_node | hnsw | 0.9938 | 0.0000 | 0.0062 | 501.6 | 40.8 | 347 |
+| stackexchange | single_node | ivf | 0.7587 | 0.0000 | 0.2414 | 465.2 | 4.4 | 275 |
+| stackexchange | single_node | ivf_pq | 0.2772 | 0.0000 | 0.7228 | 7.5 | 5.1 | 703 |
+| stackexchange | semantic | flat | 0.8692 | 0.1308 | 0.0000 | 1795.9 | 0.0 | 28 |
+| stackexchange | semantic | hnsw | 0.8688 | 0.1308 | 0.0004 | 1954.7 | 158.8 | 338 |
+| stackexchange | semantic | ivf | 0.6554 | 0.1308 | 0.2138 | 1851.1 | 55.2 | 74 |
+| stackexchange | semantic | ivf_pq | 0.3880 | 0.1308 | 0.4812 | 265.9 | 256.5 | 867 |
+| stackexchange | hash | flat | 1.0000 | 0.0000 | 0.0000 | 460.8 | 0.0 | 2 |
+| stackexchange | hash | hnsw | 0.9966 | 0.0000 | 0.0034 | 501.6 | 40.8 | 459 |
+| stackexchange | hash | ivf | 0.8448 | 0.0000 | 0.1552 | 464.4 | 3.6 | 204 |
+| stackexchange | hash | ivf_pq | 0.2473 | 0.0000 | 0.7527 | 8.3 | 5.9 | 831 |
+
+**One operating point, not a curve.** Every IVF row is `nprobe=8`, which for
+`nlist=1024` is 0.8% of the cells; every IVF-PQ row is `m=16, nbits=8`. These
+numbers say what those settings cost on these corpora. They do not say what
+IVF-PQ costs, and a reader who reads them as a property of the algorithm will
+be wrong about a different `nprobe`.
+
+**The estimate is not the measurement.** `est_memory_bytes` is 460.8 MB for
+every single-node row, including the IVF-PQ one that measures 7.5 MB — wrong
+by 61×. That is the whole reason `footprint()` stopped being arithmetic.
+
+**Quantisation does not survive sharding at this shard size.** The semantic
+IVF-PQ rows hold 8.9 MB of codes and carry 256.3 MB of overhead, because each
+of the 256 shards trains and stores its own codebook: a coarse quantiser of
+`64 × 768 × 4` = 197 KB plus a PQ codebook of `16 × 256 × 48 × 4` = 786 KB,
+times 256, is ~252 MB. **The codebooks cost 29× more than the codes they
+compress.** The 61× compression a single index gets becomes 6.5× when the
+same corpus is cut into 256 pieces, and nothing about the algorithm warns
+you — it is a property of the partition it is paired with.
 
 Three rules hold across the four:
 
