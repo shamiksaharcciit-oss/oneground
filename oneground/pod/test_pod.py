@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import pathlib
 import tempfile
 import time
 
@@ -3381,3 +3382,99 @@ def test_run_session_stamps_running_and_sync_stamps_the_rest():
                  "launch_start"):
         assert 'phase("%s")' % name in sync_src, name
     assert "state.mark_phase" in sync_src
+
+
+# -- task 030b: an unexpected stop fetches like every other exit path --------
+
+class _FakeSshWithFiles(_FakeSsh):
+    """_FakeSsh plus the two calls `_fetch_outputs` makes on each output.
+
+    Kept separate from `_FakeSsh` so the watchdog tests that predate task 030b
+    keep exercising exactly what they did before.
+    """
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.fetched = []
+
+    def exists(self, remote):
+        return True
+
+    def get(self, remote, local, timeout=None):
+        self.fetched.append(remote)
+        pathlib.Path(local).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(local).write_bytes(b"x")
+
+
+def _watch_with_status(tmp, status, sid="stopped1", ssh_raises=False,
+                       outputs=None):
+    """Drive `watch` against a pod whose desiredStatus is not RUNNING."""
+    _seed_session(tmp, pod_id="pod-1", sid=sid, hours_ago=0.01)
+    if outputs is not None:
+        statemod.mark(sid, "running", tmp, outputs=outputs)
+    pod = {"id": "pod-1", "desiredStatus": status, "costPerHr": 0.72}
+    t = _transport({"/pods/pod-1": pod, "/pods": [pod]})
+    fake = _FakeSshWithFiles([10, 20, 30])
+
+    def from_pod(pod, **kw):
+        if ssh_raises:
+            raise sshx.SshError("pod pod-1 has no SSH endpoint yet")
+        return fake
+
+    orig_from_pod, orig_sleep = sshx.PodSsh.from_pod, cli.time.sleep
+    sshx.PodSsh.from_pod = staticmethod(from_pod)
+    cli.time.sleep = lambda s: None
+    try:
+        code, out, _ = _run_cli(["watch", sid, "--interval", "0"], t, tmp)
+    finally:
+        sshx.PodSsh.from_pod = orig_from_pod
+        cli.time.sleep = orig_sleep
+    return code, out, [c for c in t.calls if c[0] == "DELETE"]
+
+
+def test_watch_fetches_when_the_pod_stops_unexpectedly():
+    """The case where the evidence matters most must not be the case with no
+    fetch. Before task 030b this path returned without fetching anything."""
+    with tempfile.TemporaryDirectory() as tmp:
+        code, out, deleted = _watch_with_status(tmp, "EXITED")
+        assert "POD STOPPED UNEXPECTEDLY" in out, out
+        assert "fetching" in out.lower(), out
+        assert deleted, "an unexpectedly stopped pod was not terminated"
+
+
+def test_watch_still_terminates_when_the_stopped_pod_cannot_be_reached():
+    """A stopped pod usually has no SSH endpoint. The fetch fails, is said to
+    have failed, and the pod is terminated anyway -- a pod kept alive to retry
+    a download is a pod billing while nobody is watching."""
+    with tempfile.TemporaryDirectory() as tmp:
+        code, out, deleted = _watch_with_status(tmp, "EXITED", sid="stopped2",
+                                                ssh_raises=True)
+        assert "POD STOPPED UNEXPECTEDLY" in out, out
+        assert "fetch failed" in out, out
+        assert deleted, "the pod was left alive after a failed fetch"
+
+
+def test_watch_records_why_an_unexpectedly_stopped_session_ended():
+    """`finished_because` separates a stop nobody chose from a cap or a DONE."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _watch_with_status(tmp, "EXITED", sid="stopped3")
+        rec = statemod.load("stopped3", tmp)
+        assert rec["state"] == "terminated"
+        assert rec.get("finished_because") == "pod_stopped", rec
+
+
+def test_watch_fetch_order_puts_the_log_first():
+    """The run log is declared first so a run that never reached its MANIFEST
+    still comes home with its phase timings. _fetch_outputs walks the list in
+    order, so order is the guarantee."""
+    with tempfile.TemporaryDirectory() as tmp:
+        outs = [{"remote": "/workspace/oneground-session.log",
+                 "local": "logs/", "extract": False},
+                {"remote": "/workspace/big.tgz", "local": "./",
+                 "extract": False}]
+        code, out, _ = _watch_with_status(tmp, "EXITED", sid="stopped4",
+                                          outputs=outs)
+        i_log = out.find("oneground-session.log")
+        i_tgz = out.find("big.tgz")
+        assert i_log != -1 and i_tgz != -1, out
+        assert i_log < i_tgz, "the log was not fetched first"

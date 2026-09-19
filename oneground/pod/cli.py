@@ -1041,9 +1041,21 @@ def cmd_watch(args):
             return 0
 
         if pod.get("desiredStatus") != "RUNNING":
-            print("pod state is %s; stopping the watch"
-                  % pod.get("desiredStatus"))
-            state.mark(args.id, "terminated", root)
+            # An unexpected stop fetches like every other exit path (task
+            # 030b). This used to return here without fetching anything, so
+            # the one case where a pod dies for a reason nobody chose -- the
+            # case where the evidence matters most -- was the only case with
+            # no fetch. `/workspace` is a network volume and outlives the
+            # pod, so the artifacts were recoverable by hand, which is what
+            # task 027 had to do; "recoverable by hand" is not a plan.
+            #
+            # The fetch may well fail: a stopped pod usually has no SSH
+            # endpoint, and `PodSsh.from_pod` raises when the port mapping is
+            # gone. `_finish` catches that, says so, and terminates anyway,
+            # which is the same behaviour every other exit path already gets.
+            print("\nPOD STOPPED UNEXPECTEDLY: desiredStatus is %s. Fetching "
+                  "what exists, then terminating." % pod.get("desiredStatus"))
+            _finish(client, rec, root, args, reason="pod_stopped")
             return 0
 
         # If the pod's own price has appeared or moved since the record was
