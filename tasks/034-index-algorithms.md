@@ -26,6 +26,25 @@ memory measured rather than estimated, and a cost that is
 corpus-dependent — which is precisely the kind of thing folklore gets
 wrong.
 
+There is a gap on the other side of it. Those four are faiss's four, and
+the simulation is honest about them; engines offer something else. Qdrant
+builds HNSW and nothing else — its quantisation is a modifier on that
+graph, not a separate index family. pgvector offers HNSW and IVFFlat, and
+its IVFFlat is not faiss's IVF: different construction, different
+parameter names, different behaviour. So without the engine half of this
+task, a user simulates `ivf_pq`, learns it costs 3% of recall for a fifth
+of the memory on their corpus, takes that to `verify`, and finds out only
+afterwards that neither engine they are considering can build it. The
+simulation answered a question about the algorithm class; the deployment
+question is about what their engine implements, and the tool should say
+so before the run rather than after.
+
+The rules for that already exist and need no invention. The
+same-configuration rule already refuses to let a measurement settle a
+constraint for an option the engine was not built with, so an `ivf_pq`
+row verified on Qdrant is already impossible. What is missing is that the
+refusal should be **early, named, and distinguishable from an absence**.
+
 ## Do
 
 1. **The index becomes a declared parameter of every family**, in 026's
@@ -75,26 +94,81 @@ wrong.
    about drift and agreed about architecture; whether they agree about
    quantisation is not something anyone here knows.
 
-6. **What the report may not say**, tested as the claim invariant is
-   tested: that one algorithm is better than another (they trade
-   differently and the trade is the finding); that a memory figure for
-   one corpus transfers to another; that a quantisation result at 150k
-   holds at 10M. The sample caveat already exists — this adds the
-   quantisation caveat beside it, because PQ's error depends on the
-   distribution it was trained on.
+6. **Each adapter declares its index families**, in the same shape as the
+   parameter tables: which families it can build, and for each, the
+   engine's own parameter names beside the family's declared ones. An
+   adapter that does not declare them cannot be used to verify an
+   indexed configuration — the conformance suite enforces the
+   declaration, as it enforces every other protocol requirement.
 
-7. **Published values do not move.** Both fixtures' reference results
-   were measured with HNSW at declared parameters. Adding `index` as a
-   parameter must not change a single one — prove it by re-running the
-   reference configurations and diffing `simulate.json`, and if a label
-   changes because `index` now appears in it, 032's canonicalisation rule
-   applies: a parameter at its default produces the same label as its
-   omission, so `index: hnsw` must be the default and must not re-label.
+   Do not guess what an engine supports. Resolve it live against the
+   pinned versions, and where the mapping from a family's parameter to an
+   engine's is not exact, record it as approximate with what differs —
+   pgvector's IVFFlat is not faiss's IVF and the declaration must say so
+   rather than implying a correspondence.
 
-8. **Docs.** `docs/MODELS.md` gains the four algorithms, what each is
-   for, its knobs, its determinism status and its measured cost.
-   `docs/CHARTER.md`'s roadmap loses "more engine adapters" as the only
-   named index work and gains this.
+   This does not add engine-specific index families to `simulate`. If an
+   engine builds something faiss cannot, that is a gap in what the
+   simulator can predict and it is named as one — not papered over by
+   simulating something adjacent and calling it the same.
+
+7. **`verify` refuses before it creates anything.** A configuration whose
+   index family the engine cannot build is refused at plan time, naming
+   the family, the engine, and what the engine does offer. This is the
+   022 precondition rule and the money boundary applied together: the
+   refusal must come before a pod is created, not after a run has been
+   paid for.
+
+8. **The report distinguishes three states, not two.** Today a
+   constraint is `meets`, `fails`, or `couldnt_check`. The third now
+   carries a reason that separates:
+   - **not verified** — this configuration could have been verified and
+     was not. Remedy: run it.
+   - **not verifiable here** — no engine in this run can build this index
+     family. Remedy: name the engines that could, or state that none of
+     the adapters can and that this remains a simulation result.
+   A reader must be able to tell "nobody ran it" from "it cannot be run
+   here", because the actions are different and one of them is *choose a
+   different engine*.
+
+   None of this makes a simulation result less valid. An `ivf_pq` row
+   measured against exact ground truth is a true statement about that
+   algorithm on that corpus, and it stays in the report with its recall
+   and its measured memory. What changes is that the report no longer
+   implies it is a deployable option without saying where it could be
+   deployed.
+
+9. **Say it in the decision log**, in the sentence that already names
+   what would settle a couldn't-check. For a not-verifiable-here row,
+   what would settle it is not a command — it is a different engine, or
+   an adapter that does not exist. The log should say which, and it
+   should name the adapter as a contribution unit where that is the
+   honest answer.
+
+10. **What the report may not say**, tested as the claim invariant is
+    tested: that one algorithm is better than another (they trade
+    differently and the trade is the finding); that a memory figure for
+    one corpus transfers to another; that a quantisation result at 150k
+    holds at 10M. The sample caveat already exists — this adds the
+    quantisation caveat beside it, because PQ's error depends on the
+    distribution it was trained on.
+
+11. **Published values do not move.** Both fixtures' reference results
+    were measured with HNSW at declared parameters. Adding `index` as a
+    parameter must not change a single one — prove it by re-running the
+    reference configurations and diffing `simulate.json`, and if a label
+    changes because `index` now appears in it, 032's canonicalisation rule
+    applies: a parameter at its default produces the same label as its
+    omission, so `index: hnsw` must be the default and must not re-label.
+
+12. **Docs.** `docs/MODELS.md` gains the four algorithms, what each is
+    for, its knobs, its determinism status and its measured cost.
+    `docs/CHARTER.md`'s roadmap loses "more engine adapters" as the only
+    named index work and gains this. `docs/ADAPTERS.md` gains the coverage
+    table: the four families against the adapters, showing which
+    combinations are verifiable today. That table is a fact about the
+    ecosystem rather than about the corpus, and it belongs where someone
+    choosing an engine will meet it.
 
 ## Acceptance
 - Four algorithms declared, their knobs in the parameter tables, unknown
@@ -106,8 +180,19 @@ wrong.
   numbers.
 - Every published fixture value unchanged; labels unchanged for the
   reference configurations.
+- Every adapter declares its index families, resolved live, with
+  approximate mappings marked as approximate and what differs stated.
+- A configuration the engine cannot build is refused at plan time, before
+  any billable resource exists.
+- The report separates *not verified* from *not verifiable here*, and the
+  decision log says what would settle each.
+- The coverage table is in `docs/ADAPTERS.md`.
 
 ## Do not
 - Rank the algorithms. Change a published value or tolerance. Let
   `index: hnsw` re-label an existing configuration. Estimate a memory
   figure that can be measured.
+- Guess an engine's capabilities from documentation rather than
+  resolving them. Map a family onto an engine's nearest equivalent and
+  call it the same. Let a not-verifiable-here row read as a run that
+  simply has not happened yet.
