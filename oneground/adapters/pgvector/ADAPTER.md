@@ -228,6 +228,38 @@ stub-only pass proves the protocol; only a live engine proves the engine.
 
 ---
 
+## Index families (task 034)
+
+`simulate` measures four index algorithms — `flat`, `hnsw`, `ivf`, `ivf_pq`.
+Postgres answers which of them this server can build exactly, so
+`index_families()` asks it rather than reading release notes:
+
+```sql
+SELECT amname FROM pg_am WHERE amtype = 'i';
+```
+
+The rows it returns are kept in `raw`. `hnsw` maps onto the family of the
+same name. `ivfflat` maps onto `ivf` and is recorded **approximate**, with
+what differs stated: the two clusterings are trained by different code from
+different samples, the parameters are named and scoped differently (a build
+reloption `lists` against faiss's `nlist`; a session GUC `ivfflat.probes`
+against an attribute on the index object), and oneground has not measured
+that the two return the same candidate set for any corpus. A recall figure
+simulated on faiss's IVF is not a prediction of this one, and the declaration
+says so rather than implying a correspondence.
+
+`flat` is deliberately **not** claimed. An unindexed pgvector table is scanned
+exhaustively, which is exact — but that is the absence of an index rather than
+an index family, and `pg_am`, which is what was asked, does not list it.
+
+**This adapter ships `not_resolved`.** The machine it was written on has no
+Docker and no reachable Postgres, so the query has never been run against a
+server. `oneground adapters coverage --engine pgvector --endpoint
+postgresql://...` is what replaces it, and the record names the pgvector
+version that answered.
+
+---
+
 ## Known limits
 
 - **One table per namespace, one database.** No sharding or replication of

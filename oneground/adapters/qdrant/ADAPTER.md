@@ -136,6 +136,30 @@ as its first vector. Worth fixing before anyone points this at one.
 
 ---
 
+## Index families (task 034)
+
+`simulate` measures four index algorithms — `flat`, `hnsw`, `ivf`, `ivf_pq`.
+`index_families()` asks the engine which of them it builds, by creating a
+probe collection under the `oneground-` prefix and reading back the
+configuration Qdrant returns for it; the index structures in that
+configuration are the answer, and the configuration itself is kept in `raw`
+so a later reader can check this reading rather than trust it. The probe
+collection is deleted in a `finally`, like every other namespace.
+
+**This adapter ships `not_resolved`.** The machine it was written on has no
+Docker and no reachable Qdrant, so the question has never been put to a
+running engine. Every family is therefore `unresolved`, which `verify`
+reports as couldn't-check — not as a capability and not as a refusal.
+`oneground adapters coverage --engine qdrant --endpoint <url>` is what
+replaces it, and the record it writes names the version that answered.
+
+A quantization block, if the engine returns one, is deliberately **not** read
+as an index family: it is a modifier on the HNSW graph rather than a separate
+index, and mapping it onto `ivf_pq` would claim a correspondence nobody has
+measured.
+
+---
+
 ## Not supported
 
 - Multi-vector (named vector) collections — see quirk 7.

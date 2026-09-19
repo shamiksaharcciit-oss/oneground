@@ -72,6 +72,15 @@ def _knob(config, name, knobs=None):
     return int(config.get(name, default))
 
 
+def _in(where):
+    """The `in region 3` clause of a refusal, or nothing.
+
+    A sharded family builds one index per region, and "nlist 1024 over 812
+    vectors" is only actionable when a reader knows which region it was.
+    """
+    return (" in " + where) if where else ""
+
+
 class IndexTooSmall(ParameterError):
     """A training set smaller than the cells it was asked to learn.
 
@@ -84,10 +93,7 @@ def build(vectors, config, *, seed, deterministic, dim=None, add_chunk=None,
           progress=None, where="", knobs=None):
     """The configuration's index, built over `vectors`.
 
-    `where` names the shard for an error message: a sharded family builds one
-    of these per region, and "nlist 1024 over 812 vectors" is only actionable
-    when a reader knows which region.
-
+    `where` names the shard a refusal is about; see `_in`.
     `knobs` are values the family fixes for every index it builds; see `_knob`.
     """
     import faiss
@@ -114,7 +120,7 @@ def build(vectors, config, *, seed, deterministic, dim=None, add_chunk=None,
                     "index=%s asks for nlist=%d cells over %d vector(s)%s; "
                     "faiss cannot train more cells than it has points. Lower "
                     "nlist, or choose a partition with larger shards."
-                    % (algorithm, nlist, n, (" in " + where) if where else ""))
+                    % (algorithm, nlist, n, _in(where)))
             quantizer = faiss.IndexFlatIP(dim)
             if algorithm == IVF:
                 index = faiss.IndexIVFFlat(quantizer, dim, nlist,
@@ -125,8 +131,20 @@ def build(vectors, config, *, seed, deterministic, dim=None, add_chunk=None,
                     raise ParameterError(
                         "index=ivf_pq asks for m=%d sub-quantisers over "
                         "dimension %d; the dimension must divide by m" % (m, dim))
-                index = faiss.IndexIVFPQ(quantizer, dim, nlist, m,
-                                         _knob(config, "nbits", knobs),
+                nbits = _knob(config, "nbits", knobs)
+                # The PQ trains its own k-means, of 2**nbits centroids, over
+                # the same points. It is a second size floor and a much
+                # higher one than nlist's: nbits=8 wants 256 points where
+                # nlist=8 wants 8, and faiss's own message for it names
+                # neither the configuration nor the shard.
+                if 2 ** nbits > n:
+                    raise IndexTooSmall(
+                        "index=ivf_pq asks for nbits=%d, which is %d PQ "
+                        "centroids per sub-quantiser, over %d vector(s)%s; "
+                        "faiss cannot train more centroids than it has "
+                        "points. Lower nbits, or choose a partition with "
+                        "larger shards." % (nbits, 2 ** nbits, n, _in(where)))
+                index = faiss.IndexIVFPQ(quantizer, dim, nlist, m, nbits,
                                          faiss.METRIC_INNER_PRODUCT)
                 # The PQ's own clustering, seeded for the same reason the
                 # coarse one is.
@@ -163,9 +181,10 @@ def _add(index, vectors, add_chunk, progress):
 def set_search(index, config, knobs=None):
     """Put the configuration's search-time knob on a built index.
 
-    Called before every search rather than once at build: `simulate` reuses a
-    built index across a sweep's rows, and a knob left over from the previous
-    row would be measured as this row's.
+    Called before every search rather than once at build, which is what the
+    families did with `efSearch` before 034: `search`, `state` and a caller
+    holding a `BuiltIndex` can each pass a different config, and a knob left
+    over from the previous call would be measured as this one's.
     """
     algorithm = algorithm_of(config)
     if algorithm == HNSW:

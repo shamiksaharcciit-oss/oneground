@@ -138,6 +138,20 @@ def test_more_cells_than_points_is_its_own_refusal_synthetic():
     assert "nlist=1024" in msg and "64 vector" in msg and "region 3" in msg
 
 
+def test_a_pq_asked_for_more_centroids_than_points_is_refused_synthetic():
+    """The second size floor, and the much higher one. `nbits=8` wants 256
+    training points per sub-quantiser where `nlist=8` wants 8, and faiss
+    raises from inside `train` naming neither the config nor the shard."""
+    x, _ = _corpus(n=128)
+    cfg = Config.make("single_node_hnsw", {"index": IVF_PQ, "nlist": 8,
+                                           "nprobe": 2, "m": 4, "nbits": 8})
+    with pytest.raises(indexes.IndexTooSmall) as e:
+        indexes.build(x, cfg, seed=1, deterministic=True, where="region 9")
+    msg = str(e.value)
+    assert "nbits=8" in msg and "256" in msg and "128 vector" in msg, msg
+    assert "region 9" in msg, msg
+
+
 def test_a_dimension_that_does_not_divide_by_m_is_refused_synthetic():
     x, _ = _corpus(dim=18)
     cfg = Config.make("single_node_hnsw", {"index": IVF_PQ, "nlist": 4,

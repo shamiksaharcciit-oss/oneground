@@ -121,6 +121,12 @@ NOISE_FRACTION = 0.20
 RTT_PINGS = 50
 
 
+# Where a recorded index-family resolution is looked for, in order. The first
+# that exists wins: a resolution run against a live engine beats the
+# declaration an adapter shipped, which is `not_resolved` on purpose.
+COVERAGE_FILES = (os.path.join("adapters", "index-coverage.json"),)
+
+
 class VerifyError(RuntimeError):
     """The run cannot proceed. The message says what to do about it."""
 
@@ -615,6 +621,74 @@ def environment_id():
     return local_environment_id()
 
 
+def index_coverages(engine_names, workdir=None, repo_root=None):
+    """What each engine says it can build, best source first (task 034).
+
+    A resolution recorded against a live engine beats the declaration the
+    adapter shipped, which is `not_resolved` on purpose -- nobody types an
+    engine's capabilities in from its documentation. An engine with neither
+    is `not_resolved` too, which is a couldn't-check and not a capability.
+    """
+    from ..adapters import get as get_adapter
+    from ..adapters import index_families as IF
+
+    recorded = {}
+    roots = [d for d in (workdir, repo_root, os.getcwd()) if d]
+    for root in roots:
+        for rel in COVERAGE_FILES:
+            path = os.path.join(root, rel)
+            if os.path.exists(path):
+                for cov in IF.read(path):
+                    recorded.setdefault(cov.engine, cov)
+    out = []
+    for name in engine_names:
+        if name in recorded:
+            out.append(recorded[name])
+            continue
+        try:
+            declared = getattr(get_adapter(name)(), "INDEX_COVERAGE", None)
+        except Exception:                                 # noqa: BLE001
+            declared = None
+        out.append(declared if declared is not None else IF.unresolved(
+            name, "no adapter declaration and no recorded resolution"))
+    return out
+
+
+def plan_index_families(cfg, engine_names, coverages):
+    """Whether every named engine can build the declared index family.
+
+    Called before anything is created -- before a container is started and
+    before a pod session is prepared -- because a refusal that arrives after
+    a run has been paid for is not a refusal. 022's precondition rule
+    applies: every engine that cannot build it is named at once.
+
+    Returns the per-engine decisions. Raises `VerifyError` when any named
+    engine cannot build the family. An engine whose coverage was never
+    resolved does **not** refuse: "nobody asked" is not "it cannot be done",
+    and collapsing the two is the defect this exists to prevent.
+    """
+    from ..adapters import index_families as IF
+    from ..models.base import HNSW, INDEX_ALGORITHMS
+
+    family = str(cfg.get("index", HNSW) or HNSW)
+    if family not in INDEX_ALGORITHMS:
+        raise VerifyError(
+            f"verify.index {family!r} is not a declared index family; they "
+            f"are {', '.join(INDEX_ALGORITHMS)}")
+    decisions = [IF.buildability(cov, family) for cov in coverages]
+    refusing = [d for d in decisions if d.state == IF.NOT_VERIFIABLE_HERE]
+    if refusing:
+        raise VerifyError(
+            "this run cannot be verified as configured:\n  - "
+            + "\n  - ".join(f"{d.reason}. {d.remedy}" for d in refusing)
+            + "\n\nNothing has been created. Change verify.index, or run "
+              "against an engine that builds it. A simulate row for "
+              f"index={family} stays a true statement about that algorithm "
+              "on this corpus; it is simply not a deployable option on these "
+              "engines.")
+    return decisions
+
+
 def run(requirements_path, up=False, down=False, on_pod=False,
         target_override=None, endpoint_override=None, engines_override=None,
         log_fn=log):
@@ -645,6 +719,13 @@ def run(requirements_path, up=False, down=False, on_pod=False,
                           "indexing_threshold": 1})
     metric = str(cfg.get("metric", "inner_product"))
     ks = tuple(int(k) for k in (cfg.get("ks") or (10, 100)))
+
+    # Task 034, before anything exists: an engine that cannot build the
+    # declared index family refuses here, not after a pod has been paid for.
+    # `_prepare_runpod` is the next thing that would happen on the runpod
+    # path and `compose_up` on the local one; both are below this line.
+    coverages = index_coverages(engine_names, workdir, req.resolve("."))
+    coverage_decisions = plan_index_families(cfg, engine_names, coverages)
 
     if target == "runpod" and not on_pod:
         # Off the pod: prepare the session and stop. This never creates
@@ -711,6 +792,22 @@ def run(requirements_path, up=False, down=False, on_pod=False,
         blocks.append(block)
 
     result = _combine(blocks, env_id, target, time.time() - t0)
+    # What each engine answered about the index family this run measured
+    # (task 034). Carried into the receipt so the report can tell "nobody ran
+    # it" from "it cannot be run here" without asking an engine again.
+    result["index"] = {
+        "family": str(cfg.get("index", "hnsw") or "hnsw"),
+        "kind": "declared",
+        "engines": [d.as_dict() for d in coverage_decisions],
+        # The whole coverage, not only the decision for the family this run
+        # measured: the report judges every simulated option, and an option
+        # at a different algorithm needs the same question answered without
+        # asking an engine again.
+        "coverages": [c.as_dict() for c in coverages],
+        "note": ("what each adapter says it can build. `coverage_unresolved` "
+                 "means no engine was asked, which is a couldn't-check and "
+                 "not a capability."),
+    }
     _write(req, workdir, result, requirements_path, engine_names, target,
            engine_params, log_fn)
     _summary(req, result, workdir)

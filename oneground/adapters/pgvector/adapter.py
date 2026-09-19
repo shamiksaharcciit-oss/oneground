@@ -53,6 +53,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from .. import index_families as IF
 from ..base import (AdapterError, Candidates, EngineFacts, NotConnected,
                     UpsertStats, register)
 
@@ -178,6 +179,74 @@ class PgvectorAdapter:
         if self._conn is None:
             raise NotConnected("pgvector: connect() first")
         return self._conn
+
+    # -- what this engine can build (task 034) ------------------------------
+    # Not a table typed in from pgvector's documentation. The declaration
+    # below is `unresolved` until `index_families()` has been run against a
+    # running Postgres, and `verify` reports an unresolved family as
+    # couldn't-check rather than as a capability.
+    INDEX_COVERAGE = IF.unresolved(
+        NAME, "no resolution recorded: run `oneground adapters coverage` "
+              "with a pgvector-enabled Postgres reachable")
+
+    def index_families(self):
+        """Ask the database itself which index families it can build.
+
+        Postgres answers this exactly: `pg_am` lists the index access methods
+        that are installed, so the question "can this server build an IVF
+        index" is a query rather than a reading of release notes. The rows it
+        returned are kept in `raw`.
+
+        pgvector's `ivfflat` is mapped onto the `ivf` family and marked
+        **approximate**: both are an inverted file over k-means cells and they
+        are not the same index. What differs is stated rather than implied,
+        because a mapping presented as exact would let a measurement of one
+        settle a question about the other.
+        """
+        conn = self._need()
+        with conn.cursor() as cur:
+            cur.execute("SELECT amname FROM pg_am WHERE amtype = 'i' "
+                        "ORDER BY amname")
+            methods = [str(r[0]) for r in cur.fetchall()]
+            cur.execute("SELECT name FROM pg_settings WHERE name LIKE "
+                        "'ivfflat.%' OR name LIKE 'hnsw.%' ORDER BY name")
+            settings = [str(r[0]) for r in cur.fetchall()]
+
+        supported = {}
+        if "hnsw" in methods:
+            supported[IF.HNSW] = IF.FamilySupport(
+                family=IF.HNSW, status=IF.BUILDS, engine_name="hnsw",
+                params={"M": "m", "efConstruction": "ef_construction",
+                        "efSearch": "hnsw.ef_search"},
+                note="an index access method installed on this server")
+        if "ivfflat" in methods:
+            supported[IF.IVF] = IF.FamilySupport(
+                family=IF.IVF, status=IF.BUILDS, engine_name="ivfflat",
+                params={"nlist": "lists", "nprobe": "ivfflat.probes"},
+                approximate=True,
+                differs=(
+                    "pgvector's ivfflat and faiss's IndexIVFFlat are both an "
+                    "inverted file over k-means cells and they are not the "
+                    "same index: the clusterings are trained by different "
+                    "code from different samples, the parameters are named "
+                    "and scoped differently (a build reloption `lists` "
+                    "against faiss's `nlist`; a session GUC `ivfflat.probes` "
+                    "against an attribute on the index object), and oneground "
+                    "has not measured that the two return the same candidate "
+                    "set for any corpus. A recall figure simulated on faiss's "
+                    "IVF is not a prediction of this one"),
+                note="an index access method installed on this server")
+        # `flat` is deliberately not claimed. An unindexed pgvector table is
+        # scanned exhaustively, which is exact, but it is the absence of an
+        # index rather than an index family -- and `pg_am`, which is what was
+        # asked, does not list it.
+        return IF.resolved(
+            NAME, self._version, supported,
+            how=("SELECT amname FROM pg_am WHERE amtype='i' -- the index "
+                 "access methods this server has installed"),
+            raw={"pg_am_index_methods": methods,
+                 "index_settings": settings,
+                 "postgres_version": self._pg_version})
 
     @staticmethod
     def _metric(metric):

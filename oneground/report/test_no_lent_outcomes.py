@@ -293,6 +293,10 @@ COVERED_LOG_KINDS = {
     # Task 017 item 5, built by `qps_max_lines`: a measured ceiling, never a
     # verdict, so it quantifies over nothing.
     "qps_max",
+    # Task 034: the quantisation caveat. One sentence per run about the
+    # algorithm, naming no configuration and asserting no outcome, so there
+    # is no outcome for it to lend. Driven by test_verdict.py.
+    "quantisation_limits",
 }
 # Every rendering path reachable from `render_html`, split by whether it can
 # put a verdict on the page. The split is the point: naming a path is cheap,

@@ -63,8 +63,73 @@ inner-product scores, `-1` and `-inf` padded, no duplicate ids in a row.
 
 **`footprint`** — what it costs, independent of how well it recalls:
 `stored_vectors`, `storage_amplification`, `est_memory_bytes` (an estimate,
-and labelled as one everywhere it is printed), `fanout`, `shards`, and the
-copies distribution.
+and labelled as one everywhere it is printed), `fanout`, `shards`, the copies
+distribution, and — since task 034 — `index_bytes`, `vector_bytes` and
+`overhead_bytes`, which are **measured** rather than estimated. See
+**The index algorithm** below.
+
+---
+
+## The index algorithm
+
+Until task 034 every family built HNSW underneath, and `M`, `efConstruction`
+and `efSearch` were the only index knobs a user could turn. That was right for
+the question the project started from — hold the index constant so a
+partition's effect is isolated — and it left out the trade a team actually
+argues about, which is memory against recall.
+
+The algorithm is now a declared parameter of every family, with its own knobs
+per algorithm. One builder, [`oneground/models/indexes.py`](../oneground/models/indexes.py),
+is used by all three families, because an algorithm and its knobs are a
+property of faiss rather than of a partition.
+
+| `index` | what it is | knobs | determinism | cost |
+|---|---|---|---|---|
+| `flat` | exact. Every vector scored. | none | byte-identical on one machine; no training, so nothing to diverge | the reference point: recall 1.0 by construction, and the memory and query cost of not approximating |
+| `hnsw` | a navigable small-world graph. **The default**, and what every published fixture value was measured under. | `M`, `efConstruction`, `efSearch` | byte-identical with `deterministic=True`; one thread is required (task 012b), no BLAS is required across machines (task 029) | measured per run; see the 034 report |
+| `ivf` | `nlist` k-means cells, `nprobe` of them searched | `nlist`, `nprobe` | trains a k-means, so it inherits task 029 exactly: seeded from the run's seed and trained under `deterministic_faiss` | measured per run |
+| `ivf_pq` | the same, with the residuals product-quantised | `nlist`, `nprobe`, `m`, `nbits` | trains a **second** clustering for the PQ, seeded the same way | an order of magnitude smaller, and lossy in a way that depends on the distribution it trained on |
+
+Three rules hold across the four:
+
+- **`hnsw` is the default and does not re-label.** Every published label is
+  composed entirely of parameters at their declared defaults, so task 032's
+  rule of *filling* a missing default would have appended `index=hnsw` to a
+  public interface. The direction is declared per key
+  (`Param.in_label_at_default`) and a key added after a label was published
+  elides at its default instead. `index: hnsw` written out and `index` left
+  out are one configuration: one label, one params dict, one set of returned
+  ids, one footprint.
+- **A knob belongs to an algorithm.** `nprobe` under HNSW is refused rather
+  than accepted and ignored, and an unknown algorithm is refused with the
+  declared list. This is task 026's rule, for task 026's reason: a key
+  accepted and ignored is a run that reports numbers as if it had been
+  applied. The same check applies to a sweep grid — `nprobe: [4, 8]` with no
+  IVF among the swept `index` values is refused at plan time.
+- **Routing loss is a property of the partition, not of the index.** The
+  ceiling is exact search over what a query can reach, and what it can reach
+  is the partition's business. Four algorithms over one partition return the
+  same ceiling ids; if they did not, the decomposition would be attributing
+  index loss to routing or the reverse, and that would be a defect rather
+  than a finding about an algorithm.
+
+Two size floors are refused with their own message rather than faiss's, which
+names neither the configuration nor the shard: `nlist` greater than the number
+of vectors in the shard, and `2**nbits` greater than it — the PQ's own
+clustering needs at least as many training points as it has centroids, and for
+a sharded family the shard is what has to hold them.
+
+**Memory stopped being arithmetic.** With quantisation, `vectors × dimension ×
+4` is wrong by an order of magnitude and a formula over faiss's internals
+would be a guess. `footprint()` therefore reports what faiss says about the
+index it built (`faiss.serialize_index(...).nbytes`, summed over shards), the
+vector payload it holds, and the difference. The old estimate stays, keeps its
+name `est_memory_bytes`, and keeps being labelled an estimate everywhere it is
+printed — the two answer different questions and one of them is now checkable.
+
+**What the simulator can say about an engine.** These are faiss's four
+families. No engine offers all of them, and an engine's nearest equivalent is
+not the same index: see [ADAPTERS.md](ADAPTERS.md#index-families).
 
 ---
 

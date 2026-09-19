@@ -1,0 +1,86 @@
+# Task 034: the four index algorithms across the three families, on the
+# smoke fixture.
+#
+# 2,000 vectors. This file is not a measurement anyone should quote -- it is
+# the shape of the 034 sweep, run where it costs minutes rather than hours, so
+# that the 150k files are known to be right before they are started. The
+# numbers it produces describe a synthetic source (see
+# fixtures/arxiv-smoke.fixture.yaml), which is why they are not published
+# values and never will be.
+#
+# Two knob choices are forced by the corpus rather than chosen:
+#
+#   `nlist` is per *shard*, not per corpus. semantic_sharded's published
+#   partition is 256 regions, which over 2,000 vectors leaves each region with
+#   about eight of them -- fewer points than any IVF worth training. So the
+#   semantic rows here use 16 regions. The partition differs from the
+#   published one on purpose and the table says so; what is being compared in
+#   each family is four algorithms over *one* partition.
+#
+#   `nbits` is the PQ's own k-means and a much higher floor than `nlist`'s:
+#   nbits=8 asks for 256 centroids per sub-quantiser and faiss cannot train
+#   more centroids than it has points. The semantic rows' smallest region
+#   holds 59 vectors, so they use nbits=5. faiss warns about every one of
+#   these clusterings -- it wants far more training points than any shard of
+#   2,000 vectors has -- and the warning is part of what this run is for. At
+#   150k it does not appear, and a quantisation result from a shard too small
+#   to train one is exactly the kind of number that should not be quoted.
+
+oneground: 1
+
+run:
+  name: 034-index-smoke
+  mode: measure
+  seed: 20260908                     # the smoke fixture's own sampling seed
+  workdir: ./runs/034-index-smoke
+
+corpus:
+  sample:
+    kind: receipt
+    vectors:
+      path: ./fixtures/arxiv-smoke/vectors.npy
+      normalized: true
+    queries:
+      path: ./fixtures/arxiv-smoke/queries.npy
+      count_min: 50
+      source: written
+    target_sample_size: 2000
+
+simulate:
+  kind: declared
+  families: [single_node_hnsw, semantic_sharded, hash_sharded]
+  node_counts: [3]
+  ground_truth_k: 100
+
+  grid:
+    single_node_hnsw:
+      index: [flat, hnsw, ivf, ivf_pq]
+      M: [32]
+      efSearch: [128]
+      nlist: [64]
+      nprobe: [8]
+      m: [16]
+      nbits: [8]
+    semantic_sharded:
+      index: [flat, hnsw, ivf, ivf_pq]
+      centroids: [16]
+      epsilon: [0.2]
+      probe: [2]
+      M: [32]
+      efSearch: [96]
+      nlist: [8]
+      nprobe: [2]
+      m: [16]
+      nbits: [5]
+    hash_sharded:
+      index: [flat, hnsw, ivf, ivf_pq]
+      shards: [3]
+      M: [32]
+      efSearch: [96]
+      nlist: [16]
+      nprobe: [4]
+      m: [16]
+      nbits: [8]
+
+  budget:
+    max_minutes: 30

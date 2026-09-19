@@ -61,12 +61,25 @@ class Verdict:
     # did. Task 015: with two engines verified in the same environment, a
     # latency verdict without an engine name is not a fact anyone can use.
     engine: Any = None
+    # Task 034: a couldn't-check is not one thing. `not_verified` is a run
+    # that could have happened and did not -- remedy: run it. `not_verifiable
+    # _here` is a configuration no engine in this run can build -- remedy: a
+    # different engine, or an adapter that does not exist. A reader who
+    # cannot tell them apart cannot act, and one of the two actions is
+    # *choose a different engine*. Absent on any verdict that is not a
+    # couldn't-check.
+    couldnt_check_kind: Optional[str] = None
+    remedy: str = ""
 
     def as_dict(self):
-        return {"constraint": self.constraint, "outcome": self.outcome,
-                "reason": self.reason, "source": self.source,
-                "value": self.value, "threshold": self.threshold,
-                "kind": self.kind, "engine": self.engine}
+        out = {"constraint": self.constraint, "outcome": self.outcome,
+               "reason": self.reason, "source": self.source,
+               "value": self.value, "threshold": self.threshold,
+               "kind": self.kind, "engine": self.engine}
+        if self.outcome == COULDNT_CHECK and self.couldnt_check_kind:
+            out["couldnt_check_kind"] = self.couldnt_check_kind
+            out["remedy"] = self.remedy
+        return out
 
 
 @dataclass
@@ -760,8 +773,84 @@ def engines_meeting(verdicts):
     return names
 
 
+# --------------------------------------------------------------------------
+# not verified, or not verifiable here (task 034)
+# --------------------------------------------------------------------------
+# Constraints that can only be settled by measuring a real engine. A
+# couldn't-check on one of these is where the distinction bites: if no engine
+# in the run can build the option's index family, no amount of running settles
+# it, and saying "run it" would be false.
+
+ENGINE_CONSTRAINTS = ("latency_p95", "qps")
+
+NOT_VERIFIED = "not_verified"
+
+
+def coverages_from(verify_data, workdir=None):
+    """The index coverages this report can see, best source first.
+
+    A verify run records what each engine answered; failing that, a recorded
+    resolution beside the adapters; failing that, the declarations the
+    adapters ship, which are `not_resolved` on purpose.
+    """
+    import os
+
+    from ..adapters import engines as registered
+    from ..adapters import get as get_adapter
+    from ..adapters import index_families as IF
+
+    block = (verify_data or {}).get("index") or {}
+    if block.get("coverages"):
+        return IF.read_blocks(block["coverages"])
+    for root in [d for d in (workdir, os.getcwd()) if d]:
+        path = os.path.join(root, "adapters", "index-coverage.json")
+        if os.path.exists(path):
+            return IF.read(path)
+    out = []
+    for name in registered():
+        if name == "stub":
+            continue          # not an engine anyone deploys on
+        try:
+            out.append(getattr(get_adapter(name)(), "INDEX_COVERAGE", None)
+                       or IF.unresolved(name))
+        except Exception:                                 # noqa: BLE001
+            out.append(IF.unresolved(name))
+    return out
+
+
+def classify_couldnt_checks(option, coverages):
+    """Say, on every engine-dependent couldn't-check, which kind it is.
+
+    Called after the verdicts are built rather than inside each rule: whether
+    a constraint could have been settled is a question about the option's
+    index family and the engines in the run, not about the constraint.
+    """
+    from ..adapters import index_families as IF
+    from ..models.base import HNSW
+
+    family = str((option.params or {}).get("index") or HNSW)
+    decisions = [IF.buildability(cov, family) for cov in (coverages or [])]
+    can = [d for d in decisions if d.state == IF.VERIFIABLE]
+    unknown = [d for d in decisions if d.state == IF.COVERAGE_UNRESOLVED]
+    for v in option.verdicts:
+        if v.outcome != COULDNT_CHECK or v.constraint not in ENGINE_CONSTRAINTS:
+            continue
+        if decisions and not can and not unknown:
+            v.couldnt_check_kind = IF.NOT_VERIFIABLE_HERE
+            v.remedy = "; ".join(
+                f"{d.reason}. {d.remedy}" for d in decisions)
+        elif unknown and not can:
+            v.couldnt_check_kind = IF.COVERAGE_UNRESOLVED
+            v.remedy = "; ".join(
+                f"{d.reason}. {d.remedy}" for d in unknown)
+        else:
+            v.couldnt_check_kind = NOT_VERIFIED
+            v.remedy = ""
+    return option
+
+
 def judge_option(sim_row, verify_data, constraints, verify_env=None,
-                 costs=None, verify_info=None):
+                 costs=None, verify_info=None, coverages=None):
     """Every constraint, for one option."""
     # A constraint that was not asked for produces no row at all. It is not a
     # check that could not be made -- it is a check nobody requested, and
@@ -802,6 +891,10 @@ def judge_option(sim_row, verify_data, constraints, verify_env=None,
                  verdicts=verdicts)
     opt.outcome = overall(verdicts)
     opt.engines_meeting = engines_meeting(verdicts)
+    # Task 034. After the verdicts, because it is a fact about the option's
+    # index family and this run's engines rather than about any one rule.
+    if coverages is not None:
+        classify_couldnt_checks(opt, coverages)
     return opt
 
 
