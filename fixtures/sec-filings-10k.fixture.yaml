@@ -433,7 +433,13 @@ embedding:
   dtype: float32
   dimension: 768
   batch_size: 128
-  device: TO_BE_FILLED
+  # DECLARED, not a receipt, because the builder reads it. Marking it
+  # TO_BE_FILLED killed session 20260919-101123 at the embedding step, after
+  # the fetch, the duplicate rate and the chunking had all completed: torch
+  # was handed the literal string "TO_BE_FILLED" as a device name. It is
+  # recorded in build_info.json as well, which is what made it look like a
+  # receipt; every other value the builder reads was already declared.
+  device: cuda
   vectors_sha256: TO_BE_FILLED
   kind: receipt
 
