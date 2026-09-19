@@ -15,8 +15,9 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from .. import index_families as IF
 from ..base import (AdapterError, Candidates, EngineFacts, NotConnected,
-                    UpsertStats, register)
+                    UpsertStats, namespace_for, register)
 
 NAME = "qdrant"
 
@@ -38,6 +39,10 @@ class QdrantAdapter:
                  prefer_grpc=None):
         self._client = None
         self._version = "unknown"
+        # Kept so a later call can re-ask the engine about itself over REST
+        # (task 034's coverage resolution reads the version the same way
+        # `connect` does, rather than from the client's private attributes).
+        self._endpoint = ""
         self._timeout = timeout
         self._batch_size = int(batch_size)
         self._prefer_grpc = prefer_grpc
@@ -49,6 +54,7 @@ class QdrantAdapter:
 
         from qdrant_client import QdrantClient
 
+        self._endpoint = str(endpoint or "")
         api_key = None
         if credentials_env:
             api_key = os.environ.get(credentials_env)
@@ -142,6 +148,66 @@ class QdrantAdapter:
         if self._client is None:
             raise NotConnected("qdrant: connect() first")
         return self._client
+
+    # -- what this engine can build (task 034) ------------------------------
+    # Not a table typed in from Qdrant's documentation. The declaration below
+    # is `unresolved` until `index_families()` has been run against a running
+    # engine, and `verify` reports an unresolved family as couldn't-check
+    # rather than as a capability. See oneground/adapters/index_families.py.
+    INDEX_COVERAGE = IF.unresolved(
+        NAME, "no resolution recorded: run `oneground adapters coverage` "
+              "with a Qdrant reachable")
+
+    def index_families(self):
+        """Ask the engine itself which index families it builds.
+
+        Qdrant serves no "list your index types" endpoint, so the question is
+        put the only way it can be answered from the engine: create a probe
+        collection, read the configuration Qdrant returns for it, and see
+        which index structures are in it. The configuration is kept in `raw`,
+        so a later reader can check this reading rather than trust it.
+
+        The probe collection is created under the `oneground-` prefix and
+        deleted in a `finally`, as every namespace this project creates is.
+        """
+        import uuid
+
+        c = self._need()
+        version = self._read_version(self._endpoint) or "unknown"
+        ns = namespace_for("coverage-" + uuid.uuid4().hex[:8], "probe")
+        try:
+            self.create_namespace(ns, 8, "inner_product",
+                                  {"m": 16, "ef_construct": 100})
+            config = c.get_collection(collection_name=ns).config
+            raw = config.model_dump() if hasattr(config, "model_dump") else {}
+        finally:
+            try:
+                self.delete_namespace(ns)
+            except Exception:                         # noqa: BLE001
+                pass
+
+        params = raw.get("params") or {}
+        supported = {}
+        if raw.get("hnsw_config") is not None:
+            supported[IF.HNSW] = IF.FamilySupport(
+                family=IF.HNSW, status=IF.BUILDS, engine_name="hnsw",
+                params={"M": "hnsw_config.m",
+                        "efConstruction": "hnsw_config.ef_construct",
+                        "efSearch": "search_params.hnsw_ef"},
+                note="the only index structure in the configuration Qdrant "
+                     "returned for a collection it just created")
+        # Everything else is `cannot_build`, filled in by `IF.resolved`, with
+        # what the engine did return recorded beside it. A quantization block
+        # is a modifier on the graph above, not a separate index family, and
+        # is deliberately not read as one.
+        return IF.resolved(
+            NAME, version, supported,
+            how=("created a probe collection and read back its configuration; "
+                 "the index structures in it are the families this engine "
+                 "builds"),
+            raw={"collection_config_keys": sorted(raw),
+                 "vector_params_keys": sorted(params),
+                 "quantization_config": raw.get("quantization_config")})
 
     # -- namespaces --------------------------------------------------------
     def create_namespace(self, ns, dim, metric="inner_product",

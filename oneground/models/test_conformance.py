@@ -191,6 +191,62 @@ def test_single_threaded_faiss_restores_the_thread_count_synthetic():
         assert faiss.omp_get_max_threads() == before
 
 
+def test_routing_runs_on_the_builds_arithmetic_path_synthetic():
+    """Task 032b. `deterministic` must reach every call site that needs it.
+
+    The defect this pins: `semantic_sharded.state()` recomputed the closure
+    inside `deterministic_faiss` and the query-side routing outside it, so
+    the state recorded distances the run had not computed on the path it
+    computed everything else on. A pod session measured the consequence --
+    3,191 of 4,000 recorded distances differed across two machines while
+    every base-side column was byte-identical.
+
+    Asserted by observation rather than by reading the source: the context is
+    entered, and it is entered with the build's own setting.
+    """
+    import contextlib
+
+    from oneground.models import base as B
+    from oneground.models.semantic_sharded.model import MODEL
+
+    x, q = _corpus(n=240, dim=16, n_q=8)
+    seen = []
+    real = B.deterministic_faiss
+
+    @contextlib.contextmanager
+    def recording(enabled=True):
+        seen.append(bool(enabled))
+        with real(enabled):
+            yield
+
+    cfg = Config.make(MODEL.name, {"centroids": 4, "epsilon": 0.2,
+                                   "probe": 2, "M": 16, "efSearch": 32})
+    built = MODEL.build(x, cfg, SEED)
+    import oneground.models.semantic_sharded.model as mod
+    mod.deterministic_faiss = recording
+    try:
+        seen.clear()
+        MODEL.search(built, q, 5, cfg)
+        assert seen == [True], (
+            "search routed without entering the build's arithmetic context: "
+            "%r" % (seen,))
+
+        seen.clear()
+        MODEL.ceiling(built, q, 5)
+        assert seen == [True], ("ceiling routed outside the context: %r"
+                                % (seen,))
+
+        # and a build that asked for the fast path gets the fast path, so
+        # the context follows the build rather than being pinned on
+        off = Config.make(MODEL.name, {**cfg.params, "deterministic": False})
+        built_off = MODEL.build(x, off, SEED)
+        seen.clear()
+        MODEL.search(built_off, q, 5, off)
+        assert seen == [False], seen
+    finally:
+        mod.deterministic_faiss = real
+
+
 def test_add_chunk_does_not_change_the_graph_synthetic():
     """Chunked adds stay sequential, so the index is the same one."""
     from oneground.models.single_node_hnsw.model import MODEL

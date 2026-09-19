@@ -234,6 +234,16 @@ class ParameterError(ValueError):
     """A configuration names or sets a key its family does not accept."""
 
 
+class _NoDefault:
+    """A declared key the family has no default for: it must be named."""
+
+    def __repr__(self):                               # pragma: no cover
+        return "<no default>"
+
+
+NO_DEFAULT = _NoDefault()
+
+
 @dataclass(frozen=True)
 class Param:
     """One declared key.
@@ -252,7 +262,154 @@ class Param:
     maximum: Optional[float] = None
     swept: bool = False
     fixed: Any = None
+    # What the family uses when a config does not name this key. Declared
+    # here so there is one of it: before task 032 the same number appeared in
+    # the family's `config.get(key, X)` calls, again in the dict `configs()`
+    # seeds an `include` entry from, and nowhere a reader could look it up.
+    # `NO_DEFAULT` means the key must be named.
+    default: Any = NO_DEFAULT
+    # Whether this key appears in a label when it is at its default.
+    #
+    # Task 032 canonicalised a label by *filling* the defaults, so that a
+    # parameter written at its default and the same parameter omitted are one
+    # label and one row. Task 034 then added `index`, whose default is the
+    # behaviour every published label was measured under -- and filling it
+    # would append `index=hnsw` to labels that are a public interface, while
+    # eliding every default would collapse those same labels to `family[]`,
+    # since each is composed entirely of parameters at their defaults.
+    #
+    # So the table says which, per key, and the invariant holds either way:
+    # `always` fills a missing default, `when_set` elides one, and both make
+    # the two spellings of a default one label. The direction that does not
+    # move a label already published is the one a new key takes.
+    in_label_at_default: bool = True
+    # Which value of another key this one belongs to: ("index", ("ivf",
+    # "ivf_pq")) means the key is accepted only when `index` is one of those.
+    # A knob an algorithm would ignore is refused rather than accepted (034),
+    # for the reason 026 refuses a key no family reads.
+    belongs_to: Optional[Any] = None
+    # The closed set of values this key may take, for a key whose type does
+    # not bound it. `minimum`/`maximum` bound a number; nothing bounded a
+    # string until 034 declared `index`, and an unknown algorithm accepted
+    # and then quietly built as HNSW is the accept-and-ignore defect 026
+    # exists to stop.
+    choices: Optional[Any] = None
     note: str = ""
+
+
+# --------------------------------------------------------------------------
+# index algorithms (task 034)
+# --------------------------------------------------------------------------
+# Until 034 every family built HNSW underneath and `M`, `efConstruction` and
+# `efSearch` were the only index knobs a user could turn. That was right for
+# the question the project started from -- hold the index constant so a
+# partition's effect is isolated -- and wrong for the one asked more often,
+# which is what quantisation costs in recall on *this* corpus.
+#
+# The algorithm is a declared parameter of every family. `hnsw` is the
+# default because every published value was measured under it, and it is
+# declared `in_label_at_default=False` so that adding the key rewrites no
+# published label.
+
+FLAT = "flat"
+HNSW = "hnsw"
+IVF = "ivf"
+IVF_PQ = "ivf_pq"
+
+INDEX_ALGORITHMS = (FLAT, HNSW, IVF, IVF_PQ)
+
+# Which knobs each algorithm reads. A configuration naming a knob its chosen
+# algorithm does not read is refused; the table below is what the refusal
+# quotes back.
+INDEX_KNOBS = {
+    FLAT: (),
+    HNSW: ("M", "efConstruction", "efSearch"),
+    IVF: ("nlist", "nprobe"),
+    IVF_PQ: ("nlist", "nprobe", "m", "nbits"),
+}
+
+
+HNSW_ONLY = ("index", (HNSW,))
+IVF_ONLY = ("index", (IVF, IVF_PQ))
+PQ_ONLY = ("index", (IVF_PQ,))
+
+
+def index_params():
+    """The `index` key and the knobs 034 adds, for a family's declared table.
+
+    One definition, three families: an algorithm and its knobs are a property
+    of faiss rather than of a partition, and three copies of this list would
+    drift. A family's **own** HNSW knobs stay where they are -- their roles
+    and defaults differ (`efSearch` is 128 for one index and 96 per shard;
+    `efConstruction` is a parameter in one family and a constant in two) --
+    and each gains `belongs_to=HNSW_ONLY` in place.
+    """
+    return (
+        Param("index", str, default=HNSW, in_label_at_default=False,
+              swept=True, choices=INDEX_ALGORITHMS,
+              note="flat | hnsw | ivf | ivf_pq; hnsw is what every published "
+                   "value was measured under, and naming it changes no label"),
+        Param("nlist", int, minimum=1, swept=True, default=1024,
+              belongs_to=IVF_ONLY,
+              note="IVF cells; a k-means over the corpus"),
+        Param("nprobe", int, minimum=1, swept=True, default=8,
+              belongs_to=IVF_ONLY, note="IVF cells probed per query"),
+        Param("m", int, minimum=1, swept=True, default=16,
+              belongs_to=PQ_ONLY,
+              note="PQ sub-quantisers; the dimension must divide by it"),
+        Param("nbits", int, minimum=1, maximum=16, swept=True, default=8,
+              belongs_to=PQ_ONLY, note="PQ bits per sub-quantiser"),
+    )
+
+
+# The keys `index_params` adds beside `index` itself. A family's own HNSW
+# knobs are swept by its own `configs()` loops; these are crossed in by
+# `index_combinations` instead, because which of them exist depends on the
+# algorithm.
+INDEX_KNOB_KEYS = ("nlist", "nprobe", "m", "nbits")
+
+
+def index_combinations(family, grid):
+    """Every index setting a grid asks for, as coherent parameter dicts.
+
+    A grid that never names `index` yields exactly one combination at the
+    declared default, so a requirements file written before 034 produces the
+    configurations it produced before 034, under the labels it produced
+    before: `index` elides at its default (`in_label_at_default=False`).
+
+    A grid that does name it yields the cross product of the algorithms with
+    the knobs *that algorithm reads* -- `nlist x nprobe` for `ivf`, those two
+    plus `m x nbits` for `ivf_pq`, nothing for `flat`. Crossing every knob
+    with every algorithm would produce configurations that are refused on
+    sight, from a grid nobody wrote that way.
+    """
+    import itertools
+
+    table = parameter_table(family)
+    algorithms = list(grid.get("index") or (table["index"].default,))
+    combos = []
+    for algorithm in algorithms:
+        keys = [k for k in INDEX_KNOB_KEYS
+                if k in table and algorithm in tuple(table[k].belongs_to[1])]
+        axes = [[(k, v) for v in (grid[k] if k in grid
+                                  else (table[k].default,))] for k in keys]
+        for chosen in (itertools.product(*axes) if axes else [()]):
+            combos.append(dict(chosen, index=algorithm))
+    return combos
+
+
+def coherent(family, params):
+    """`params` with the keys the chosen algorithm does not read removed.
+
+    For a *generator*, not for a validator. `configs()` crosses a family's own
+    axes with the index axis, and `M` simply is not part of an IVF
+    configuration; dropping it there is not the same act as accepting it in a
+    configuration a user wrote, which is refused -- see `_belonging_problem`.
+    """
+    table = parameter_table(family)
+    return {k: v for k, v in params.items()
+            if k not in table
+            or _belonging_problem(family, table, table[k], params) is None}
 
 
 # family name -> {key: Param}. Filled by each family at import.
@@ -279,6 +436,53 @@ def parameter_table(family):
         raise ParameterError(
             f"no parameter table for family {family!r}; declared: "
             f"{', '.join(sorted(PARAMETER_TABLES)) or 'none'}") from None
+
+
+def default_of(family, key):
+    """A family's declared default for `key`, or `NO_DEFAULT`.
+
+    The one place a default is written down. A family reads its own through
+    this rather than repeating the literal at every `config.get` call, so the
+    number in the label and the number the build uses cannot drift apart.
+    """
+    param = parameter_table(family).get(key)
+    return NO_DEFAULT if param is None else param.default
+
+
+def canonical_params(family, params):
+    """`params` in the one form that names this configuration.
+
+    What is measured does not depend on whether a parameter was written at its
+    default or left out, so neither does the label. Two directions, declared
+    per key (`Param.in_label_at_default`), and both reach one form:
+
+        always    a missing default is filled in, so the two spellings
+                  expand to the same label -- task 032's rule, and what
+                  every published label already reads
+        when_set  a value equal to the default is dropped, so the two
+                  spellings elide to the same label -- what a key added
+                  after those labels were published must do, or it would
+                  rewrite them
+
+    Keys of other roles, and keys of an unregistered family, are passed
+    through exactly as given -- see `Config.make` for why.
+    """
+    table = PARAMETER_TABLES.get(family) or {}
+    out = dict(params)
+    for name, param in table.items():
+        if param.role != PARAMETER or param.default is NO_DEFAULT:
+            continue
+        # A knob the chosen algorithm does not read is not filled in: task
+        # 034. Filling `M` into an IVF configuration would produce a
+        # configuration the validator then refuses, from a spelling the user
+        # never wrote.
+        if _belonging_problem(family, table, param, out) is not None:
+            continue
+        if param.in_label_at_default:
+            out.setdefault(name, param.default)
+        elif name in out and out[name] == param.default:
+            del out[name]
+    return out
 
 
 def _describe_table(family, table, roles=None):
@@ -310,6 +514,9 @@ def check_value(family, param, value):
         return f"{where} must be at least {param.minimum} (given {value!r})"
     if param.maximum is not None and value > param.maximum:
         return f"{where} must be at most {param.maximum} (given {value!r})"
+    if param.choices is not None and value not in tuple(param.choices):
+        return (f"{where} must be one of {', '.join(map(str, param.choices))} "
+                f"(given {value!r})")
     return None
 
 
@@ -326,7 +533,65 @@ def parameter_problems(family, params):
         problem = check_value(family, param, params[key])
         if problem:
             problems.append(problem)
+            continue
+        problem = _belonging_problem(family, table, param, params)
+        if problem:
+            problems.append(problem)
     return problems
+
+
+def _belonging_problem(family, table, param, params):
+    """Why this key does not belong with the rest of the configuration.
+
+    Task 034: `nprobe` is an IVF knob and `M` is an HNSW one, and a
+    configuration naming a knob the chosen algorithm does not read is refused
+    rather than accepted -- the same rule as 026's, for the same reason. A key
+    accepted and ignored is a run that reports numbers as if it had been
+    applied.
+    """
+    if not param.belongs_to:
+        return None
+    owner, wanted = param.belongs_to
+    owning = table.get(owner)
+    chosen = params.get(owner)
+    if chosen is None and owning is not None and owning.default is not NO_DEFAULT:
+        chosen = owning.default
+    if chosen in tuple(wanted):
+        return None
+    belongs = sorted(n for n, p in table.items()
+                     if p.belongs_to and p.belongs_to[0] == owner
+                     and chosen in tuple(p.belongs_to[1]))
+    return (f"{family}.{param.name} is a {' or '.join(tuple(wanted))} "
+            f"setting and this configuration has {owner}={chosen!r}, which "
+            f"does not read it. {owner}={chosen!r} reads: "
+            + (", ".join(belongs) if belongs else "no knobs of its own"))
+
+
+def _grid_belonging_problems(family, table, grid):
+    """Swept keys in `grid` that no algorithm `grid` names would read (034).
+
+    `nprobe: [4, 8]` in a grid whose `index` list is `[hnsw]` -- or absent,
+    which means the same thing -- sweeps nothing: `configs()` crosses a knob
+    in only for the algorithms that read it. That is the accept-and-ignore
+    defect `for_family` exists to stop, one key further out.
+    """
+    owner = "index"
+    if owner not in table:
+        return []
+    chosen = set(grid.get(owner) or (table[owner].default,))
+    out = []
+    for key in sorted(grid):
+        param = table.get(key)
+        if param is None or not param.belongs_to:
+            continue
+        holder, wanted = param.belongs_to
+        if holder != owner or chosen & set(wanted):
+            continue
+        out.append(
+            f"{family}.{key} is a {' or '.join(tuple(wanted))} setting and "
+            f"this grid sweeps {owner}={sorted(chosen)}, so its values would "
+            f"be ignored. Name an {owner} that reads it, or drop the key.")
+    return out
 
 
 def validate_params(family, params):
@@ -364,6 +629,21 @@ class Config:
 
     @staticmethod
     def make(family, params):
+        """A config, with every declared parameter present at its value.
+
+        Task 032. A parameter left out and the same parameter written at its
+        declared default are the same architecture, and used to be two labels
+        and therefore two rows: a sweep could measure identical work twice and
+        present it as two configurations. `canonical_params` fills what was
+        left out, so the two spellings produce one label and one row.
+
+        Only keys whose role is `parameter` are filled. A build setting is not
+        filled, because `deterministic=False` is a different build and must
+        stay a different label, and one written at its default is a run
+        someone asked for explicitly; a run-level setting is not filled
+        because the simulator adds it without changing the label.
+        """
+        params = canonical_params(family, params)
         bits = ",".join(f"{k}={params[k]}" for k in sorted(params))
         return Config(family=family, params=dict(params),
                       label=f"{family}[{bits}]")
@@ -452,6 +732,7 @@ class ConfigSpace:
                     problem = check_value(family, param, v)
                     if problem:
                         problems.append(problem)
+        problems.extend(_grid_belonging_problems(family, table, grid))
         if problems:
             raise ParameterError("; ".join(problems))
         return grid
@@ -503,12 +784,40 @@ class Footprint:
     copies_p50: int = 1
     copies_p95: int = 1
     copies_p99: int = 1
+    # Measured, not estimated (task 034). `index_bytes` is what faiss reports
+    # for the built index, summed over shards; `vector_bytes` is the vector
+    # data it holds -- float32 vectors for flat, HNSW and IVF, PQ codes for
+    # IVF-PQ, which are not vectors at all; `overhead_bytes` is the difference
+    # -- the graph, the coarse quantiser, the list structure, the codebooks.
+    #
+    # `vector_bytes` is deliberately not "what these vectors would cost stored
+    # raw". Measured that way the overhead of an IVF-PQ index came out at -453
+    # MB, which is not a number that is wrong by a little: it is a definition
+    # that did not fit the algorithm. See `indexes.stored_vector_bytes`.
+    #
+    # With quantisation `memory_bytes` above stopped being a description of
+    # anything, so it keeps its name, keeps being labelled an estimate, and
+    # sits beside these three.
+    index_bytes: Optional[int] = None
+    vector_bytes: Optional[int] = None
+
+    @property
+    def overhead_bytes(self):
+        if self.index_bytes is None or self.vector_bytes is None:
+            return None
+        return int(self.index_bytes) - int(self.vector_bytes)
 
     def as_dict(self):
+        measured = {}
+        if self.index_bytes is not None:
+            measured["index_bytes"] = int(self.index_bytes)
+            measured["vector_bytes"] = int(self.vector_bytes or 0)
+            measured["overhead_bytes"] = int(self.overhead_bytes or 0)
         return {
             "stored_vectors": int(self.stored_vectors),
             "storage_amplification": float(self.amplification),
             "est_memory_bytes": int(self.memory_bytes),
+            **measured,
             "fanout": float(self.fanout),
             "shards": int(self.shards),
             "p50_copies": int(self.copies_p50),

@@ -47,7 +47,8 @@ from .. import capacity
 from .. import cost as costmod
 from .. import environment
 from .. import intake
-from ..receipts import (MANIFEST_NAME, library_versions, round_floats,
+from ..receipts import (MANIFEST_NAME, library_versions,
+                        producing_version, round_floats,
                         sha256_file, write_json_stable, write_manifest)
 from . import claims as cl
 from . import verdict as vd
@@ -235,6 +236,17 @@ def decision_claims(options, not_run_rows, recommended, constraints,
                    # The ranking numbers are quoted in the sentence, so the
                    # prose-quotes-an-uncited-number check is told about them.
                    "literal_numbers": ("%.2f" % (storage or 0.0),)}))
+
+    # Task 034: a quantised row is bounded twice over -- by this sample, and
+    # by what this sample looks like, because the codebook was learned from
+    # it. Said once per run rather than per row: it is one fact about the
+    # algorithm, not a judgement of any configuration.
+    from ..proposals.card import quantised_in
+    quantised = quantised_in(*[opt.params for opt in options])
+    if quantised:
+        claim(cl.Claim(kind="quantisation_limits", predicate="quantisation",
+                       source="simulate.json:rows[*].params.index",
+                       extra={"families": quantised}))
 
     # What would turn each couldn't-check into a verdict.
     unresolved = {}
@@ -432,6 +444,10 @@ def run_declared(req, requirements_path, workdir, t0, log_fn=log,
         # two would silently win the dict literal. This one is the
         # interpreter that produced the report.
         "run_environment": env_stamp or environment.stamp(),
+        # And which oneground judged them (task 033): the stamp above
+        # says which interpreter and pins, and said nothing about the
+        # code that read the rows.
+        "oneground": producing_version(),
         "declared": declared,
         "analogy": analogy_block,
         "capacity": cap,
@@ -982,6 +998,10 @@ def build_manifest(recommended, workdir, req, verify_data, verify_info,
         # two would silently win the dict literal. This one is the
         # interpreter that produced the report.
         "run_environment": env_stamp or environment.stamp(),
+        # And which oneground judged them (task 033): the stamp above
+        # says which interpreter and pins, and said nothing about the
+        # code that read the rows.
+        "oneground": producing_version(),
         "recommended": {
             "family": recommended.family,
             "config": recommended.config,
@@ -1171,8 +1191,13 @@ def run(requirements_path, log_fn=log, env_stamp=None):
            f"{len(_constraint_names(constraints))} constraints"
            + (f", verify on {env}" if env else ", no verify run"))
 
+    # What each engine can build (task 034), so that a couldn't-check on a
+    # constraint only an engine can settle says which kind it is: a run that
+    # has not happened, or a configuration no engine here could run at all.
+    coverages = vd.coverages_from(verify_data, workdir)
     options = [vd.judge_option(row, verify_data, constraints, env,
-                              costs=costs, verify_info=verify_info)
+                              costs=costs, verify_info=verify_info,
+                              coverages=coverages)
                for row in sim.get("rows", [])]
     vd.mark_indistinguishable(options, k=k)
 
@@ -1214,6 +1239,10 @@ def run(requirements_path, log_fn=log, env_stamp=None):
         # two would silently win the dict literal. This one is the
         # interpreter that produced the report.
         "run_environment": env_stamp or environment.stamp(),
+        # And which oneground judged them (task 033): the stamp above
+        # says which interpreter and pins, and said nothing about the
+        # code that read the rows.
+        "oneground": producing_version(),
         "constraints": constraints,
         "environment": {"verify_target": env,
                         "environment_id": env_id,

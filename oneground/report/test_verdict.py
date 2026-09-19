@@ -165,6 +165,95 @@ def test_a_simulate_only_workdir_leaves_every_option_couldnt_check_synthetic():
     assert vd.recommend(opts) is None
 
 
+# ------------------------ not verified vs not verifiable here (task 034)
+# Three states where there were two. "Nobody ran it" and "it cannot be run
+# here" call for different actions, and one of those actions is *choose a
+# different engine* -- which is not a command anyone can print.
+
+def _coverage(builds, engine="qdrant", version="1.9.0"):
+    from oneground.adapters import index_families as IF
+    return IF.resolved(engine, version, {
+        f: IF.FamilySupport(family=f, status=IF.BUILDS, engine_name=f)
+        for f in builds}, how="asked the engine")
+
+
+def _pq_row(**kw):
+    r = row(config="single_node_hnsw[index=ivf_pq,m=16,nlist=1024]", **kw)
+    r["params"] = {"index": "ivf_pq", "nlist": 1024, "nprobe": 8,
+                   "m": 16, "nbits": 8}
+    return r
+
+
+def _latency(opt):
+    return [v for v in opt.verdicts if v.constraint == "latency_p95"][0]
+
+
+def test_a_family_no_engine_builds_is_not_verifiable_here_synthetic():
+    from oneground.adapters import index_families as IF
+
+    c = {"recall_at_k": {"k": 10, "min": 0.5}, "latency": {"p95_ms": 40}}
+    opt = vd.judge_option(_pq_row(), None, c,
+                          coverages=[_coverage(["hnsw"])])
+    v = _latency(opt)
+    assert v.outcome == CC
+    assert v.couldnt_check_kind == IF.NOT_VERIFIABLE_HERE, v.as_dict()
+    assert "cannot build index=ivf_pq" in v.remedy
+    assert "different engine" in v.remedy
+    # and the receipt carries both, so a reader does not have to infer it
+    assert v.as_dict()["couldnt_check_kind"] == IF.NOT_VERIFIABLE_HERE
+
+
+def test_a_family_the_engine_builds_is_merely_not_verified_synthetic():
+    """The control. Same constraint, same absence of a verify run, and a
+    completely different remedy: run it."""
+    c = {"recall_at_k": {"k": 10, "min": 0.5}, "latency": {"p95_ms": 40}}
+    opt = vd.judge_option(row(), None, c,
+                          coverages=[_coverage(["hnsw"])])
+    v = _latency(opt)
+    assert v.outcome == CC
+    assert v.couldnt_check_kind == vd.NOT_VERIFIED, v.as_dict()
+    assert v.remedy == ""
+
+
+def test_an_unresolved_coverage_is_its_own_state_synthetic():
+    from oneground.adapters import index_families as IF
+
+    c = {"recall_at_k": {"k": 10, "min": 0.5}, "latency": {"p95_ms": 40}}
+    opt = vd.judge_option(_pq_row(), None, c,
+                          coverages=[IF.unresolved("qdrant", "nobody asked")])
+    v = _latency(opt)
+    assert v.couldnt_check_kind == IF.COVERAGE_UNRESOLVED, v.as_dict()
+    assert "has not been asked" in v.remedy
+
+
+def test_the_decision_log_says_a_different_engine_not_a_command_synthetic():
+    """Item 9: the sentence that names what would settle a couldn't-check
+    must not print `run it` for a row nothing here can run."""
+    from oneground.report import claims as cl
+
+    c = {"recall_at_k": {"k": 10, "min": 0.5}, "latency": {"p95_ms": 40}}
+    opt = vd.judge_option(_pq_row(), None, c,
+                          coverages=[_coverage(["hnsw"])])
+    text = cl.how_to_resolve("latency_p95", _latency(opt), None)
+    assert "different engine" in text, text
+    assert "oneground verify" not in text, text
+    # and the ordinary case still says run it
+    plain = vd.judge_option(row(), None, c, coverages=[_coverage(["hnsw"])])
+    assert "oneground verify" in cl.how_to_resolve(
+        "latency_p95", _latency(plain), None)
+
+
+def test_a_simulation_result_is_not_made_less_valid_synthetic():
+    """The brief's "what this does not do": the row keeps its recall and its
+    measured memory, whatever no engine can build."""
+    c = {"recall_at_k": {"k": 10, "min": 0.5}}
+    opt = vd.judge_option(_pq_row(recall10=0.58), None, c,
+                          coverages=[_coverage(["hnsw"])])
+    assert opt.measurement["recall_at_10"] == 0.58
+    assert [v.outcome for v in opt.verdicts
+            if v.constraint == "recall_at_k"] == [MEETS]
+
+
 # ------------------------------------------------------- overall outcome
 def test_overall_fails_beats_couldnt_check_synthetic():
     """A provably broken constraint decides, even with unknowns present."""

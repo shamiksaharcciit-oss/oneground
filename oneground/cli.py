@@ -50,6 +50,11 @@ UNGUARDED = {
         "serves drawings of a run that already exists; writes no file, starts "
         "no measurement, and runs its own guard over the modules it serves "
         "from before it binds a port (docs/LAB.md)"),
+    "oneground adapters": (
+        "asks each reachable engine which index families it builds and "
+        "records the answer. It measures nothing on this machine and writes "
+        "no canonical artifact -- what it records is a fact about an engine "
+        "at a version, and the version it asked is in the record (task 034)"),
 }
 
 
@@ -109,6 +114,19 @@ def _cmd_simulate(args, rest):
         raise SystemExit(f"oneground simulate: unexpected arguments: "
                          f"{' '.join(rest)}")
     simulate.run(args.requirements, emit_state=args.emit_state)
+    # Task 034. A configuration that could not be built is reported and the
+    # sweep goes on, so the rows already measured are not lost -- but a run
+    # that did not measure what it planned to exits non-zero, because
+    # couldn't-check is never rounded up to success.
+    dropped = getattr(simulate.run, "last_dropped", None) or []
+    if dropped:
+        planned = getattr(simulate.run, "last_planned", len(dropped))
+        print(f"\n  exit 1: {len(dropped)} of {planned} planned "
+              f"configuration(s) were not measured. The rest were, and are in "
+              f"simulate.json;")
+        print("  each one that was not is named with its reason in "
+              "simulate_info.json:dropped.")
+        return 1
     return 0
 
 
@@ -290,6 +308,11 @@ def _cmd_pod(argv):
     return pod_main(argv)
 
 
+def _cmd_adapters(argv):
+    from .adapters.coverage_cli import main as coverage_main
+    return coverage_main(argv)
+
+
 def build_parser():
     ap = argparse.ArgumentParser(
         prog="oneground",
@@ -413,6 +436,9 @@ def build_parser():
     sub.add_parser("pod",
                    help="run a session on a RunPod pod",
                    add_help=False)
+    sub.add_parser("adapters",
+                   help="ask each engine which index families it builds",
+                   add_help=False)
     return ap
 
 
@@ -427,6 +453,8 @@ def main(argv=None):
         return _cmd_calibrate(argv[1:])
     if argv and argv[0] == "pod":
         return _cmd_pod(argv[1:])
+    if argv and argv[0] == "adapters":
+        return _cmd_adapters(argv[1:])
 
     args, rest = build_parser().parse_known_args(argv)
     if args.command == "characterize":

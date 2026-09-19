@@ -190,7 +190,9 @@ pass. The git log is the project's own receipt trail.
 
 The unit of contribution, and deliberately the first thing after v0.1: the
 project's credibility rests on having no favourite, and two adapters is the
-smallest number that can demonstrate that.
+smallest number that can demonstrate that. It is no longer the only index
+work on this roadmap — see Phase 3d, which is about what the *simulator*
+varies rather than about how many engines it can reach.
 
 - **Milvus** and **Weaviate** are the named next two, behind the same
   `VectorEngine` protocol. Nothing about either is written.
@@ -243,6 +245,38 @@ are what rule that out.
 - anything at all about chunking on a corpus supplied as vectors. If the input
   is `.npy` the cut has already happened and is out of the instrument's reach:
   `chunking: couldn't-check — vectors were supplied, not text`.
+
+### Phase 3d — The index algorithm as a choice (v0.2)
+
+Until task 034 the simulator varied the architecture — one index,
+hash-partitioned, semantically partitioned — and HNSW's parameters within
+each, but not the index algorithm. That was right for the question the
+project started from, and it left out the trade a team argues about more
+often than sharding: memory against recall.
+
+- **Four families in `simulate`**: `flat`, `hnsw`, `ivf`, `ivf_pq`, all
+  measured against exact ground truth, with their knobs declared per algorithm
+  in task 026's parameter-table form. `hnsw` is the default and re-labels
+  nothing, because every published fixture value was measured under it. See
+  [MODELS.md](MODELS.md#the-index-algorithm).
+- **Memory measured rather than estimated.** With quantisation, `vectors ×
+  dimension × 4` is wrong by an order of magnitude; `footprint()` reports what
+  faiss says about the index it built, and the old estimate keeps its name and
+  its label.
+- **What an engine can build is a separate question, and the tool says so
+  before the run.** faiss has four families; Qdrant builds HNSW and nothing
+  else, and pgvector's IVFFlat is not faiss's IVF. Each adapter declares its
+  families, resolved against a running engine rather than from documentation,
+  and a configuration no engine can build is refused at plan time — before a
+  pod exists. See [ADAPTERS.md](ADAPTERS.md#index-families).
+- **Three states, not two.** A report distinguishes *not verified* — remedy:
+  run it — from *not verifiable here* — remedy: a different engine, or an
+  adapter that does not exist. Collapsing them would let a reader think a
+  missing run was the only thing in the way.
+- **Not on this roadmap**: engine-specific index families in the simulator. An
+  engine that builds something faiss cannot is a gap in what the simulator can
+  predict, and it is named as one rather than papered over by simulating
+  something adjacent.
 
 ### Phase 4 — The lab (Q1 2027)
 - The ground view and the query trace as interactive renderers over

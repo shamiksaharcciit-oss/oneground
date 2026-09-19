@@ -295,6 +295,46 @@ fill that field would be worse than the gap.
 
 ---
 
+## What produced an artifact
+
+Every artifact this project writes records the **version and commit that
+produced it**, in a field called `oneground`:
+
+    "oneground": {"version": "0.1.0",
+                  "commit": "43123b4d458d…" | null,
+                  "dirty": true | false | null,
+                  "source": "checkout" | "wheel" | "unknown",
+                  "note": "<why commit is null, when it is>"}
+
+It is written into the **declared** half of each pair — `build_info.json`,
+`simulate_info.json`, `verify_info.json`, `propose_info.json`,
+`state/state_info.json`, `report.json`, and every calibration line — and not
+into the receipts, because a receipt is what was measured and this is a fact
+about the process that measured it. Task 020b made the same ruling about
+timings for the same reason, which is why `simulate.json` carries no
+`build_seconds`.
+
+**One exception, and it is deliberate.** A proposal card carries *two*: the
+version that measured the baseline row and the version that measured the
+changed row. A card's whole claim is a difference between two rows, and the
+statement that the difference is real rather than a difference of code needs
+both.
+
+**`commit: null` is a real answer.** An installed wheel has no git, so the
+build hook in `setup.py` writes what it was built from and a wheel answers as
+confidently as a checkout. Where neither is possible — a source tree with no
+git, a checkout whose git cannot be run — the field is `null` and `note` says
+which, in the same habit as every other couldn't-check in this project. **A
+consumer may not read a missing or null version as a match.**
+
+**What it never carries:** a branch, a remote, a tag or a build path. A
+version and a commit are facts about the code; the others name whose machine
+it was, which is what the identifier scan exists to keep out of artifacts.
+
+An artifact written before this was recorded has no such field, and nothing
+can add one honestly. It reads as couldn't-check — never as a match, and
+never as a mismatch.
+
 ## Cadence
 
 | trigger | job | what gates | what is also recorded |

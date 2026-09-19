@@ -42,7 +42,8 @@ from .measures.ambiguity import AMBIGUOUS_RATIO, ambiguous_query_rate
 from .measures.crispness import CRISP_RATIO, N_CENTROIDS, boundary_crispness
 from .measures.drift import drift_pair
 from .measures.skew import skew_top10_share
-from .receipts import (MANIFEST_NAME, library_versions, round_floats,
+from .receipts import (MANIFEST_NAME, library_versions, producing_version,
+                      round_floats,
                        sha256_file, write_json_stable, write_manifest)
 from .sample import loaders
 
@@ -378,6 +379,7 @@ def run(requirements_path, with_projection=False, log_fn=log,
         },
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
+        "oneground": producing_version(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "device": req.text.get("device", "cpu") if source_kind == "text" else None,
@@ -476,6 +478,7 @@ def run_declared(req, requirements_path, workdir, t0, log_fn=log,
         "tier": 2,
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
+        "oneground": producing_version(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "device": None,

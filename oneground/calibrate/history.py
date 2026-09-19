@@ -182,6 +182,13 @@ def make_line(check, dataset, engine, engine_version, config, measured,
         "environment": environment or environment_id(),
         "pins_sha256": pins_digest(),
         "oneground_version": __version__,
+        # The version alone cannot tell two lines from the same release
+        # apart, and a calibration history is read across weeks. Task 033:
+        # the commit too, or null with the reason it is not knowable. The
+        # version field stays as it is -- every existing line has one, and a
+        # reader comparing old lines to new should not have to notice a
+        # rename.
+        "oneground": _producing_version(),          # task 033
         "definition": definition,
         "outcome_scope": outcome_scope,
     }
@@ -192,6 +199,22 @@ def make_line(check, dataset, engine, engine_version, config, measured,
     if extra:
         line.update(extra)
     return line
+
+
+def _producing_version():
+    """The version and commit that wrote this line (task 033).
+
+    Imported inside the function: `calibrate` must stay importable on a
+    machine with neither faiss nor a qdrant client, and a module-level import
+    of the receipts package would put that reasoning one import further away
+    than it needs to be.
+
+    Deliberately not added to `FIELDS`, which is the *required* set that
+    `validate` enforces: every line already written lacks this key, and making
+    it required would invalidate the history it exists to make readable.
+    """
+    from ..receipts import producing_version
+    return producing_version()
 
 
 def validate(line):

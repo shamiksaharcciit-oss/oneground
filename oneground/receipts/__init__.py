@@ -36,9 +36,103 @@ MANIFEST_NAME = "MANIFEST.sha256"
 # Fixed float precision for every JSON receipt.
 FLOAT_DECIMALS = 6
 
+# Written into the package at build time, so an installed wheel can answer
+# the same question a checkout can. See `setup.py`.
+BUILD_STAMP_NAME = "_build_stamp.json"
+
 # The libraries whose versions go in build_info.json. torch is read separately
 # by torch_receipt(), which needs its local version segment (task 003c).
 RECEIPT_LIBRARIES = ("numpy", "faiss-cpu", "sentence-transformers", "umap-learn")
+
+
+def _run_git(args):
+    """`git <args>` in the package's own tree, or None if it cannot be run."""
+    import subprocess
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        r = subprocess.run(["git"] + list(args), cwd=here,
+                           capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, "%s: %s" % (type(e).__name__, e)
+    if r.returncode != 0:
+        return None, "git %s: exit %s: %s" % (
+            " ".join(args), r.returncode,
+            r.stderr.decode("utf-8", "replace").strip() or "(no stderr)")
+    return r.stdout.decode("utf-8", "replace").strip(), None
+
+
+def _build_stamp():
+    """What `setup.py` recorded at build time, or None."""
+    path = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), BUILD_STAMP_NAME)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def producing_version():
+    """What produced this artifact: the version, and the commit if knowable.
+
+    Task 033. Every other input to a measurement is recorded -- the seed, the
+    pins, the corpus digests, the run-level settings -- and until this the one
+    that decides what those inputs *mean* was not. Three tasks paid for it:
+    028b dated a commit to work out which code measured a workdir, 028c
+    measured one configuration at three revisions to settle the same
+    question, and `docs/LIBRARY.md` §2.2 cannot give a card a comparability
+    verdict better than couldn't-check without it.
+
+        {"version": "0.1.0",
+         "commit": "<40 hex>" | None,
+         "dirty": True | False | None,
+         "source": "checkout" | "wheel" | "unknown",
+         "note": "<why commit is None, when it is>"}
+
+    `commit` is None with a stated reason rather than a guess or a refusal:
+    an installed wheel has no git, which task 022 made a first-class case.
+    A wheel built by this project's `setup.py` carries a build stamp and
+    answers as confidently as a checkout.
+
+    **Only the version and the commit.** Never a branch, a remote, a tag or a
+    build path: those name a person's working arrangements rather than the
+    code, and the identifier scan exists because that distinction gets lost.
+    """
+    from .. import __version__
+
+    out = {"version": __version__, "commit": None, "dirty": None,
+           "source": "unknown", "note": ""}
+
+    stamp = _build_stamp()
+    if stamp:
+        out["source"] = "wheel"
+        out["commit"] = stamp.get("commit")
+        out["dirty"] = stamp.get("dirty")
+        if not out["commit"]:
+            out["note"] = str(stamp.get("note") or
+                              "built without a commit recorded")
+        return out
+
+    from ..environment import checkout_root
+    if checkout_root(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))) is None:
+        out["note"] = ("installed without a build stamp and not a git "
+                       "checkout, so no commit can be recorded")
+        return out
+
+    commit, problem = _run_git(["rev-parse", "HEAD"])
+    if commit is None:
+        out["source"] = "checkout"
+        out["note"] = "this is a checkout and git could not be asked: %s" % (
+            problem,)
+        return out
+    status, problem = _run_git(["status", "--porcelain"])
+    out.update(source="checkout", commit=commit,
+               dirty=None if status is None else bool(status.strip()))
+    if status is None:
+        out["note"] = "the working tree's cleanliness could not be read: %s" % (
+            problem,)
+    return out
 
 
 def sha256_file(path, buf=1 << 20):

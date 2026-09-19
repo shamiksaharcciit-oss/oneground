@@ -311,6 +311,103 @@ measured and before the index is released.
 
 ---
 
+## What "the same state" means: two claims, not one
+
+A `.state.npz` stores decisions **and** raw float32 inner products, and one
+identity claim cannot be true of both. So the contract is two statements, and
+which one applies depends on where the two files came from.
+
+> **Within one environment: byte-identical.**
+> The writer fixes every zip entry's timestamp and sorts the entries, so the
+> same run on the same machine produces the same bytes. This is what
+> `MANIFEST.sha256` is for.
+>
+> **Across environments: identical decisions, and scored floats equal to
+> within a couple of units in the last place.**
+
+**A reader who compares two machines' digests and expects a match will get a
+false alarm.** The digests *will* differ, and nothing is wrong.
+
+### Why, measured
+
+Task 032b ran the arxiv-150k reference configuration at one commit on an
+Intel i3-1115G4 and an AMD EPYC 7352, with the same corpus, the same
+characterization and the same seed. Of 24 columns, **20 were byte-identical**:
+
+- the partition — `partition.centroids`, `region_ids`, `region_sizes`
+- the assignment — `home_region`, `centroid_dist`, `copy_count`, `copy_set`,
+  `nearest_region`
+- the routing — `probed_region`, `scored_region`, `scored_dist`, `probe_reason`
+- the load — every column
+- the candidate structure — `cand_shard`, `offsets`, `true_ids`
+- `header.json`
+
+Four differed, all downstream of one thing: `candidates.cand_score`, where
+80,648 of 400,000 values differed — 75,811 by one ulp and 4,837 by two, a
+maximum absolute difference of 1.1920929e-07 on values lying in
+[0.546, 0.905]. `cand_id` moved in 27 places, `survived_dedupe` in 5,244 and
+`true_rank` in 14, all as a consequence of two adjacent candidates swapping
+when their scores moved. Exactly one candidate in 400,000 was returned by one
+machine and not the other, so the graphs agree; what differs is the
+arithmetic.
+
+Those scores are inner products computed inside faiss's own search kernels,
+below `distance_compute_blas_threshold`, where `deterministic_faiss` does not
+reach: it pins the thread count and keeps k-means off the BLAS, and neither
+touches a per-vector distance in an HNSW traversal. `FAISS_OPT_LEVEL` at
+unset, `AVX2`, `AVX512` and `GENERIC` gives identical results on one machine,
+so the dispatch level is **couldn't-check** as the mechanism — tested, not
+demonstrated.
+
+**None of it reaches a measurement.** `simulate.json`'s rows were equal across
+the two machines, because recall is a count of matching ids and the merged
+top-k did not move.
+
+### What was a defect, and is not any more
+
+`route.scored_dist` was in the differing set until 032b found the reason: the
+query-side routing was computed outside the determinism context the base side
+was computed inside, so the state recorded distances the run had not computed
+on the path it computed everything else on. The context now lives in
+`semantic_sharded._probed`, so `search`, `ceiling` and `state` share one path,
+and the column is byte-identical across the two machines.
+
+That distinction is the one to keep: **a float we own the arithmetic of must
+be exact, and only a float we do not own may move.** A column joins the
+tolerated set because faiss computes it where we cannot reach, never because
+we have not reached it yet.
+
+### The check
+
+```
+python corpora/compare_state.py <A>/state <B>/state                    # within
+python corpora/compare_state.py --cross-environment <A>/state <B>/state
+```
+
+The second implements the second claim: every decision column exact, the
+scored columns within `--max-ulps`, and the ordering columns allowed to move
+only where a scored column actually did — a rank that changed with no score
+behind it is a different traversal, not rounding. The ulp distribution is
+printed every time.
+
+`--max-ulps` defaults to **2 because that is what one pair of machines
+showed**, not because anyone derived it. The worst case for a float32 dot
+product over 768 terms summed in two orders is of order 768 × eps ≈ 9e-5,
+four orders larger than anything observed, so no bound here follows from the
+arithmetic. A third machine could exceed 2 with nothing being wrong, which is
+why the distribution is printed rather than reduced to a verdict.
+
+### What is deliberately not done about it
+
+Three things would make byte-identity true across environments: store the
+scores at reduced precision, store only the decisions, or round what is
+stored. **All three are refused.** Each trades a receipt's exactness for a
+simpler claim, and the receipt is worth more than the claim. The scores are
+what they are, and the contract describes them accurately rather than the
+file being reshaped to fit.
+
+---
+
 ## The rendering contract
 
 The rule above, made enforceable (task 021, `oneground/lab/`):

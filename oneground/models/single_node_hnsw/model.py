@@ -19,9 +19,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..base import (BUILD, BuiltIndex, Candidates, Config, Footprint,
-                    Param, declare_parameters, estimate_memory_bytes,
-                    exact_over, resolve_deterministic, single_threaded_faiss)
+from .. import indexes
+from ..base import (BUILD, HNSW, HNSW_ONLY, BuiltIndex, Candidates, Config,
+                    Footprint, Param, coherent, declare_parameters,
+                    estimate_memory_bytes, exact_over, index_combinations,
+                    index_params, resolve_deterministic)
 
 NAME = "single_node_hnsw"
 
@@ -33,15 +35,26 @@ EF_CONSTRUCTION = 200
 # -- but the generated grid always builds at EF_CONSTRUCTION, so it is pinned
 # by an `include` entry, never swept.
 PARAMETERS = declare_parameters(NAME, (
-    Param("M", int, minimum=1, swept=True,
-          note="HNSW links per node"),
-    Param("efSearch", int, minimum=1, swept=True,
-          note="search beam width"),
-    Param("efConstruction", int, minimum=1,
+    Param("M", int, minimum=1, swept=True, default=32,
+          belongs_to=HNSW_ONLY, note="HNSW links per node"),
+    Param("efSearch", int, minimum=1, swept=True, default=128,
+          belongs_to=HNSW_ONLY, note="search beam width"),
+    Param("efConstruction", int, minimum=1, default=EF_CONSTRUCTION,
+          belongs_to=HNSW_ONLY,
           note="build beam width; pinned by include, not swept"),
     Param("deterministic", bool, role=BUILD,
           note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
-))
+) + index_params())
+
+
+def _d(key):
+    """This family's declared default for `key` (task 032).
+
+    Read from the parameter table rather than repeated at each call site, so
+    the value a config is labelled with and the value the build uses are the
+    same one by construction.
+    """
+    return PARAMETERS[key].default
 
 
 @dataclass
@@ -53,20 +66,27 @@ class SingleNodeHNSW:
         grid = {**DEFAULT_GRID, **space.for_family(NAME)}
         seen, out = set(), []
         for params in space.included_for(NAME):
-            p = {"M": 32, "efConstruction": EF_CONSTRUCTION, "efSearch": 128}
-            p.update(params)
-            c = Config.make(NAME, p)
+            # No seed dict of defaults since task 032: `Config.make` fills
+            # what an include entry leaves out, from the declared table.
+            c = Config.make(NAME, dict(params))
             if c.label not in seen:
                 seen.add(c.label)
                 out.append(c)
-        for M in grid["M"]:
-            for ef in grid["efSearch"]:
-                c = Config.make(NAME, {"M": int(M),
-                                       "efConstruction": EF_CONSTRUCTION,
-                                       "efSearch": int(ef)})
-                if c.label not in seen:
-                    seen.add(c.label)
-                    out.append(c)
+        # The index axis is the outer one (task 034). `coherent` drops this
+        # family's HNSW knobs from a configuration whose algorithm does not
+        # read them, so an IVF row is one configuration per (nlist, nprobe)
+        # rather than one per M -- the dedupe by label is what collapses the
+        # repetition, and it is also what keeps a grid that never names
+        # `index` producing exactly the configurations it produced before.
+        for idx in index_combinations(NAME, grid):
+            for M in grid["M"]:
+                for ef in grid["efSearch"]:
+                    c = Config.make(NAME, coherent(NAME, dict(
+                        idx, M=int(M), efConstruction=EF_CONSTRUCTION,
+                        efSearch=int(ef))))
+                    if c.label not in seen:
+                        seen.add(c.label)
+                        out.append(c)
         return out
 
     # -- build -------------------------------------------------------------
@@ -89,24 +109,14 @@ class SingleNodeHNSW:
         of minutes, and a run that prints nothing for that long is
         indistinguishable from a hung one.
         """
-        import faiss
         t0 = time.time()
         det = resolve_deterministic(config, deterministic)
-        idx = faiss.IndexHNSWFlat(vectors.shape[1], int(config.get("M", 32)),
-                                  faiss.METRIC_INNER_PRODUCT)
-        idx.hnsw.efConstruction = int(config.get("efConstruction",
-                                                 EF_CONSTRUCTION))
-        with single_threaded_faiss(det):
-            if add_chunk:
-                n = vectors.shape[0]
-                for i in range(0, n, int(add_chunk)):
-                    idx.add(np.ascontiguousarray(vectors[i:i + int(add_chunk)]))
-                    if progress:
-                        progress(min(i + int(add_chunk), n), n,
-                                 time.time() - t0)
-            else:
-                idx.add(vectors)
-        idx.hnsw.efSearch = int(config.get("efSearch", 128))
+        # Task 034: the algorithm is the configuration's. `hnsw` is the
+        # default and takes exactly the path it took before -- same
+        # construction, same sequential adds, same knobs -- because every
+        # published value was measured under it.
+        idx = indexes.build(vectors, config, seed=seed, deterministic=det,
+                            add_chunk=add_chunk, progress=progress)
         return BuiltIndex(family=NAME, config=config, n_base=len(vectors),
                           dim=vectors.shape[1],
                           state={"index": idx, "vectors": vectors,
@@ -116,7 +126,7 @@ class SingleNodeHNSW:
     # -- search ------------------------------------------------------------
     def search(self, built, queries, k, config):
         idx = built.state["index"]
-        idx.hnsw.efSearch = int(config.get("efSearch", 128))
+        indexes.set_search(idx, config)
         scores, ids = idx.search(queries, k)
         return Candidates(ids=ids.astype(np.int64),
                           scores=scores.astype(np.float32))
@@ -131,13 +141,19 @@ class SingleNodeHNSW:
 
     # -- footprint ---------------------------------------------------------
     def footprint(self, built):
-        M = int(built.config.get("M", 32))
+        # The estimate stays and stays labelled one; beside it, what faiss
+        # reports for the index it actually built (task 034).
+        M = int(built.config.get("M", _d("M"))) \
+            if indexes.algorithm_of(built.config) == HNSW else 0
         return Footprint(
             stored_vectors=built.n_base,
             amplification=1.0,
             memory_bytes=estimate_memory_bytes(built.n_base, built.dim, M),
             fanout=1.0,
             shards=1,
+            index_bytes=indexes.measured_bytes(built.state["index"]),
+            vector_bytes=indexes.stored_vector_bytes(
+                built.config, built.n_base, built.dim),
         )
 
     # -- state -------------------------------------------------------------
@@ -170,7 +186,7 @@ class SingleNodeHNSW:
             probed_region=np.zeros((nq, 1), dtype=np.int32),
             probe_reason=np.full((nq, 1), S.ROUTE_FANOUT, dtype=np.uint8))
 
-        idx.hnsw.efSearch = int(config.get("efSearch", 128))
+        indexes.set_search(idx, config)
         scores, ids = idx.search(queries, k)
         per_query = [(ids[q], np.zeros(len(ids[q]), dtype=np.int32),
                       scores[q]) for q in range(nq)]

@@ -37,13 +37,24 @@ Every row carries its ceiling, so the gap from perfect recall always splits:
 A recall number without this split cannot tell you whether to tune or to
 re-architect, which is the question the whole tool exists to answer.
 
-Budgets
--------
+Budgets, and configurations that cannot be built
+------------------------------------------------
 `simulate.budget.max_configs` truncates the sweep and `max_minutes` stops it.
 Neither silently drops work: the configurations not run are listed in
 `simulate_info.json` as `couldnt_check: budget` with the rule that dropped
 them, because a sweep that quietly measured less than it was asked to is a
 sweep whose absence of a row means nothing.
+
+A configuration the corpus cannot build is dropped the same way (task 034).
+`nlist` larger than a shard, or a product quantiser asking for more centroids
+than the shard has points, refuses at build time -- and until 034 that
+refusal ended the sweep and took every row already measured with it. **A run
+that dies on one bad row loses every good row before it**, which is the
+opposite of what a refusal is for. So it is recorded as
+`couldnt_check: not buildable on this corpus` with faiss's own reason, the
+sweep continues, and the command **exits non-zero** naming how many were not
+measured. The rows that were measured are still written and still valid;
+couldn't-check is never rounded up, including to an exit code.
 """
 
 import json
@@ -56,7 +67,8 @@ import numpy as np
 from .. import intake
 from ..models import Config, ConfigSpace, UnknownFamily, get as get_model
 from ..models.base import ParameterError, resolve_deterministic
-from ..receipts import (library_versions, round_floats, sha256_file,
+from ..receipts import (library_versions, producing_version, round_floats,
+                        sha256_file,
                         write_json_stable, write_manifest)
 from ..sample import loaders
 from ..truth import exact_knn
@@ -393,6 +405,12 @@ def run(requirements_path, log_fn=log, emit_state=False):
 
     # ---- the sweep ----
     kept, dropped = plan_sweep(req, seed)
+    # What the plan asked for, fixed before the sweep runs. `dropped` grows
+    # during the sweep now -- a budget deadline, and since task 034 a
+    # configuration this corpus cannot build -- and those later entries are
+    # configurations that WERE planned, so adding them to `kept` again would
+    # count them twice.
+    configs_planned = len(kept) + len(dropped)
     log_fn(f"{len(kept)} configurations across "
            f"{len(set(f for f, _ in kept))} families"
            + (f", {len(dropped)} dropped by max_configs" if dropped else ""))
@@ -487,10 +505,31 @@ def run(requirements_path, log_fn=log, emit_state=False):
                    f"{len(kept) - i + 1} configs not run")
             break
         log_fn(f"[{i}/{len(kept)}] {config.label}")
-        row, timing = measure_config(get_model(fam), config, base, queries,
-                                     gt_ids, gt_scores, seed,
-                                     context=context_for(config),
-                                     log_fn=log_fn, state_sink=state_sink)
+        try:
+            row, timing = measure_config(get_model(fam), config, base, queries,
+                                         gt_ids, gt_scores, seed,
+                                         context=context_for(config),
+                                         log_fn=log_fn, state_sink=state_sink)
+        except ParameterError as e:
+            # A configuration this corpus cannot build is one row's problem,
+            # not the run's (task 034). `nlist` larger than a shard, or a PQ
+            # asking for more centroids than the shard has points, refuses at
+            # build time -- and before this, that refusal killed the sweep and
+            # took every row already measured with it. Eight rows were lost
+            # that way while 034 was being written.
+            #
+            # So it is recorded the way a budget drop is recorded, with its
+            # own reason, and the sweep goes on. The run still exits non-zero
+            # at the end: a sweep that did not measure what it planned to has
+            # not succeeded, and `couldnt_check` is never rounded up.
+            dropped.append({
+                "config": config.label,
+                "reason": f"{COULDNT_CHECK}: not buildable on this corpus",
+                "rule": str(e),
+            })
+            log_fn(f"  {COULDNT_CHECK}: {e}")
+            log_fn("  not measured; the rest of the sweep continues")
+            continue
         rows.append(row)
         timings[config.label] = timing
 
@@ -517,6 +556,7 @@ def run(requirements_path, log_fn=log, emit_state=False):
                         if cited_prediction else {})),
         "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
+        "oneground": producing_version(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "torch_cuda": torch_info["torch_cuda"],
@@ -557,7 +597,7 @@ def run(requirements_path, log_fn=log, emit_state=False):
                              "has no shards. The semantic_sharded default is "
                              "30, which is what published fixture values "
                              "were measured with."),
-        "configs_planned": len(kept) + len(dropped),
+        "configs_planned": configs_planned,
         "configs_measured": len(rows),
         "dropped": dropped,
         "budget": dict(budget),
@@ -594,6 +634,7 @@ def run(requirements_path, log_fn=log, emit_state=False):
                                              for e in state_entries), 3),
             "projection": projection_info,
             "library_versions": versions,
+            "oneground": producing_version(),
             "note": ("each state is written after its configuration's row is "
                      "measured and before its index is released; "
                      "simulate.json is identical with or without "
@@ -618,6 +659,13 @@ def run(requirements_path, log_fn=log, emit_state=False):
                 "are listed as such in state/state_info.json.")
 
     _table(simulate_json, dropped, workdir, time.time() - t0, timings)
+    # A sweep that planned twelve configurations and measured eleven has not
+    # succeeded, whatever the eleven say. The eleven are written, the twelfth
+    # is named with its reason in simulate_info.json, and the caller is told
+    # (task 034). `run` returns the workdir as it always has; the count rides
+    # alongside so the CLI can exit non-zero without re-reading the receipt.
+    run.last_dropped = list(dropped)
+    run.last_planned = configs_planned
     return workdir
 
 
@@ -716,26 +764,31 @@ def _table(simulate_json, dropped, workdir, elapsed, timings=None):
     verdict: no column says whether a row is good enough for anything."""
     rows = simulate_json["rows"]
     print()
-    print("=" * 118)
+    print("=" * 127)
     print(f"simulate — {simulate_json['run']}   "
           f"{simulate_json['n_base']:,} vectors, "
           f"{simulate_json['n_queries']:,} queries, seed "
           f"{simulate_json['seed']}")
-    print("=" * 118)
+    print("=" * 127)
     hdr = (f"{'configuration':<52} {'r@1':>6} {'r@10':>6} {'r@100':>6} "
            f"{'ceil':>6} {'route':>6} {'index':>6} {'1/rat':>6} "
-           f"{'ampl':>5} {'fan':>4} {'mem MB':>8} {'build s':>8} {'query s':>8}")
+           f"{'ampl':>5} {'fan':>4} {'est MB':>8} {'idx MB':>8} "
+           f"{'build s':>8} {'query s':>8}")
     print(hdr)
     print("-" * len(hdr))
     for r in rows:
         t = (timings or {}).get(r["config"], {})
+        # Measured index bytes are absent from a row written before task 034;
+        # an empty column says couldn't-check rather than implying zero.
+        measured = r.get("index_bytes")
+        measured = f"{measured / 1e6:>8.1f}" if measured is not None else " " * 8
         print(f"{r['config']:<52} "
               f"{r['recall_at_1']:>6.3f} {r['recall_at_10']:>6.3f} "
               f"{r['recall_at_100']:>6.3f} {r['ceiling_at_10']:>6.3f} "
               f"{r['routing_loss']:>6.3f} {r['index_loss']:>6.3f} "
               f"{r['inv_ratio_at_10']:>6.3f} "
               f"{r['storage_amplification']:>5.2f} {r['fanout']:>4.0f} "
-              f"{r['est_memory_bytes'] / 1e6:>8.1f} "
+              f"{r['est_memory_bytes'] / 1e6:>8.1f} {measured} "
               f"{t.get('build_seconds', float('nan')):>8.1f} "
               f"{t.get('query_seconds', float('nan')):>8.1f}")
     print()
@@ -745,13 +798,18 @@ def _table(simulate_json, dropped, workdir, elapsed, timings=None):
     print("  index  = ceil - r@10, reachable and not returned. efSearch might.")
     print("  1/rat  = mean (true k-th distance)/(returned k-th distance) at "
           "k=10; 1.0 is exact")
-    print("  mem MB = estimated, not observed")
+    print("  est MB = estimated from vectors x dimension x 4 plus a graph "
+          "term, not observed")
+    print("  idx MB = measured: what faiss reports for the index it built, "
+          "summed over shards.")
+    print("           With quantisation the estimate stops describing "
+          "anything; this is the number.")
     if dropped:
         print()
-        print(f"  {len(dropped)} configuration(s) not measured "
-              f"({COULDNT_CHECK}: budget):")
+        print(f"  {len(dropped)} configuration(s) not measured:")
         for d in dropped[:10]:
             print(f"    {d['config']}")
+            print(f"      {d['reason']}")
         if len(dropped) > 10:
             print(f"    ... and {len(dropped) - 10} more, listed in "
                   "simulate_info.json")

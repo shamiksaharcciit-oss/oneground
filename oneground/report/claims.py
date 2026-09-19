@@ -913,7 +913,32 @@ def _r_proposal_limits(c):
                c.extra.get("run")))
 
 
+def _r_quantisation_limits(c):
+    """The quantisation caveat, beside the sample caveat (task 034).
+
+    A product quantiser learns a codebook from the vectors it was trained on,
+    so its error is a property of that distribution and not of the algorithm.
+    That makes a quantisation result bounded twice over -- by this sample, and
+    by what this sample looks like -- and neither bound can be dropped.
+
+    Exempt from the forbidden-phrase scan for the reason `_r_proposal_limits`
+    is: it has to name what it rules out.
+    """
+    families = c.extra.get("families") or ()
+    return ("This run measured %s, which is a quantised index: the codebook "
+            "is learned from the vectors it was trained on, so what it costs "
+            "in recall and in memory is a property of this corpus's "
+            "distribution rather than of the algorithm. It says nothing "
+            "about what quantisation costs on other corpora, and it does not "
+            "say this result would hold at full scale -- a codebook trained "
+            "on more vectors is a different codebook. It also does not rank "
+            "the algorithms: they trade differently, and the trade is what "
+            "was measured."
+            % ", ".join(families))
+
+
 _RENDERERS = {
+    "quantisation_limits": _r_quantisation_limits,
     "proposal_change": _r_proposal_change,
     "proposal_outcome": _r_proposal_outcome,
     "proposal_metric": _r_proposal_metric,
@@ -1087,6 +1112,14 @@ def runner_up_lines(recommended, options, meets="meets",
 def how_to_resolve(name, verdict, verify_info):
     """What is missing. Specific, not generic."""
     reason = verdict.reason
+    # Task 034. For a not-verifiable-here row what would settle it is not a
+    # command: it is a different engine, or an adapter that does not exist.
+    # Printing "run `oneground verify`" here would be false, and it is the
+    # one case where the remedy is a contribution rather than an action.
+    remedy = getattr(verdict, "remedy", "")
+    kind = getattr(verdict, "couldnt_check_kind", None)
+    if remedy and kind in ("not_verifiable_here", "coverage_unresolved"):
+        return f"To decide {name}: {remedy}."
     if name == "latency_p95":
         if "no verify run" in reason:
             return ("To decide latency_p95: run `oneground verify` against a "
