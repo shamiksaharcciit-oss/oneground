@@ -1,0 +1,146 @@
+# oneground requirements — the chunking stage over sec-filings-10k (task 031).
+#
+# Three strategies compared on one corpus, through paths A and B. This file is
+# the receipt for what was compared: the subsample and its seed, the three
+# parameter sets, the anchor draw, the two thresholds behind the one judgement
+# the report makes, and the extraction the whole result is conditional on.
+#
+# It reads the fixture's own `documents.jsonl.zst`, which ships as a release
+# asset and is not in the repository:
+#
+#     ~/oneground-assets/sec-filings-10k-large.tgz
+#         fixtures/sec-filings-10k/documents.jsonl.zst   691,567,625 bytes
+#
+# That file is what makes this comparison possible at all: it carries each
+# filing's extracted text AND its section offsets, so `structure` has real
+# Item boundaries to cut on and span survival has real units to be cut
+# through. A fixture that shipped only vectors could not be chunked.
+
+oneground: 1
+
+run:
+  name: chunking-sec-filings-10k
+  mode: chunk
+  seed: 20260921
+  workdir: ./runs/chunking-sec-filings-10k
+
+# What produced the text. DECLARED, never run and never verified: oneground
+# takes extracted text and does not run extractors, so this is a statement
+# carried onto every result rather than something checked.
+#
+# This corpus is the one case where oneground did the extraction, because it
+# built the fixture — so the declaration names the rule and its published
+# digest rather than a third-party tool and a version. The rule is a published
+# artifact of sec-filings-10k and is A REFERENCE FOR COMPARISON, NOT A
+# RECOMMENDATION: a different extractor on the same filings would give
+# different text, different offsets and different numbers.
+extraction:
+  tool: oneground.sample.sec_filings
+  version: 4766215f12ec83f14586d9d82fea7a21cad2889cb4b31924ee910924c2f32b87
+  note: >
+    The version is `extraction.rule_sha256` from the fixture spec, over every
+    declared value that can change what the rule emits. Results here are
+    conditional on it, and two results from differently-extracted text are two
+    observations, never a comparison.
+
+corpus:
+  fixture: sec-filings-10k
+  documents: ~/oneground-assets/sec-filings-10k/documents.jsonl.zst
+  units: sections          # the Item spans the fixture publishes per document
+
+  # A DECLARED SUBSAMPLE, and the reason is measured rather than asserted.
+  subsample:
+    kind: receipt
+    documents: 1000
+    of: 10000
+    fraction: 0.10
+    seed: 20260921
+    rule: >
+      The 10,000 accepted filings are ordered by accession and a uniform
+      sample of 1,000 is drawn under `seed`. No stratification by filer, year
+      or length: the corpus's own skew is a property of it, and the fixture's
+      sampling rule did not stratify either.
+    why: >
+      Not a budget cut. Two reasons, both about what the numbers mean.
+
+      Each strategy produces about 150,000 chunks from 1,000 filings — 157k
+      for `fixed`, 188k for `sentence`, 185k for `structure` — which is the
+      base-set size of arxiv-150k, stackexchange-150k and sec-filings-10k.
+      These numbers therefore sit beside those rather than forming a fourth
+      scale that nothing else can be read against.
+
+      And both paths run on the SAME slice. A and B are shown side by side
+      precisely so a reader sees when they disagree, so measuring A on 10,000
+      documents and B on 1,000 would make that comparison meaningless. This
+      is required by the design, not chosen for convenience.
+    full_corpus_cost_measured: >
+      Recorded so a reader deciding whether to run this at full scale has the
+      number instead of repeating the measurement. Three strategies over all
+      10,000 documents is 5,294,400 chunks — 1,566,600 `fixed`, 1,874,600
+      `sentence`, 1,853,200 `structure`, extrapolated from a 100-document
+      sample at 156.7, 187.5 and 185.3 chunks per document.
+
+      Embedding that is ~7.5 hours on an RTX PRO 4500 at the rate task 030
+      measured (152,000 chunks of 512 tokens in ~13 minutes), before
+      tokenising, chunking, exact k-NN or path A — call it 9 to 10 hours and
+      about $7. On this laptop's CPU, measured at 2.045 s/chunk on real
+      chunks, it is 3,008 hours.
+    population_note: >
+      THE TWO POPULATIONS ARE NOT THE SAME. The chunking measures below are on
+      10% of the corpus; the fixture's own five measures and its two reference
+      results are on all of it. Nothing here should be read as though the two
+      described the same set of documents.
+
+# Tokenised ONCE per document and the offsets shared by all three strategies.
+# All three read the same offsets, so tokenising per strategy would triple the
+# CPU cost of the run and change nothing.
+tokenizer:
+  model: BAAI/bge-base-en-v1.5
+  shared_across_strategies: true
+
+# The three the brief asks for. `fixed` at 512/64 is sec-filings-10k's own
+# published baseline chunking, so that column is directly comparable with the
+# fixture's `chunking` block.
+strategies:
+  - name: fixed
+    params: {size: 512, overlap: 64, min_final: 32}
+    note: the fixture's published baseline; section-blind by design
+  - name: sentence
+    params: {max_size: 512, overlap: 64, min_final: 32}
+  - name: structure
+    params: {max_size: 512, overlap: 64, min_size: 64}
+    note: cuts on the fixture's published Item offsets
+
+# Path B. Anchors are drawn from the RAW text before any chunking, so the same
+# anchor set is used for every strategy and the comparison is like for like.
+anchors:
+  count: 2000
+  seed: 20260922
+  min_tokens: 8
+  kind: sentence
+  perturbations: [verbatim, drop_first_clause, function_words_removed]
+  k: 5
+
+# Path A.
+measures:
+  length_floor: 64
+  length_cap: 512
+  duplicate_threshold: 0.80
+  duplicate_seed: 20260919
+  # The corpus's own PRE-CHUNKING near-duplicate rate at the same threshold,
+  # from fixtures/sec-filings-10k.fixture.yaml. Without it a chunk-level
+  # duplicate rate on this corpus is mostly the corpus, not the strategy.
+  duplicate_baseline: 0.0431
+
+# The only judgement the report makes about a strategy. Both thresholds are
+# stated here because neither has a default: a floor nobody chose is how a
+# judgement becomes folklore.
+fragmented:
+  length_p50_floor: 64
+  high_self_recall: 0.95
+  basis: >
+    Flagged when the median chunk is below the floor AND self-retrieval is at
+    or above the high threshold. Either alone is not the fault: short chunks
+    with a poor score are simply a poor chunking, and a high score with sound
+    lengths is the result the measure exists to find. The two together are the
+    measure being gamed.

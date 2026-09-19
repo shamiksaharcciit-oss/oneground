@@ -1009,3 +1009,60 @@ def sample_records(source, spec, n_total, seed, log=None, receipt=None):
             token_start=c["token_start"], token_end=c["token_end"]))
     _say(log, f"sampled {len(out):,} chunks of {len(index):,}")
     return out
+
+
+# ------------------------------------------------------- the rule as a receipt
+
+def rule_parameters():
+    """Every declared value that can change what this rule emits.
+
+    Task 031 requires 030's extraction rule to be a published artifact of the
+    fixture rather than an implementation detail, because a chunking result
+    measured on this text is conditional on it. This is the part of the module
+    that is normative: change any of it and the corpus changes.
+
+    Deliberately NOT a digest of the source file. The module is mostly prose
+    explaining why each threshold is what it is, and a comment edit must not
+    move a receipt. What moves it is a threshold, a pattern or the Item list.
+    """
+    return {
+        "min_doc_chars": MIN_DOC_CHARS,
+        "min_sections": MIN_SECTIONS,
+        "core_items": list(CORE_ITEMS),
+        "min_prose_chars": MIN_PROSE_CHARS,
+        "min_prose_sections": MIN_PROSE_SECTIONS,
+        "table_numeric_fraction": TABLE_NUMERIC_FRACTION,
+        "heading_title_chars": HEADING_TITLE_CHARS,
+        "item_word_pattern": _ITEM_WORD,
+        "heading_pattern": _HEADING.pattern,
+        "toc_max_gap": TOC_MAX_GAP,
+        "toc_min_run": TOC_MIN_RUN,
+        "toc_max_position": TOC_MAX_POSITION,
+        "canonical_items": list(CANONICAL_ITEMS),
+        "rejection_categories": sorted(REJECTIONS),
+    }
+
+
+def rule_digest():
+    """sha256 over the declared parameters, canonically serialised.
+
+    Published as `extraction.rule_sha256`. A test pins it, so changing a
+    threshold is a deliberate act that updates a published value rather than a
+    silent change to what the fixture means.
+    """
+    import hashlib
+    blob = json.dumps(rule_parameters(), sort_keys=True,
+                      separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(blob.encode("ascii")).hexdigest()
+
+
+TAKES_NO_SEED = """The extraction rule is deterministic and takes no seed.
+
+Task 031 asks for the rule's seed along with its parameters and digest. There
+is not one, and saying so is better than inventing one: given the same bytes
+the rule emits the same text and the same offsets, every time. The seeds this
+fixture does carry belong to steps that make a choice -- `sampling.seed`
+20260919 orders which filings are examined and which chunks are sampled,
+`queries.seed` 20260920 draws the held-out set, and `near_duplicates.seed`
+20260919 fixes the MinHash permutations.
+"""

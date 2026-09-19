@@ -90,10 +90,21 @@ retrievability of the corpus's own text, not accuracy on your users' questions, 
 this report does not measure."*
 
 **Two refinements that keep it honest.**
-- *Paraphrase distance, declared.* Optionally perturb the anchor (drop the first clause;
-  use only the sentence's noun phrases) to move the query away from verbatim overlap.
-  Each perturbation rule is seeded, named, and reported as its own column; none is a
-  model.
+- *Paraphrase distance, declared.* Optionally perturb the anchor to move the query away
+  from verbatim overlap. Each perturbation rule is seeded, named, and reported as its
+  own column; none is a model. Two are built: `drop_first_clause`, and
+  `function_words_removed`, which removes a published closed-class word list and keeps
+  whatever is left.
+
+  *Corrected in task 031, and the correction matters more than the perturbation.* This
+  paragraph previously asked for "use only the sentence's noun phrases". Noun-phrase
+  extraction needs a part-of-speech tagger, which is a model, and this path admits no
+  model — so the specification was asking for something its own rules forbid, which is
+  how a future implementer admits a tagger while believing they are following the
+  document. The refusal outranks the optional feature. What replaces it is named for
+  what it does rather than for what was wanted: a closed-class removal is not
+  noun-phrase extraction, what survives it includes verbs and adverbs, and the rule has
+  no idea which is which.
 - *Document-level agreement.* For real queries the team already has (logs, no labels),
   measure whether the top-k *documents* agree across chunkings. This is a stability
   measure — it says whether the chunking decision changes what a user would see — and
@@ -151,7 +162,89 @@ or labelled heuristic; the only model in the loop is the formatter under test. I
 formatter helps, the receipt shows where; if it does not, the same receipt says so.
 That is the experiment core asked for, and it costs a fixture and a weekend.
 
-## 7. What is written down now, and nothing else
+## 7. Built (task 031) — this document is now the specification
+
+What was a position is what the code does. Three strategies, both paths, on
+`sec-filings-10k`. Paths C and D remain **unbuilt** and are not scheduled.
+
+### The rule the run added: an alignment rate is unreadable without its ceiling
+
+**`boundary_alignment` must always be published with `alignment_ceiling`
+beside it.** A chunking cannot align more starts than it has units to align
+to: a unit longer than `max_size` is split, and only the first of its pieces
+can begin on the unit's edge. So the achievable maximum is
+`units / chunks`, not 1.0, and it is usually around 0.12 on this corpus.
+
+0.0723 against a ceiling of 0.1178 is 61% of what was achievable. 0.0723
+against an assumed ceiling of 1.0 reads as a failure. Same number, opposite
+conclusions — so the bare rate is not a publishable figure.
+
+### What the three strategies measured
+
+1,000 filings (a declared 10% subsample, seed 20260921; the fixture's own five
+measures are on all 10,000 — not the same population), 2,000 anchors, k=5.
+
+| | fixed | sentence | structure |
+|---|---|---|---|
+| chunks | 158,341 | 185,771 | 182,361 |
+| boundary alignment | 0.0003 | 0.0017 | **0.0723** |
+| ceiling | 0.1357 | 0.1157 | 0.1178 |
+| % of ceiling | 0.2% | 1.5% | **61.4%** |
+| span survival | 0.5551 | 0.5607 | **0.6386** |
+| `self_recall@5` | **0.2260** | 0.2070 | 0.2195 |
+| `containing_hit@5` | 0.2485 | 0.2600 | **0.2725** |
+
+### The finding, and it is the argument for the side-by-side rule
+
+**The structure-aware strategy wins the structural measures by 241× and loses
+retrieval.** `structure` aligns 0.0723 against `fixed`'s 0.0003, splits 1,794
+fewer Items — and retrieves *worse*: `self_recall@5` 0.2195 against 0.2260.
+
+Neither number is the answer. A reader with only path A would have concluded
+that structure-aware chunking is the clear improvement; a reader with only
+path B would have concluded it is not worth the trouble. **Both would have
+been confident and wrong**, and this happened on the corpus with the best
+structure available to disagree on — real Item boundaries, published offsets,
+a strategy cutting precisely on them.
+
+This is why A and B are shown side by side, and the reason is now measured
+rather than reasoned. §5's refusal — that a structural improvement may not be
+reported as implying a retrieval improvement — is not a hypothetical caution.
+
+Note `structure` also has the widest gap between `self_recall` and
+`containing_hit` (0.053 against `fixed`'s 0.023): more of its containing
+chunks are not the home chunk. Under a hit definition that counted any
+container, `structure` would have looked best. It does not under the pinned
+one, which is what the pinning is for.
+
+### What each measure needs
+
+- **Need offsets:** self-retrieval by containment (a span's home chunk is
+  positional) and span survival (did the cut fall inside a unit).
+- **Do not:** length distribution, near-duplicate rate,
+  unresolved-reference rate.
+- **Never:** anything downstream of embedding. The vector-database path works
+  on vectors and ids and has no idea where a chunk came from.
+
+"Offsets required" is therefore not a precondition for using oneground: it is
+a precondition for two of the seven columns.
+
+### The cost, measured
+
+Every strategy needs its own embedding pass — different chunks, different
+vectors, no reuse. **Comparing N strategies costs N embeds.** Measured on an
+RTX PRO 4500: 810 s, 927 s and 897 s for the three, 196–203 chunks/s, 43.9
+minutes in total for ~526,000 chunks.
+
+Tokenisation is the one cost that is *not* N-fold: all strategies read the
+same offsets, so the document is tokenised once and the offsets shared. At
+corpus scale that is the difference between one CPU cost and three.
+
+At full corpus — all 10,000 filings — the three produce 5,294,400 chunks,
+about 7.5 hours of embedding alone, 9 to 10 hours and roughly $7. That is the
+reason the published comparison is on 10%.
+
+## 8. What is written down now, and nothing else
 
 This document; a `chunking:` section in `docs/CHARTER.md` under v0.2 with the four
 paths and the refusal list; and an entry in the roadmap. No code before v0.1 ships, no

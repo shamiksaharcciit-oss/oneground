@@ -1,0 +1,91 @@
+# The chunking comparison over sec-filings-10k (task 031 step 7), as a pod
+# session.
+#
+# `oneground pod plan sessions/chunking-sec-filings.yaml` resolves this live
+# and prices it; `up` is the only subcommand that creates anything, and it
+# still needs a typed 'y' at a TTY.
+#
+# WHY A POD, with the number rather than the impression.
+#
+# Every strategy needs its own embedding pass: different chunks, different
+# vectors, no reuse. Comparing three strategies costs three embeds. Measured
+# on a 100-document sample with the real bge tokenizer, the three produce
+# 156.7, 187.5 and 185.3 chunks per document -- so over all 10,000 filings
+# that is 5,294,400 chunks, which is ~7.5 hours of embedding alone on this
+# card at the rate task 030 measured, and 3,008 hours on the developer's CPU
+# at a measured 2.045 s/chunk.
+#
+# This run is therefore a DECLARED SUBSAMPLE of 1,000 documents, and the
+# reason is not the budget. Each strategy then produces about 150,000 chunks
+# -- the base-set size of all three fixtures -- so these numbers sit beside
+# theirs instead of forming a fourth scale nothing can be read against. And
+# both paths run on the same slice, because A and B are shown side by side
+# precisely so a reader sees when they disagree. The subsample, its seed and
+# its rule are declared in requirements.chunking-sec-filings.yaml, and the
+# full-corpus cost is recorded there so a future reader deciding whether to
+# run it at full scale has the number rather than repeating the measurement.
+#
+# WHAT IT DOES, and the one thing to know about the inputs. The corpus is
+# sec-filings-10k's documents.jsonl.zst, 692 MB, which ships as a release
+# asset: a git bundle carries commits so it cannot arrive that way, and it
+# does not go up an scp inside input_size_cap_mb. It comes off the network
+# volume, where task 030's session left it, and run_chunking.sh checks for it
+# FIRST -- before the model is loaded or anything is tokenised -- so a missing
+# corpus costs four minutes and names the path.
+
+gpu:
+  - RTX PRO 4500
+  - RTX PRO 6000
+  - RTX 6000 Ada
+  - RTX 4090
+
+volume: vecbench                 # datacenter derived from the name
+volume_mount_path: /workspace
+
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+
+# The corpus is 692 MB compressed and ~3.6 GB of text for the full file; this
+# run materialises 1,000 documents of it. Chunk vectors are the larger cost:
+# ~520,000 x 768 float32 across the three strategies is about 1.6 GB, and the
+# tarball holds the receipts rather than the vectors.
+disk_gb: 40
+
+env:
+  HF_HOME: /workspace/hf
+  TOKENIZERS_PARALLELISM: "true"
+
+setup: corpora/POD_SETUP.md
+run: bash corpora/run_chunking.sh
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-session.log
+done_marker: DONE
+
+outputs:
+  # The log FIRST, so a run terminated before it finishes still comes home
+  # with its phase timings and its per-strategy numbers (task 030b).
+  - {remote: /workspace/oneground-session.log,
+     local: tasks/scratch/031-session-log/}
+  # The receipts: chunking.json plus one file per strategy, written the moment
+  # each strategy completes.
+  - {remote: /workspace/chunking-sec-filings.tgz, local: ./, extract: true}
+
+# Every phase reports: the corpus index and the subsample materialisation,
+# the shared tokenisation, each strategy's chunk count, the embedding pass
+# (progress bar ON for exactly this reason -- it is the only long quiet
+# stretch, roughly fifteen minutes per strategy), path A's shingling, and each
+# path B column.
+stall_minutes: 20
+
+caps:
+  # Estimated 1.5 h from measured parts: ~2 min to index and materialise the
+  # subsample, ~2 min shared tokenisation, ~5 min chunking all three, ~45 min
+  # embedding ~520,000 chunks at task 030's measured rate, ~30 min for path A
+  # including the near-duplicate measure over ~175,000 chunks per strategy.
+  #
+  # Two hours at the top of the live range ($0.72/hr, what the other sessions
+  # were billed and what this is confirmed against rather than the $0.34
+  # floor) is $1.44, inside max_usd.
+  max_hours: 2.0
+  max_concurrent: 1
+  max_usd: 2.50

@@ -43,7 +43,64 @@ Everything the report says is traceable to a file and a field in your workdir.
 That is what "receipt" means here: re-derivable from the seeds and rules
 recorded beside it.
 
-### If you bring text: one record is one vector, so bring chunks
+### If you bring text: chunking runs first, and it is measured
+
+Since task 031, `oneground characterize` accepts **extracted text** as well as
+vectors — one record per document, however you produced it, with no extractor
+protocol, adapter, plugin or catalogue. Given text, the chunking stage runs
+first, writes its own receipt, and the rest of the path continues from the
+chunks it produced. `oneground chunk <requirements>` runs that stage alone, so
+you can ask "is my chunking cutting through answers" without committing to a
+full run. See [CHUNKING.md](CHUNKING.md).
+
+**Given vectors, chunking reports couldn't-check** in those words: the cut has
+already happened and is out of the instrument's reach. A vector carries no
+record of where its chunk began, so neither the structural measures nor
+self-retrieval can be computed. That is a stated outcome, not an omitted
+section.
+
+#### The `extraction:` declaration is required
+
+oneground **does not run extractors**, and this is deliberate rather than
+unfinished. In a real pipeline the chunker sits behind an extractor and the
+text has already been through one; feeding the chunker raw HTML would measure
+it in a position it never occupies, and shipping pre-cleaned text would bake
+an extractor's choices in invisibly. Running them ourselves would mean
+dependencies dwarfing the wheel, or a hosted service that sends your documents
+off your machine, and partial responsibility for someone else's parser — the
+position the adapter protocol deliberately avoids for engines.
+
+So you declare what produced the text, and it is carried onto every result:
+
+```yaml
+extraction:
+  tool: unstructured
+  version: "0.16"
+```
+
+`unknown` is accepted — you often will not know — **but only with a reason**:
+
+```yaml
+extraction:
+  tool: unknown
+  reason: the corpus was handed over as text by another team
+```
+
+Unknown with no reason is indistinguishable from nobody having asked, and a
+reader cannot tell which they are looking at. A named tool needs its version,
+because an extractor's output changes between releases.
+
+Nothing about this declaration is checked. It says what the result is
+conditional on; it does not claim to be true, and the result records that
+oneground neither ran nor verified it.
+
+**A chunking measured under one extraction may not hold under another.** Two
+results from differently-extracted text are two observations, never a
+comparison — and comparing two extractions needs no new machinery: run both
+extractors yourself, bring two corpora, get two results, each declaring its
+extraction.
+
+### One record is one vector, so bring chunks
 
 oneground embeds each record you give it into exactly one vector, and the
 model takes a fixed number of tokens — `max_seq_length`, 512 by default. A
@@ -119,6 +176,8 @@ is the honest answer to "what do I have to do to get a real answer?"
 | `ambiguous_query_rate` | **50 or more real queries** — logged, not invented. Below 50 it stays couldn't-check; a rate over 12 queries is a number you can compute and should not report. |
 | `drift` | a timestamp column on the corpus **and** on the queries. Corpus timestamps alone say when the partition was trained but not which queries are the future ones. |
 | `latency_p95`, `qps` | more than a sample: a real engine in an environment where the round trip is small relative to the query. That is `oneground verify` with `verify.target: runpod`. See [VERIFY.md](VERIFY.md). |
+| `span_survival`, `self_retrieval` | **text and chunk offsets.** The chunker emits them as it cuts; chunks brought from elsewhere have them derived by an ordered search, and a chunk that is not a verbatim substring is couldn't-check on these two with the reason. Vectors alone: couldn't-check. |
+| `length_distribution`, chunk `near_duplicate_rate`, `unresolved_references` | the chunks' text. **No offsets needed** — these three are unaffected by a chunk whose position is unknown. |
 | `monthly_budget` | stays declared either way. The price table is list prices with an error band, and the budget verdict uses the **upper** bound. |
 
 ---

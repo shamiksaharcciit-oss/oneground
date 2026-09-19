@@ -131,6 +131,33 @@ class Requirements:
         return out
 
 
+def _validate_text_corpus(req, path):
+    """A corpus given as extracted text needs its extraction declared.
+
+    oneground does not run extractors, so what produced the text cannot be
+    inferred. The declaration is carried onto every result so a reader knows
+    what the result is conditional on; `unknown` is accepted with a reason,
+    because unknown with no reason is indistinguishable from nobody having
+    asked. See docs/INTAKE.md and docs/CHUNKING.md.
+    """
+    d = req.data.get("extraction")
+    if not d:
+        raise RequirementsError(
+            f"{path}: corpus.documents is set but `extraction:` is missing. "
+            "oneground takes extracted text and does not run extractors, so "
+            "name the tool and its version -- or `unknown` with a reason.")
+    if not d.get("tool"):
+        raise RequirementsError(f"{path}: extraction.tool is required")
+    if d["tool"] == "unknown" and not d.get("reason"):
+        raise RequirementsError(
+            f"{path}: extraction.tool is 'unknown' with no reason. Unknown "
+            "with no reason is indistinguishable from nobody having asked.")
+    if d["tool"] != "unknown" and not d.get("version"):
+        raise RequirementsError(
+            f"{path}: extraction.tool {d['tool']!r} needs its version; an "
+            "extractor's output changes between releases.")
+
+
 def _validate_declared(req, path):
     """Tier 2's own validation. Names the field, refuses rather than guesses.
 
@@ -212,11 +239,22 @@ def load(path):
         if req.declared:
             _validate_declared(req, path)
             return req                      # Tier 2: nothing below applies
+        if (req.data.get("corpus") or {}).get("documents"):
+            # A TEXT corpus (task 031). `characterize` accepts extracted text
+            # as well as vectors: the chunking stage runs first, writes its
+            # own receipt, and the rest of the path continues from the chunks
+            # it produced. The corpus is documents, so there is no
+            # `corpus.sample.vectors` to point at and nothing below applies.
+            _validate_text_corpus(req, path)
+            return req
         raise RequirementsError(
-            f"{path}: corpus.sample is missing and corpus.declared is empty. "
-            "`characterize` measures a sample of your own vectors (Tier 1); "
-            "with corpus.declared it produces a fixture analogy and capacity "
-            "arithmetic instead (Tier 2). One of the two has to be there.")
+            f"{path}: corpus.sample is missing, corpus.declared is empty and "
+            "corpus.documents names no extracted text. `characterize` "
+            "measures a sample of your own vectors (Tier 1); with "
+            "corpus.declared it produces a fixture analogy and capacity "
+            "arithmetic instead (Tier 2); with corpus.documents it chunks "
+            "extracted text first (docs/CHUNKING.md). One of the three has "
+            "to be there.")
 
     has_vectors = bool(req.vectors.get("path"))
     has_text = bool(req.text.get("path"))
