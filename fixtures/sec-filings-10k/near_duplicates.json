@@ -1,0 +1,48 @@
+{
+  "bands": 32,
+  "by_threshold": {
+    "0.50": {
+      "documents": 5628,
+      "kind": "lower bound",
+      "lsh_recall": 0.873211,
+      "pairs": 4039,
+      "rate": 0.5628
+    },
+    "0.60": {
+      "documents": 3673,
+      "kind": "lower bound",
+      "lsh_recall": 0.988224,
+      "pairs": 2493,
+      "rate": 0.3673
+    },
+    "0.70": {
+      "documents": 1431,
+      "kind": "exact",
+      "lsh_recall": 0.999847,
+      "pairs": 962,
+      "rate": 0.1431
+    },
+    "0.80": {
+      "documents": 431,
+      "kind": "exact",
+      "lsh_recall": 1.0,
+      "pairs": 290,
+      "rate": 0.0431
+    },
+    "0.90": {
+      "documents": 43,
+      "kind": "exact",
+      "lsh_recall": 1.0,
+      "pairs": 27,
+      "rate": 0.0043
+    }
+  },
+  "candidate_pairs": 14646,
+  "documents": 10000,
+  "measure": "lexical Jaccard over word shingles, exact on candidates",
+  "num_perm": 128,
+  "primary_threshold": 0.8,
+  "rows": 4,
+  "seed": 20260919,
+  "shingle_words": 5
+}

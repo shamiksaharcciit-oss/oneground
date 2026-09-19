@@ -64,3 +64,6 @@ tasks/scratch/
 # The CI-only corpus and requirements the calibration workflow generates.
 # Re-derivable from .github/scripts/make_ci_corpus.py and its seed.
 .ci/
+
+# sec-filings-10k ships its corpus as a release asset (692 MB compressed).
+fixtures/*/documents.jsonl.zst

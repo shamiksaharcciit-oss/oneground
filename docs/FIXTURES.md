@@ -22,7 +22,7 @@ rounding couldn't-check up to verified.
 
 |  | **arxiv-150k** | **stackexchange-150k** | **sec-filings-10k** |
 |---|---|---|---|
-| status | `verified` | `built` | `planned` |
+| status | `verified` | `built` | `built` |
 | built for | reference | reference | **chunking** |
 | source | arXiv metadata snapshot | Stack Overflow posts (Internet Archive Stack Exchange dump) | EDGAR 10-K annual reports |
 | provider | arxiv.org via Kaggle `Cornell-University/arxiv` | Hugging Face `mikex86/stackoverflow-posts`, revision `9e791fe8` | U.S. Securities and Exchange Commission, twelve quarterly indexes |
@@ -40,19 +40,22 @@ rounding couldn't-check up to verified.
 
 | measure | tolerance | arxiv-150k | stackexchange-150k | sec-filings-10k |
 |---|---|---|---|---|
-| intrinsic dimensionality (TwoNN) | 0.5 | 32.55 | **37.46** | not built |
-| boundary crispness | 0.02 | 0.036 | **0.011** | not built |
-| ambiguous query rate | 0.02 | 0.891 | **0.908** | not built |
-| skew, top-10 share | 0.02 | 0.075 | 0.069 | not built |
-| drift (before → after) | 0.02 | 0.522 → 0.549 | **0.485 → 0.450** | not built |
+| intrinsic dimensionality (TwoNN) | 0.5 | 32.55 | **37.46** | 33.43 |
+| boundary crispness | 0.02 | 0.036 | 0.011 | **0.107** |
+| ambiguous query rate | 0.02 | 0.891 | 0.908 | **0.654** |
+| skew, top-10 share | 0.02 | 0.075 | 0.069 | 0.089 |
+| drift (before → after) | 0.02 | 0.522 → 0.549 | **0.485 → 0.450** | 0.632 → 0.616 |
 
-`sec-filings-10k` is `planned`: its rules, seeds, thresholds and cutoffs are
-fixed in writing and every value in its spec is `TO_BE_FILLED`. Nothing is
-reported for it here until the canonical build fills them, and "not built" is
-not a placeholder for a number someone expects — it is the whole of what is
-known.
+The third column is the one that does not follow. `sec-filings-10k` is **three
+times crisper than arXiv and ten times crisper than Stack Overflow**, and much
+less ambiguous. Part of that is the corpus and part of it is the construction:
+its records are 512-token chunks of long documents, and the other chunks of a
+document are a chunk's nearest neighbours, so regions inherit the document
+boundary as structure that abstracts and question titles do not have. That is
+the property the fixture exists to make measurable, and it is stated here
+rather than read as a fact about filings alone.
 
-Definitions are in each spec and are identical across the two: crispness is the
+Definitions are in each spec and are identical across the three: crispness is the
 fraction of base vectors whose second-nearest centroid distance exceeds 1.20×
 the nearest under k-means with 256 centroids; ambiguity is the fraction of
 queries with `d2 <= 1.10 × d1` against the same centroids; skew is the share of
@@ -62,8 +65,8 @@ queries either side.
 
 ### The two reference results
 
-Both fixtures publish the same two configurations at the same parameters, so
-the rows are comparable line for line.
+All three fixtures publish the same two configurations at the same parameters,
+so the rows are comparable line for line.
 
 | | arxiv-150k | stackexchange-150k |
 |---|---|---|
@@ -75,27 +78,34 @@ the rows are comparable line for line.
 | storage amplification | 3.715× | **3.897×** |
 | copies p50 / p95 / p99 | 4 / 4 / 4 | 4 / 4 / 4 |
 
+`sec-filings-10k` adds a third column to both: single-node HNSW **0.988** —
+the *lowest* of the three — and semantic sharding **0.929** at **3.432×**,
+routing ceiling 0.930. It is the cheapest of the three to shard and among the
+best served by it, and the hardest of the three to search exactly. The two
+results move in opposite directions, which is worth more than either alone.
+
 The **routing ceiling** is what an exact search over everything the routing can
-reach would return. On both fixtures it sits at the measured recall, which says
-the loss is the routing rather than the index — no amount of `efSearch`
-recovers it.
+reach would return. On all three fixtures it sits at the measured recall, which
+says the loss is the routing rather than the index — no amount of `efSearch`
+recovers it. What differs is how high the ceiling sits.
 
 ### The drift pair
 
-| | arxiv-150k | stackexchange-150k |
-|---|---|---|
-| cutoff | 2019-01-01 | 2017-01-01 |
-| before | 0.522 | 0.485 |
-| after | 0.549 | **0.450** |
-| direction | improves | **degrades** |
-| queries before / after | — | 1,063 / 937 |
-| realised corpus split | — | 78,969 / 150,000 = 52.6% before |
+| | arxiv-150k | stackexchange-150k | sec-filings-10k |
+|---|---|---|---|
+| cutoff | 2019-01-01 | 2017-01-01 | 2024-01-01 |
+| before | 0.522 | 0.485 | 0.632 |
+| after | 0.549 | **0.450** | 0.616 |
+| direction | improves | **degrades** | degrades mildly |
+| queries before / after | — | 1,063 / 937 | 1,370 / 630 |
+| realised corpus split | — | 78,969 / 150,000 = 52.6% before | — |
 
-This is the one measure where the two corpora disagree in **sign**, and it is
-the finding v0.1 leads with. arXiv's regions describe newer papers slightly
-better than older ones; Stack Overflow's describe newer questions *worse*. A
-topic mix that turns over — jQuery out, React and Kubernetes in — is not
-described by centroids trained before it turned.
+arXiv is the only one that **improves**: its regions describe newer papers
+slightly better than older ones. Stack Overflow's describe newer questions
+*worse*, by 7.2% relative — a topic mix that turns over, jQuery out, React and
+Kubernetes in, is not described by centroids trained before it turned. Filings
+drift the same way and by a third as much, 2.5% relative, which is what a
+corpus of mandated annual disclosures on a two-year window should do.
 
 ---
 
@@ -109,6 +119,19 @@ From `stackexchange-150k`'s own `findings` block, verbatim:
 > opposite way (0.485->0.450 vs 0.522->0.549). Two corpora that look unalike
 > to a reader turn out to agree on the architecture question and disagree
 > about time.
+
+And from `sec-filings-10k`'s, which breaks that agreement:
+
+> Against the other two fixtures: far crisper (0.107 vs 0.036 and 0.011), much
+> less ambiguous (0.654 vs 0.891 and 0.908), cheaper to shard (3.432x vs
+> 3.715x and 3.897x), better under semantic sharding (0.929 vs 0.932 and
+> 0.869), harder to search exactly (0.988 vs 0.997 and 0.994), and drifting
+> mildly in Stack Overflow's direction (0.632 to 0.616).
+>
+> Three corpora now, and the architecture question has three answers rather
+> than a trend. What separates this one is not its subject matter but that its
+> records are chunks of long documents instead of short whole ones — which is
+> the property the fixture was built to make measurable.
 
 ---
 
@@ -137,10 +160,17 @@ published by category.** Filer HTML is of no fixed discipline: some letter-space
 headings across inline elements so the word arrives as `It em 7.`, some put the
 Item number on its own line. Every filing the rule turns away is counted and
 attributed, and the fixture publishes examined-versus-accepted. A fixture that
-silently drops a third of its corpus is measuring its own parser. On a seeded
-development sample of 40 filings the rule accepted 38, and both rejections were
-asset-backed trusts that file Items 1 to 15 under General Instruction J and
-answer "Omitted." to every one — structurally perfect, and empty.
+silently drops a third of its corpus is measuring its own parser.
+
+Measured on the canonical build: **11,445 filings examined to accept 10,000,
+12.63% rejected**. `sections_empty` is 766 of the 1,445 — the largest single
+reason, 53% — and those are asset-backed trusts that file Items 1 to 15 under
+General Instruction J and answer "Omitted." to every one. Structurally
+perfect, and empty; a rule that counted headings would have taken all 766 as
+among the best-structured documents in the corpus. `too_short` is 492,
+`no_sections` 137, `too_few_sections` 43 — the last two are the honest count
+of what this parser cannot read, 1.6% of what it examined. `not_html` 4,
+`no_core_section` 2, `no_10k_document` 1, `fetch_failed` 0.
 
 **Boilerplate repetition is intrinsic, so the near-duplicate rate is published
 for the corpus before any chunking.** This is the baseline a chunking
@@ -148,9 +178,24 @@ comparison must be read against: without it, a strategy's duplicate rate cannot
 be told apart from the corpus's own. It is measured lexically — Jaccard over
 word shingles — precisely because a chunk vector exists only once a chunking has
 been chosen, so a cosine rate on chunk vectors already contains the strategy
-under test. Measured before the build on three filers' consecutive filings, the
-same company's adjacent-year 10-Ks score Jaccard 0.49 to 0.62. The repetition is
-large and it belongs to the corpus.
+under test.
+
+Measured on the canonical build, and the reason the thresholds were fixed from
+a three-filer pilot *before* it:
+
+| threshold | rate | kind |
+|---|---|---|
+| J ≥ 0.50 | **56.28%** | lower bound (LSH recall 0.873) |
+| J ≥ 0.60 | 36.73% | lower bound (LSH recall 0.988) |
+| J ≥ 0.70 | 14.31% | exact |
+| J ≥ 0.80 | 4.31% | exact |
+| J ≥ 0.90 | 0.43% | exact |
+
+At the primary 0.80 cutoff alone this corpus looks barely duplicated, 4.31%.
+At 0.50, **more than half of all 10,000 documents** have another sharing at
+least half their five-word shingles. The repetition is enormous and lives in a
+band a single high cutoff cannot see — which is exactly what a chunking
+comparison must know before attributing any of it to a strategy.
 
 **On the licence.** The SEC says of EDGAR that "anyone can access and download
 this information for free", asserts no copyright, and attaches no reuse terms —

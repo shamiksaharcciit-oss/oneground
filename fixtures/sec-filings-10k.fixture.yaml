@@ -27,15 +27,23 @@
 #      nearly verbatim. Without that baseline, a chunking strategy's
 #      duplicate rate cannot be told apart from the corpus's own.
 #
-# status: planned — every receipt value below is TO_BE_FILLED until the
-# canonical build fills it. The rules, seeds, thresholds and cutoffs are
-# fixed here first, in writing, precisely so that the choice of corpus, rule
-# and cutoff is settled BEFORE any number exists.
+# status: built — the canonical build is session 20260919-101123. Every
+# receipt value below is measured, and `oneground fixture verify
+# sec-filings-10k` checks them against a local recomputation.
+#
+# Every rule, seed, threshold and cutoff was fixed in writing, with every
+# value TO_BE_FILLED, BEFORE any number existed. That mattered twice. The
+# near-duplicate threshold range was set from a three-filer pilot rather than
+# from the corpus, and it is why the duplication is visible at all: at the
+# primary 0.80 cutoff the rate is 4.3%, and at 0.50 it is 56.3%. And the
+# architecture answer came out the opposite way from stackexchange-150k's --
+# this is the first fixture on which semantic sharding does well. See
+# `findings`.
 
 fixture:
   id: sec-filings-10k
   version: 1
-  status: planned
+  status: built
   purpose: chunking
   license_notice: >
     SEC filings are compulsory public disclosures held in EDGAR, a database
@@ -263,10 +271,18 @@ extraction:
       both are correct. This is not the fixture's rejection rate: it is 40
       filings, and the build measures all of them.
   # Filled by the canonical build, over every filing it examined.
-  examined: TO_BE_FILLED
-  accepted: TO_BE_FILLED
-  rejection_rate: TO_BE_FILLED
-  rejections_by_category: TO_BE_FILLED
+  examined: 11445
+  accepted: 10000
+  rejection_rate: 0.1263
+  rejections_by_category:
+    sections_empty: 766
+    too_short: 492
+    no_sections: 137
+    too_few_sections: 43
+    not_html: 4
+    no_core_section: 2
+    no_10k_document: 1
+    fetch_failed: 0
   kind: receipt
 
 sampling:
@@ -301,7 +317,8 @@ sampling:
     2024 is 8.9 points off and 2023 is 24.6. Chosen from the index before the
     corpus was built; the split realised on the built sample is published in
     `findings` rather than used to move the cutoff.
-  documents_sha256: TO_BE_FILLED
+  documents_sha256: 8a1d8ebba8781360b6b26a2e5d0696aee549ef262700a18df31de63d95934f35
+  sample_sha256: 1cf90cdecc532a103ebb57870290246f041245ab862c8332badcc49b74cc0349
   kind: receipt
 
 # ---------------------------------------------------------------------------
@@ -341,9 +358,19 @@ chunking:
       truncation. 64 of overlap because some overlap is near-universal in
       practice and zero would make the baseline a straw man. Neither number
       was tuned against any measurement.
-  chunks_total: TO_BE_FILLED
-  chunks_per_document: TO_BE_FILLED
-  chunks_crossing_a_boundary: TO_BE_FILLED
+  chunks_total: 1559834
+  chunks_per_document: 155.98
+  chunks_crossing_a_boundary: 109722
+  crossing_rate: 0.0703
+  crossing_rate_in_the_shipped_sample: 0.0706
+  crossing_rate_note: >
+    109,722 of 1,559,834 chunks cross a section boundary. The full-corpus
+    counts are read from the build log, because the builder does not persist
+    them to an artifact -- a gap recorded in the task 030 report. The rate is
+    independently recomputable from a shipped artifact: the 152,000 chunks in
+    sample.jsonl.zst carry their own `crosses_boundary`, and 10,730 of them
+    cross, 0.0706 against the full corpus's 0.0703. This is the number a
+    section-aware chunking strategy has to beat.
   kind: declared
 
 # Per document: its sections with character offsets into the published text,
@@ -351,9 +378,35 @@ chunking:
 section_statistics:
   offsets_published: true
   offsets_index: the extracted text exactly as published in documents.jsonl.zst
-  sections_per_document: TO_BE_FILLED
-  section_chars: TO_BE_FILLED
-  item_coverage: TO_BE_FILLED
+  sections_total: 214990
+  sections_per_document: {min: 9, p50: 22, p95: 23, max: 23, mean: 21.5}
+  section_chars: {p5: 39, p50: 756, p95: 98503, max: 974099}
+  document_chars: {min: 24056, p50: 347887, p95: 633966, max: 1773064,
+                   total: 3582543434}
+  item_coverage:
+    '1': 9754
+    1A: 9676
+    1B: 9498
+    1C: 2890
+    '2': 9686
+    '3': 9805
+    '4': 9733
+    '5': 9813
+    '6': 9582
+    '7': 9942
+    7A: 9726
+    '8': 9934
+    '9': 9887
+    9A: 9924
+    9B: 9866
+    9C: 8265
+    '10': 9817
+    '11': 9791
+    '12': 9809
+    '13': 9741
+    '14': 9826
+    '15': 9921
+    '16': 8104
   kind: receipt
 
 # Per corpus, BEFORE any chunking: the baseline every chunking measure must be
@@ -389,7 +442,13 @@ near_duplicates:
     with probability 1.000 at 0.80 and 0.874 at 0.50, so rows below 0.999
     recall are published as a lower bound with the recall beside them, never
     rounded up to a rate.
-  rate_by_threshold: TO_BE_FILLED
+  candidate_pairs: 14646
+  rate_by_threshold:
+    '0.50': {rate: 0.5628, documents: 5628, pairs: 4039, kind: lower bound}
+    '0.60': {rate: 0.3673, documents: 3673, pairs: 2493, kind: lower bound}
+    '0.70': {rate: 0.1431, documents: 1431, pairs: 962, kind: exact}
+    '0.80': {rate: 0.0431, documents: 431, pairs: 290, kind: exact}
+    '0.90': {rate: 0.0043, documents: 43, pairs: 27, kind: exact}
   kind: receipt
 
 queries:
@@ -403,13 +462,17 @@ queries:
     One consequence of applying that rule unchanged here is stated rather than
     designed around. "The top 5% of categories by volume" over arXiv's ~150
     subject classes selects seven; over this corpus's 23 Items it selects
-    ONE. So half the queries come from a single Item, and it will be whichever
-    section is longest — in practice Item 8, the financial statements. The
-    rule is kept identical because comparability with the other two fixtures
-    is what makes the three readable together, and changing a constant for one
-    corpus after seeing what it selects is the fitting this fixture exists to
-    avoid. Which Item is hot, and what share of the corpus it holds, is
-    published in `findings`.
+    ONE. So half the queries come from a single Item, and it is whichever
+    section is longest. The rule is kept identical because comparability with
+    the other two fixtures is what makes the three readable together, and
+    changing a constant for one corpus after seeing what it selects is the
+    fitting this fixture exists to avoid.
+
+    Measured: the hot Item is 1A, Risk Factors, at 25.0% of sampled chunks.
+    The spec predicted Item 8, the financial statements, and was wrong --
+    Item 8's tables are dropped by the extraction rule while Item 1A is all
+    prose. The prediction is left on the record in `findings` rather than
+    quietly corrected.
 
     This differs from arxiv-150k and stackexchange-150k, where the query is
     the record's title and so is much shorter than the document, and the
@@ -420,14 +483,14 @@ queries:
     self-retrieval, the construction docs/CHUNKING.md calls path B, and it
     measures retrievability rather than answer-bearing search.
   seed: 20260920
-  queries_sha256: TO_BE_FILLED
+  queries_sha256: 6f1d041a028744c959681041d90fa13ccba8b971fd5fda9f5605d78f60f53240
   kind: receipt
 
 embedding:
   model: BAAI/bge-base-en-v1.5
   weights_sha256: c7c1988aae201f80cf91a5dbbd5866409503b89dcaba877ca6dba7dd0a5167d7
   library: sentence-transformers
-  library_version: TO_BE_FILLED
+  library_version: 6.0.1
   max_seq_length: 512
   normalize: true
   dtype: float32
@@ -440,7 +503,10 @@ embedding:
   # recorded in build_info.json as well, which is what made it look like a
   # receipt; every other value the builder reads was already declared.
   device: cuda
-  vectors_sha256: TO_BE_FILLED
+  vectors_sha256: 0c5a7bac947bc5af26e6b1a53adfe209434706252ed5e1531f836d863fd3e71b
+  torch_version: 2.14.0+cu130
+  torch_cuda: '13.0'
+  cuda_device: NVIDIA RTX PRO 4500 Blackwell
   kind: receipt
 
 ground_truth:
@@ -455,7 +521,7 @@ ground_truth:
     arxiv-150k and stackexchange-150k and the three read line for line. That
     comparability is the design principle of the pair, and it is why the
     corpus is not shipped as every chunk it has.
-  ground_truth_sha256: TO_BE_FILLED
+  ground_truth_sha256: 1376a1f656d34cd8501af7cf5465360f8181fa1558ce315a05d3cd4508796fb2
   kind: receipt
 
 # Tier 2 analogy: how a user's corpus is matched to this fixture.
@@ -474,30 +540,32 @@ analogy:
 characterization:
   intrinsic_dimensionality:
     estimator: TwoNN
-    value: TO_BE_FILLED
+    value: 33.43
     tolerance: 0.5
   boundary_crispness:
     definition: >
       Fraction of base vectors whose second-nearest centroid distance exceeds
       1.20 x their nearest centroid distance, under k-means with 256 centroids
       (seed 20260919, 20 iterations). Higher is crisper.
-    value: TO_BE_FILLED
+    value: 0.107
     tolerance: 0.02
   ambiguous_query_rate:
     definition: fraction of queries with d2 <= 1.10 * d1 against the same centroids
-    value: TO_BE_FILLED
+    value: 0.654
     tolerance: 0.02
   skew_top10_share:
     definition: share of base vectors in the 10 largest centroid regions
-    value: TO_BE_FILLED
+    value: 0.089
     tolerance: 0.02
   drift:
     definition: >
       Centroids trained on chunks from filings dated before 2024-01-01;
       recall@10 at one-region routing measured separately on queries whose
       source filing is before / after that date. Reported as the pair.
-    value_before: TO_BE_FILLED
-    value_after: TO_BE_FILLED
+    value_before: 0.632
+    value_after: 0.616
+    queries_before: 1370
+    queries_after: 630
     tolerance: 0.02
   kind: receipt
 
@@ -506,16 +574,16 @@ characterization:
 reference_results:
   single_node_hnsw:
     params: {M: 32, efConstruction: 200, efSearch: 128}
-    recall_at_10: TO_BE_FILLED
+    recall_at_10: 0.988
     tolerance: 0.01
   semantic_sharded:
     params: {centroids: 256, epsilon: 0.2, probe: 2, M: 32, efSearch: 96}
-    recall_at_10: TO_BE_FILLED
-    routing_ceiling: TO_BE_FILLED
-    storage_amplification: TO_BE_FILLED
-    p50_copies: TO_BE_FILLED
-    p95_copies: TO_BE_FILLED
-    p99_copies_per_vector: TO_BE_FILLED
+    recall_at_10: 0.929
+    routing_ceiling: 0.930
+    storage_amplification: 3.432
+    p50_copies: 4
+    p95_copies: 4
+    p99_copies_per_vector: 4
     tolerance: 0.01
   kind: receipt
 
@@ -617,4 +685,186 @@ changelog:
       oneground/sample/sec_filings.py and oneground/measures/duplicates.py,
       with 27 tests. Canonical build pending.
 
-findings: []
+findings:
+  # Written from the numbers, after they existed. The spec's header committed
+  # in advance to reporting whichever way they fell, and to reporting the two
+  # this corpus was expected to show.
+
+  - id: the-ground-is-far-crisper-than-either-other-fixture
+    measure: boundary_crispness
+    value: 0.107
+    note: >
+      The headline, and not the one either other fixture would have
+      predicted. Boundary crispness is 0.107 here against arxiv-150k's 0.036
+      and stackexchange-150k's 0.011 -- three times crisper than arXiv, ten
+      times crisper than Stack Overflow, on the same model, the same size and
+      the same definition. Ambiguity falls with it: 65.4% of queries have a
+      second-nearest centroid within 1.10x the nearest, against 89.1% and
+      90.8%.
+
+      The honest reading is that this is partly a property of chunking rather
+      than of filings. A chunk is 512 tokens of one document, and the other
+      chunks of that document are its nearest neighbours; regions built from
+      chunks inherit the document boundary as structure that abstracts and
+      question titles do not have. What a reader should take from it is that
+      a chunked corpus looks different in the ground from a corpus of short
+      whole records -- which is exactly what the other two fixtures could not
+      show.
+
+  - id: semantic-sharding-does-well-here-and-that-is-new
+    measure: reference_results
+    value:
+      single_node_hnsw.recall_at_10: 0.988
+      semantic_sharded.recall_at_10: 0.929
+      semantic_sharded.routing_ceiling: 0.930
+      semantic_sharded.storage_amplification: 3.432
+    note: >
+      Semantic sharding reaches recall@10 0.929 at 3.432x storage. On
+      stackexchange-150k the same configuration managed 0.869 at 3.897x, and
+      on arxiv-150k 0.932 at 3.715x. So this corpus is the cheapest of the
+      three to shard and among the best served by it -- the first fixture on
+      which the architecture is not simply losing.
+
+      The routing ceiling still binds: 0.930 against a measured 0.929, so
+      what the routing can reach is what it returns, and no amount of
+      efSearch recovers the gap to HNSW's 0.988. That pattern holds on all
+      three fixtures. What differs is how high the ceiling sits, and a
+      crisper ground puts it six points above Stack Overflow's.
+
+      The single-node HNSW number is the LOWEST of the three, 0.988 against
+      0.994 and 0.997. Exact search over 512-token chunks of filings is
+      harder than over abstracts, so the two results move in opposite
+      directions: the corpus easiest to shard is the hardest to search
+      exactly.
+
+  - id: extraction-quality-varies-and-the-rejections-say-how
+    measure: extraction
+    value: {examined: 11445, accepted: 10000, rejection_rate: 0.1263}
+    note: >
+      One of the two things this fixture was built to report. 11,445 filings
+      were examined to accept 10,000: 12.63% turned away, with the reasons
+      published by category rather than summed.
+
+      sections_empty is 766 of the 1,445 rejections, 53%, and the largest
+      single reason. Those are structurally perfect filings -- an
+      asset-backed issuer files Items 1 to 15 in order under General
+      Instruction J and answers "Omitted." to every one. A rule that counted
+      headings would have accepted every one as among the best-structured
+      documents in the corpus. The category did not exist until two appeared
+      in a 40-filing development sample; without it this corpus would hold
+      766 cover pages with Item titles attached.
+
+      too_short is 492: filings that incorporate their substance by
+      reference. no_sections is 137 and too_few_sections 43 -- filings whose
+      HTML defeats the heading rule, which is the honest count of what this
+      parser cannot read, 1.6% of what it examined. not_html 4,
+      no_core_section 2, no_10k_document 1.
+
+      fetch_failed is 0 across 11,445 streamed filings.
+
+  - id: boilerplate-is-intrinsic-and-sits-below-any-high-cutoff
+    measure: near_duplicates
+    value: {'0.50': 0.5628, '0.60': 0.3673, '0.70': 0.1431, '0.80': 0.0431,
+            '0.90': 0.0043}
+    note: >
+      The other thing this fixture was built to report, and the reason the
+      threshold range was fixed from a pilot before the build rather than
+      chosen after it.
+
+      At the primary 0.80 cutoff the rate is 4.31%, which reported alone
+      would say this corpus barely duplicates. At 0.70 it is 14.31%. At 0.60
+      it is 36.73%. At 0.50 it is 56.28% -- more than half of all 10,000
+      documents have another document in the corpus sharing at least half
+      their five-word shingles. The repetition is enormous and it lives in a
+      band a single high cutoff cannot see.
+
+      That is what a pre-chunking baseline is for. A chunking strategy
+      measured here will show a large duplicate rate at every threshold, and
+      most of it belongs to the corpus rather than to the strategy. The three
+      filers in the pilot -- Nicholas Financial, Medallion Financial, Henry
+      Schein -- scored Jaccard 0.49 to 0.62 between adjacent years, which is
+      where the mass turned out to be.
+
+      The 0.50 and 0.60 rows are published as lower bounds, not rates: LSH
+      proposes a true pair at those similarities with probability 0.873 and
+      0.988, so both figures can only be too small.
+
+  - id: drift-is-the-mildest-of-the-three
+    measure: drift
+    value: {before: 0.632, after: 0.616}
+    note: >
+      Centroids trained on chunks from filings dated before 2024-01-01, then
+      one-region routing recall@10 measured either side. Before 0.632
+      (n=1,370), after 0.616 (n=630): a 2.5% relative fall.
+
+      arxiv-150k improves, 0.522 to 0.549; stackexchange-150k falls 0.485 to
+      0.450, a 7.2% relative drop. Filings drift in Stack Overflow's
+      direction and by a third as much. That is what a corpus of mandated
+      annual disclosures should do -- the vocabulary of risk factors and
+      accounting policy changes slowly and the form is fixed by regulation.
+      Two years is also a short window to drift across, and the cutoff was
+      chosen for a 60/40 split rather than to maximise the effect.
+
+  - id: the-baseline-chunking-cuts-a-boundary-seven-times-in-a-hundred
+    measure: chunking.crossing_rate
+    value: 0.0703
+    note: >
+      109,722 of 1,559,834 chunks produced by the declared baseline -- fixed
+      512 tokens, 64 overlap, section-blind -- overlap more than one Item.
+      Recomputed independently from the shipped 152,000-chunk sample: 10,730
+      of 152,000, 0.0706.
+
+      This is the number a section-aware strategy has to beat, published so
+      that beating it can be checked rather than claimed. It is lower than it
+      first looks because 10-K sections are long: the median recovered
+      section is 756 characters but the 95th percentile is 98,503, so most
+      512-token windows fall well inside one Item. The fixture ships every
+      document's section offsets so a strategy can be scored on the 7% where
+      they do not.
+
+  - id: the-structure-is-recovered-almost-always
+    measure: section_statistics
+    value: {sections_total: 214990, sections_per_document_p50: 22}
+    note: >
+      214,990 sections across 10,000 accepted documents: a median of 22 of
+      the 23 canonical Items per filing, minimum 9. Item 7 is recovered in
+      9,942 documents, Item 8 in 9,934, Item 1 in 9,754, Item 1A in 9,676.
+
+      The two low rows are rules of the form, not parser misses. Item 1C is
+      recovered in 2,890 because it was assigned to Cybersecurity only for
+      fiscal years ending on or after 15 December 2023, and a minority of the
+      corpus post-dates that; the earlier filings carrying an Item 1C use the
+      number for Executive Officers, which is why section titles are
+      published beside the numbers. Item 16 is recovered in 8,104 because
+      "Form 10-K Summary" is optional and most filers omit it.
+
+  - id: the-query-skew-is-risk-factors-not-financial-statements
+    measure: queries.hot_categories
+    value: ['1A']
+    note: >
+      The spec predicted in advance that applying the other fixtures' "top 5%
+      of categories by volume" rule to a corpus of 23 Items would select
+      exactly one, and that it would be Item 8, the financial statements. The
+      first half is right and the second is wrong: the hot Item is 1A, Risk
+      Factors, at 37,977 of 152,000 sampled chunks (25.0%), ahead of Item 8
+      at 17.7%, Item 1 at 17.5% and Item 7 at 13.9%.
+
+      Risk factors are the longest narrative section of a modern 10-K, and
+      the tables inside Item 8 are dropped by the extraction rule while the
+      prose of Item 1A is not. The prediction is recorded here as made and as
+      wrong: the rule was applied unchanged and the outcome is a measurement
+      of the corpus.
+
+  - id: the-one-line-comparison
+    note: >
+      Against the other two fixtures: far crisper (0.107 vs 0.036 and 0.011),
+      much less ambiguous (0.654 vs 0.891 and 0.908), cheaper to shard
+      (3.432x vs 3.715x and 3.897x), better under semantic sharding (0.929 vs
+      0.932 and 0.869), harder to search exactly (0.988 vs 0.997 and 0.994),
+      and drifting mildly in Stack Overflow's direction (0.632 to 0.616).
+
+      Three corpora now, and the architecture question has three answers
+      rather than a trend. What separates this one is not its subject matter
+      but that its records are chunks of long documents instead of short
+      whole ones -- which is the property the fixture was built to make
+      measurable.

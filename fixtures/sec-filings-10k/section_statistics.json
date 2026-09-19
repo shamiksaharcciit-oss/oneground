@@ -1,0 +1,67 @@
+{
+  "document_chars": {
+    "max": 1773064,
+    "min": 24056,
+    "p50": 347887,
+    "p95": 633966,
+    "total": 3582543434
+  },
+  "documents": 10000,
+  "extraction": {
+    "accepted": 10000,
+    "by_category": {
+      "no_10k_document": 1,
+      "no_core_section": 2,
+      "no_sections": 137,
+      "not_html": 4,
+      "sections_empty": 766,
+      "too_few_sections": 43,
+      "too_short": 492
+    },
+    "bytes_streamed": 34507386876,
+    "examined": 11445,
+    "megabytes_per_second": 22.31,
+    "rejected": 1445,
+    "rejection_rate": 0.1263,
+    "seconds": 1546.8
+  },
+  "item_coverage": {
+    "1": 9754,
+    "10": 9817,
+    "11": 9791,
+    "12": 9809,
+    "13": 9741,
+    "14": 9826,
+    "15": 9921,
+    "16": 8104,
+    "1A": 9676,
+    "1B": 9498,
+    "1C": 2890,
+    "2": 9686,
+    "3": 9805,
+    "4": 9733,
+    "5": 9813,
+    "6": 9582,
+    "7": 9942,
+    "7A": 9726,
+    "8": 9934,
+    "9": 9887,
+    "9A": 9924,
+    "9B": 9866,
+    "9C": 8265
+  },
+  "section_chars": {
+    "max": 974099,
+    "p5": 39,
+    "p50": 756,
+    "p95": 98503
+  },
+  "sections_per_document": {
+    "max": 23,
+    "mean": 21.5,
+    "min": 9,
+    "p50": 22,
+    "p95": 23
+  },
+  "sections_total": 214990
+}

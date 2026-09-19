@@ -1,0 +1,16 @@
+{
+  "built_at": "2026-09-19T12:13:08Z",
+  "cuda_device_name": "NVIDIA RTX PRO 4500 Blackwell",
+  "device": "cuda",
+  "library_versions": {
+    "faiss-cpu": "1.15.0",
+    "numpy": "2.5.3",
+    "sentence-transformers": "6.0.1",
+    "torch": "2.14.0+cu130",
+    "umap-learn": "0.5.12"
+  },
+  "platform": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
+  "python_version": "3.12.3",
+  "source_snapshot_sha256": "0ba50ce465c4f8e4293e939cac6c1a782f4fadcc36ff715b2e1e3c9a85ef95c1",
+  "torch_cuda": "13.0"
+}
