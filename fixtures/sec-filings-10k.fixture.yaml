@@ -690,26 +690,38 @@ findings:
   # in advance to reporting whichever way they fell, and to reporting the two
   # this corpus was expected to show.
 
-  - id: the-ground-is-far-crisper-than-either-other-fixture
+  - id: the-ground-is-far-crisper-and-partly-by-construction
     measure: boundary_crispness
     value: 0.107
+    caveat: >
+      Partly an artefact of chunking, not a property of filings alone. A
+      record here is 512 tokens of one document, and the other chunks of that
+      document are its nearest neighbours, so regions built from chunks
+      inherit a document boundary that abstracts and question titles do not
+      have. This number must not be read beside arxiv-150k's and
+      stackexchange-150k's as though the three were measured on the same kind
+      of record.
     note: >
-      The headline, and not the one either other fixture would have
-      predicted. Boundary crispness is 0.107 here against arxiv-150k's 0.036
-      and stackexchange-150k's 0.011 -- three times crisper than arXiv, ten
-      times crisper than Stack Overflow, on the same model, the same size and
-      the same definition. Ambiguity falls with it: 65.4% of queries have a
+      Boundary crispness is 0.107 here against arxiv-150k's 0.036 and
+      stackexchange-150k's 0.011 -- three times crisper than arXiv, ten times
+      crisper than Stack Overflow, on the same model, the same size and the
+      same definition. Ambiguity falls with it: 65.4% of queries have a
       second-nearest centroid within 1.10x the nearest, against 89.1% and
       90.8%.
 
-      The honest reading is that this is partly a property of chunking rather
-      than of filings. A chunk is 512 tokens of one document, and the other
-      chunks of that document are its nearest neighbours; regions built from
-      chunks inherit the document boundary as structure that abstracts and
-      question titles do not have. What a reader should take from it is that
-      a chunked corpus looks different in the ground from a corpus of short
-      whole records -- which is exactly what the other two fixtures could not
-      show.
+      READ THE `caveat` FIELD ABOVE FIRST. It is not a hedge attached after
+      the fact; it is the reason the number is what it is. A fixture whose
+      construction flatters a design, and which reports the flattering number
+      without saying so, is worse than one that does not flatter it at all --
+      because the reader cannot tell which they are holding.
+
+      What survives the caveat is still worth having, and it is this: a
+      chunked corpus looks different in the ground from a corpus of short
+      whole records. That is precisely the comparison the other two fixtures
+      could not offer, and it is the reason this one exists. What does not
+      survive it is any claim that SEC filings are intrinsically a crisper
+      subject matter than arXiv or Stack Overflow. Nothing here measures
+      that.
 
   - id: semantic-sharding-does-well-here-and-that-is-new
     measure: reference_results
@@ -731,11 +743,56 @@ findings:
       three fixtures. What differs is how high the ceiling sits, and a
       crisper ground puts it six points above Stack Overflow's.
 
-      The single-node HNSW number is the LOWEST of the three, 0.988 against
-      0.994 and 0.997. Exact search over 512-token chunks of filings is
-      harder than over abstracts, so the two results move in opposite
-      directions: the corpus easiest to shard is the hardest to search
-      exactly.
+      The single-node HNSW number moves the other way. That is its own
+      finding, below.
+
+  - id: the-corpus-easiest-to-shard-is-the-hardest-to-search-exactly
+    measure: reference_results
+    value:
+      single_node_hnsw.recall_at_10: 0.988
+      semantic_sharded.recall_at_10: 0.929
+      semantic_sharded.storage_amplification: 3.432
+    note: >
+      The second-order result, and the one a reader is most likely to take
+      away, so it is stated as a finding rather than left as a remark
+      attached to another.
+
+      Across the three fixtures the two reference configurations move in
+      OPPOSITE directions:
+
+        fixture              single-node HNSW    semantic sharded    storage
+        arxiv-150k                      0.997               0.932     3.715x
+        stackexchange-150k              0.994               0.869     3.897x
+        sec-filings-10k                 0.988               0.929     3.432x
+
+      sec-filings-10k has the WORST exact-search result of the three and
+      close to the best sharded one, at the lowest storage. The corpus
+      easiest to shard is the hardest to search exactly.
+
+      Nothing about that is paradoxical once the two measures are read for
+      what they are. HNSW's recall is about how hard the neighbourhood
+      structure is to traverse approximately: 512-token chunks of filings sit
+      in a denser, more uniform neighbourhood than abstracts, and a graph
+      walk finds it harder to reach the true top ten. Semantic sharding's
+      recall is about whether the right neighbours fall in the regions the
+      routing picks, which a crisper ground makes easier. One measure is
+      hurt by what the other is helped by.
+
+      The practical reading, and the reason it matters more than either
+      number alone: **a corpus cannot be ranked "easy" or "hard" for
+      retrieval in general.** A team that measured only single-node recall
+      on a corpus like this one would conclude it was the hardest of the
+      three and would be right about that and wrong about the decision in
+      front of them. This is the whole argument for measuring the
+      architecture question on the user's own vectors rather than inferring
+      it from a corpus's reputation, and it is the first time the fixtures
+      have shown it rather than asserted it.
+
+      The caveat on `the-ground-is-far-crisper-and-partly-by-construction`
+      applies to the sharded half of this comparison too: part of what makes
+      the ground crisp here is that records are chunks of shared documents.
+      It does not apply to the HNSW half, which is measured on the same
+      vectors by a method that knows nothing about regions.
 
   - id: extraction-quality-varies-and-the-rejections-say-how
     measure: extraction

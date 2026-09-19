@@ -41,19 +41,27 @@ rounding couldn't-check up to verified.
 | measure | tolerance | arxiv-150k | stackexchange-150k | sec-filings-10k |
 |---|---|---|---|---|
 | intrinsic dimensionality (TwoNN) | 0.5 | 32.55 | **37.46** | 33.43 |
-| boundary crispness | 0.02 | 0.036 | 0.011 | **0.107** |
+| boundary crispness | 0.02 | 0.036 | 0.011 | **0.107** ⚠ |
 | ambiguous query rate | 0.02 | 0.891 | 0.908 | **0.654** |
 | skew, top-10 share | 0.02 | 0.075 | 0.069 | 0.089 |
 | drift (before → after) | 0.02 | 0.522 → 0.549 | **0.485 → 0.450** | 0.632 → 0.616 |
 
-The third column is the one that does not follow. `sec-filings-10k` is **three
-times crisper than arXiv and ten times crisper than Stack Overflow**, and much
-less ambiguous. Part of that is the corpus and part of it is the construction:
-its records are 512-token chunks of long documents, and the other chunks of a
-document are a chunk's nearest neighbours, so regions inherit the document
-boundary as structure that abstracts and question titles do not have. That is
-the property the fixture exists to make measurable, and it is stated here
-rather than read as a fact about filings alone.
+⚠ **Read this before the 0.107.** `sec-filings-10k` is three times crisper
+than arXiv and ten times crisper than Stack Overflow, and much less ambiguous
+— and that is **partly an artefact of how the corpus is built, not a property
+of filings**. Its records are 512-token chunks of long documents, so the other
+chunks of a document are a chunk's nearest neighbours and regions inherit a
+document boundary that abstracts and question titles do not have. The three
+columns are not measured on the same kind of record, and the crispness row
+must not be read as though they were.
+
+What survives that caveat is still the reason the fixture exists: a chunked
+corpus looks different in the ground from a corpus of short whole records,
+which is a comparison the other two could not offer. What does not survive it
+is any claim that SEC filings are intrinsically a crisper subject matter.
+Nothing here measures that. A fixture that reports a flattering number without
+saying which it is, is worse than one that does not flatter at all — the
+reader cannot tell which they are holding.
 
 Definitions are in each spec and are identical across the three: crispness is the
 fraction of base vectors whose second-nearest centroid distance exceeds 1.20×
@@ -78,11 +86,39 @@ so the rows are comparable line for line.
 | storage amplification | 3.715× | **3.897×** |
 | copies p50 / p95 / p99 | 4 / 4 / 4 | 4 / 4 / 4 |
 
-`sec-filings-10k` adds a third column to both: single-node HNSW **0.988** —
-the *lowest* of the three — and semantic sharding **0.929** at **3.432×**,
-routing ceiling 0.930. It is the cheapest of the three to shard and among the
-best served by it, and the hardest of the three to search exactly. The two
-results move in opposite directions, which is worth more than either alone.
+`sec-filings-10k` adds a third column to both: single-node HNSW **0.988** and
+semantic sharding **0.929** at **3.432×**, routing ceiling 0.930.
+
+### The corpus easiest to shard is the hardest to search exactly
+
+The two configurations move in **opposite directions** across the three
+fixtures, and this is the finding a reader should take away:
+
+| fixture | single-node HNSW | semantic sharded | storage |
+|---|---|---|---|
+| arxiv-150k | 0.997 | 0.932 | 3.715× |
+| stackexchange-150k | 0.994 | **0.869** | 3.897× |
+| sec-filings-10k | **0.988** | 0.929 | **3.432×** |
+
+`sec-filings-10k` has the *worst* exact-search result of the three and close
+to the best sharded one, at the lowest storage. Nothing about that is
+paradoxical once the measures are read for what they are. HNSW's recall is
+about how hard the neighbourhood is to traverse approximately, and 512-token
+chunks sit in a denser, more uniform neighbourhood than abstracts do. Semantic
+sharding's recall is about whether the right neighbours fall in the regions
+the routing picks, which a crisper ground makes easier. One measure is hurt by
+what the other is helped by.
+
+So **a corpus cannot be ranked "easy" or "hard" for retrieval in general.** A
+team measuring only single-node recall on a corpus like this would call it the
+hardest of the three, be right about that, and be wrong about the decision in
+front of them. That is the argument for measuring the architecture question on
+your own vectors rather than inferring it from a corpus's reputation, and it
+is the first time these fixtures have shown it rather than asserted it.
+
+The crispness caveat above applies to the sharded half of this comparison. It
+does not apply to the HNSW half, which is measured on the same vectors by a
+method that knows nothing about regions.
 
 The **routing ceiling** is what an exact search over everything the routing can
 reach would return. On all three fixtures it sits at the measured recall, which
