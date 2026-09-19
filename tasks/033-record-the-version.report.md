@@ -145,9 +145,26 @@ stated absence rather than nothing:
 - **An old artifact reads as couldn't-check**, and the arxiv workdir is
   asserted to *still* have no version — the test fails if anything ever
   writes one into it, which is the repair the brief forbids.
-- Couldn't check: **the sdist path.** A wheel built from an unpacked sdist
-  has no git and no stamp of its own, so it would answer `commit: null` with
-  the reason. That is the honest fallback and it is untested here; PyPI ships
+- **The sdist path, measured** (`tasks/scratch/033b-sdist-route.py`, run
+  after the developer pointed out that a conditional in a report is a
+  document rather than an execution). sdist built from the checkout →
+  unpacked outside any repository, 187 members, `fixtures/` present, `.git`
+  absent → wheel built from that tree → unpacked and imported from a
+  directory that is not a checkout:
+
+      stamp in the wheel: {"commit": null, "dirty": null,
+                           "note": "built from a tree with no readable git checkout"}
+
+      producing_version(): {"version": "0.1.0", "commit": null,
+                            "dirty": null, "source": "wheel",
+                            "note": "built from a tree with no readable git checkout"}
+
+  Exactly the predicted fallback, and one detail worth having: the stamp is
+  **written** rather than absent, so `source` is `"wheel"` and the note
+  explains — an artifact from such an install says *which* kind of unknown it
+  is. `oneground --version` from that wheel still prints `oneground 0.1.0`.
+  `docs/RELEASE.md` §2 now says to build from the checkout, with the reason.
+- Previously couldn't-check, now closed by the above. PyPI ships
   both artifacts and pip prefers the wheel.
 
 ## Observed, not done
@@ -156,10 +173,14 @@ stated absence rather than nothing:
    carries.** It is the required set, and correctly so, but a reader looking
    for the shape of a line will not find `oneground` in it. A separate
    optional-fields list would say so; the brief did not ask for one.
-2. **The sdist path is the one place the claim is still conditional.** A
-   wheel built from an unpacked sdist has neither git nor a stamp of its own
-   and answers `commit: null` with the reason. Honest, and the only route by
-   which a published artifact could carry no commit.
+2. **The sdist route is the only way a published artifact carries no
+   commit**, it is now measured rather than predicted (above), and the
+   procedure says so: `docs/RELEASE.md` §2 requires the wheel be built from
+   the checkout. Nothing enforces it — a release cut from an unpacked sdist
+   would produce a working, honest, less useful wheel, and the only thing
+   standing in the way is the sentence in the procedure. A check in the
+   release step that refuses a `commit: null` stamp would close it, and is
+   not in this task.
 3. **Nothing consumes the field yet.** `docs/LIBRARY.md` §2.2 now says a card
    whose rows carry the same commit can say `comparable`, and no code computes
    that verdict — the library is unbuilt, which is where it belongs.
@@ -177,5 +198,6 @@ stated absence rather than nothing:
     oneground/calibrate/history.py          every new line records it
     docs/VALIDATION.md                      what the field means, and that null is an answer
     docs/LIBRARY.md                         §2.2 points at the field rather than at a future
+    docs/RELEASE.md                         §2: build the wheel from the checkout, and why
     tasks/033-record-the-version.report.md  this report
     tasks/scratch/033-digest-count*.py      the count (untracked, .gitignore:62)

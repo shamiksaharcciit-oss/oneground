@@ -63,6 +63,16 @@ Both artifacts must pass `twine check`. `dist/`, `build/` and `*.egg-info/`
 are gitignored: the release attaches the ones you just built, not whatever is
 on disk from last time.
 
+**Build the wheel from the checkout, never from an unpacked sdist.** The build
+hook stamps the wheel with the commit it was built from, and an unpacked sdist
+is not a git checkout, so a wheel built from one carries
+`commit: null, note: "built from a tree with no readable git checkout"` — and
+every artifact that installation later writes says the same. It is honest and
+it is useless: the version and commit are what let a reader tell two artifacts
+from different weeks apart (`docs/VALIDATION.md`). Measured, not assumed: an
+sdist unpacked and built here produced exactly that, while the same wheel
+built from the checkout named its commit.
+
 ## 3. The stranger's path
 
 **This is the step that finds things.** Install the wheel into a genuinely
