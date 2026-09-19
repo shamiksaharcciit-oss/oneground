@@ -53,6 +53,35 @@ def strip_environmental(obj):
     return obj
 
 
+def _json_diff(a_bytes, b_bytes):
+    """Which keys of two `header.json` entries differ, as dotted paths.
+
+    The header is not a column and `np.load` hands it back as raw bytes, not
+    an array -- which this function's absence turned into an AttributeError
+    the first time two headers actually differed. A header difference is a
+    real finding, and often a more interesting one than a column difference:
+    it means the two runs described the same arrays differently.
+    """
+    try:
+        a = json.loads(bytes(a_bytes).decode("utf-8"))
+        b = json.loads(bytes(b_bytes).decode("utf-8"))
+    except Exception as e:                                # noqa: BLE001
+        return ["(could not be parsed as JSON: %s)" % e]
+
+    def walk(x, y, path):
+        if isinstance(x, dict) and isinstance(y, dict):
+            out = []
+            for key in sorted(set(x) | set(y)):
+                out.extend(walk(x.get(key), y.get(key),
+                                path + ("." if path else "") + str(key)))
+            return out
+        if x == y:
+            return []
+        return ["%s: A=%r B=%r" % (path, x, y)]
+
+    return walk(a, b, "")
+
+
 def compare_columns(a_path, b_path):
     """[(column, verdict, detail)] for two .state.npz files."""
     a, b = np.load(a_path, allow_pickle=False), np.load(b_path,
@@ -64,6 +93,15 @@ def compare_columns(a_path, b_path):
                         "A" if name in a.files else "B"))
             continue
         x, y = a[name], b[name]
+        # `header.json` is a stored entry, not an array. Compare it as JSON
+        # so the residual is a named field rather than "the bytes differ".
+        if not hasattr(x, "shape") or not hasattr(y, "shape"):
+            differences = _json_diff(x, y)
+            if not differences:
+                out.append((name, "identical", "json, same fields"))
+            else:
+                out.append((name, "DIFFERS", "; ".join(differences)))
+            continue
         if x.shape != y.shape or x.dtype != y.dtype:
             out.append((name, "shape or dtype differs",
                         "%s %s vs %s %s" % (x.shape, x.dtype, y.shape,

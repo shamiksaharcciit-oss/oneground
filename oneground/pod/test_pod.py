@@ -134,6 +134,120 @@ def _spec_file(tmp, text=SPEC_YAML, name="arxiv-build.yaml", extra=None):
     return p
 
 
+# ------------------------ two places naming the same thing (task 034)
+# Twice a session has failed after the pod existed because a value was
+# written in two places and only one was read: ONEGROUND_ENGINES in 015, and
+# ONEGROUND_WORKDIR in 032b's first session, which uploaded a run's inputs
+# into one directory while `simulate` read its workdir from the requirements
+# file and looked in another.
+
+def _mirror_case(tmp, env, requirements_text):
+    """A session and a requirements file beside it, in a throwaway root."""
+    req_name = "requirements.yaml"
+    with open(os.path.join(tmp, req_name), "w", encoding="utf-8",
+              newline="\n") as f:
+        f.write(requirements_text)
+    session = sessionmod.Session(
+        "t", _spec_data({"env": dict(env, ONEGROUND_REQUIREMENTS=req_name)}),
+        path=os.path.join(tmp, "sessions", "t.yaml"))
+    return session
+
+
+REQ_WITH_WORKDIR = """
+oneground: 1
+run: {name: r, mode: measure, seed: 1, workdir: ./runs/029-proof}
+"""
+
+
+def test_a_workdir_in_two_places_that_disagree_is_refused_at_plan_time():
+    """032b's first session, reproduced from two files on disk."""
+    with tempfile.TemporaryDirectory() as tmp:
+        s = _mirror_case(tmp, {"ONEGROUND_WORKDIR": "runs/032b-state"},
+                         REQ_WITH_WORKDIR)
+        problems = sessionmod.requirements_disagreements(s, tmp)
+        assert len(problems) == 1, problems
+        # both values named, so the reader does not have to open two files
+        assert "runs/032b-state" in problems[0], problems[0]
+        assert "runs/029-proof" in problems[0], problems[0]
+        assert "ONEGROUND_WORKDIR" in problems[0]
+        assert "run.workdir" in problems[0]
+
+
+def test_a_workdir_that_agrees_is_not_refused_however_it_is_spelled():
+    """`./runs/x` and `runs/x` are the same directory, and a check that said
+    otherwise would teach people to delete the check."""
+    with tempfile.TemporaryDirectory() as tmp:
+        s = _mirror_case(tmp, {"ONEGROUND_WORKDIR": "runs/029-proof"},
+                         REQ_WITH_WORKDIR)
+        assert sessionmod.requirements_disagreements(s, tmp) == []
+
+
+def test_engines_in_two_places_that_disagree_are_refused():
+    """015's case, the same defect one key over."""
+    with tempfile.TemporaryDirectory() as tmp:
+        s = _mirror_case(tmp, {"ONEGROUND_ENGINES": "qdrant"}, """
+oneground: 1
+verify: {engines: [qdrant, pgvector]}
+""")
+        problems = sessionmod.requirements_disagreements(s, tmp)
+        assert len(problems) == 1, problems
+        assert "qdrant" in problems[0] and "pgvector" in problems[0]
+        # and the list form and the comma form of the same thing agree
+        ok = _mirror_case(tmp, {"ONEGROUND_ENGINES": "qdrant,pgvector"}, """
+oneground: 1
+verify: {engines: [qdrant, pgvector]}
+""")
+        assert sessionmod.requirements_disagreements(ok, tmp) == []
+
+
+def test_every_disagreement_is_named_at_once():
+    """022's precondition rule: one refusal teaches the whole shape."""
+    with tempfile.TemporaryDirectory() as tmp:
+        s = _mirror_case(tmp, {"ONEGROUND_WORKDIR": "runs/a",
+                               "ONEGROUND_VECTORS": "/workspace/v.npy"}, """
+oneground: 1
+run: {name: r, workdir: ./runs/b}
+corpus: {sample: {vectors: {path: /elsewhere/v.npy}}}
+""")
+        problems = sessionmod.requirements_disagreements(s, tmp)
+        assert len(problems) == 2, problems
+
+
+def test_a_session_naming_no_requirements_file_is_not_checked():
+    """A session that runs something else is not making this mistake."""
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.Session("t", _spec_data(), path="t.yaml")
+        assert sessionmod.requirements_disagreements(s, tmp) == []
+
+
+def test_a_requirements_file_that_is_not_in_the_checkout_is_refused():
+    """A bundle carries commits, not the working tree."""
+    with tempfile.TemporaryDirectory() as tmp:
+        s = sessionmod.Session(
+            "t", _spec_data({"env": {"ONEGROUND_REQUIREMENTS": "nope.yaml"}}),
+            path="t.yaml")
+        problems = sessionmod.requirements_disagreements(s, tmp)
+        assert len(problems) == 1 and "nope.yaml" in problems[0]
+
+
+def test_plan_refuses_and_creates_nothing_when_they_disagree():
+    """The refusal has to be at plan time, which is before the create."""
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "requirements.yaml"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            f.write(REQ_WITH_WORKDIR)
+        spec = _spec_file(tmp, extra={"env": {
+            "ONEGROUND_REQUIREMENTS": "requirements.yaml",
+            "ONEGROUND_WORKDIR": "runs/somewhere-else"}})
+        said = []
+        s = sessionmod.load(spec)
+        refused = cli._mirror_refusal(s, tmp, log=said.append)
+        assert refused
+        text = "\n".join(said)
+        assert "REFUSED" in text and "Nothing was created" in text
+        assert "runs/somewhere-else" in text and "runs/029-proof" in text
+
+
 # ------------------------------------------------------- the create guard
 def test_billable_classification():
     """The guard's list is the security boundary; state it explicitly."""

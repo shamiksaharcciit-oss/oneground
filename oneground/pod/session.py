@@ -235,6 +235,104 @@ class Session:
                                                    self.volume or "none")
 
 
+# --------------------------------------------------------------------------
+# two places naming the same thing (task 034)
+# --------------------------------------------------------------------------
+# Twice now a session has failed *after* the pod existed because a value was
+# written in two places and only one of them was read:
+#
+#   015   ONEGROUND_ENGINES in the session's env beside `verify.engines` in
+#         the requirements file.
+#   032b  session 20260919-144616. The spec uploaded the run's inputs into
+#         `runs/032b-state` and set ONEGROUND_WORKDIR to match, but named a
+#         requirements file declaring `run.workdir: ./runs/029-proof`.
+#         `simulate` reads the requirements file, so it looked in a directory
+#         the inputs had never been put in, and refused -- correctly, and
+#         four and a half minutes after the meter started.
+#
+# Both are the same defect and both are checkable from two files on disk. So
+# they are checked at plan time, before anything is created, with both values
+# named: a refusal that arrives after a run has been paid for is not a
+# refusal. Adding a third pair is one line.
+ENV_MIRRORS = (
+    ("ONEGROUND_WORKDIR", "run.workdir", "path",
+     "the directory the run reads its inputs from and writes its outputs to"),
+    ("ONEGROUND_VECTORS", "corpus.sample.vectors.path", "path",
+     "the corpus"),
+    ("ONEGROUND_ENGINES", "verify.engines", "list",
+     "the engines to measure"),
+)
+
+
+def _dig(doc, dotted):
+    node = doc
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def _as_list(value):
+    if isinstance(value, (list, tuple)):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return [p.strip() for p in str(value).split(",") if p.strip()]
+
+
+def _same(kind, env_value, declared):
+    if kind == "list":
+        return _as_list(env_value) == _as_list(declared)
+    return (os.path.normpath(str(env_value).strip()).replace("\\", "/")
+            == os.path.normpath(str(declared).strip()).replace("\\", "/"))
+
+
+def requirements_disagreements(session, repo_root):
+    """Every value this session's env and its requirements file disagree on.
+
+    Sentences, not exceptions, and every one of them at once: someone fixing a
+    session should learn the whole shape of the problem from one refusal, as
+    022 requires. Returns `[]` when the session names no requirements file --
+    a session that runs something other than a requirements-driven command is
+    not making this mistake.
+    """
+    req_name = session.env.get("ONEGROUND_REQUIREMENTS")
+    where = session.path or session.name
+    if not req_name:
+        return []
+    path = os.path.join(repo_root, str(req_name))
+    if not os.path.isfile(path):
+        return ["%s sets ONEGROUND_REQUIREMENTS=%s, and there is no such file "
+                "in this checkout. A bundle carries commits, not the working "
+                "tree, so the run would reach the pod with nothing to read."
+                % (where, req_name)]
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+    except Exception as e:                                # noqa: BLE001
+        return ["%s names %s as its requirements file and it cannot be "
+                "parsed: %s" % (where, req_name, e)]
+    if not isinstance(doc, dict):
+        return ["%s names %s as its requirements file and it is not a YAML "
+                "mapping" % (where, req_name)]
+
+    out = []
+    for var, dotted, kind, what in ENV_MIRRORS:
+        if var not in session.env:
+            continue
+        declared = _dig(doc, dotted)
+        if declared is None:
+            continue
+        if _same(kind, session.env[var], declared):
+            continue
+        out.append(
+            "%s sets %s=%r, but %s declares %s: %r. They are two names for "
+            "%s, and the command reads the requirements file -- so the "
+            "session's value would be ignored and the run would use the "
+            "other one." % (where, var, session.env[var], req_name, dotted,
+                            declared, what))
+    return out
+
+
 def load(path):
     """Read and validate a session spec. Raises SessionSpecError, never
     returns a half-valid object."""

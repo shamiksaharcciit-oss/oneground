@@ -60,8 +60,32 @@ def _fmt_hours(h):
 
 
 # ---------------------------------------------------------------- plan
+def _mirror_refusal(session, root, log=print):
+    """Refuse a session whose env and requirements file disagree (task 034).
+
+    Checked here rather than in the runner because here is before the create.
+    Session 20260919-144616 paid for a pod, a clone and a venv before the
+    same disagreement surfaced as a `SimulateError`.
+    """
+    problems = sessionmod.requirements_disagreements(session, root)
+    if not problems:
+        return False
+    log("")
+    log("  REFUSED: this session names the same thing in two places and they "
+        "disagree.")
+    for problem in problems:
+        log("    - %s" % problem)
+    log("")
+    log("  Nothing was created. Make the two agree, or drop the environment "
+        "variable")
+    log("  if the requirements file is the one that should decide.")
+    return True
+
+
 def cmd_plan(args):
     s = sessionmod.load(args.spec)
+    if _mirror_refusal(s, _repo_root()):
+        return 1
     p = planmod.resolve(_client(args), s)
     print()
     print(p.render())
@@ -132,6 +156,11 @@ def _reconcile_live(client, root, pods=None, now=None, log=print):
 def cmd_up(args):
     root = _repo_root()
     s = sessionmod.load(args.spec)
+    # Before the client, before the plan, before the human is asked anything:
+    # a session whose env and requirements file disagree cannot do the work it
+    # describes, and finding that out costs a pod (task 034).
+    if _mirror_refusal(s, root):
+        return 1
     client = _client(args)
     p = planmod.resolve(client, s)
 

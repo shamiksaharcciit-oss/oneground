@@ -209,9 +209,29 @@ class SemanticSharded:
 
     # -- routing -----------------------------------------------------------
     def _probed(self, built, queries, config):
+        """The regions this query probes, on the build's arithmetic path.
+
+        The context is here rather than at the three call sites because all
+        three need it and one of them did not have it. Task 032b's pod
+        session measured the consequence: the base-side `centroid_dists` in
+        `state()` was wrapped and its column came back byte-identical across
+        an Intel laptop and an AMD pod, while the query-side call beside it
+        was not and 3,191 of 4,000 recorded distances differed, by up to
+        7.2e-07. The same call on this laptop moves 3,516 of 4,000 distances
+        when the context is turned off, which is the whole of that residual.
+        It never reached a measurement -- the probed regions are the argsort,
+        and the argsort was unchanged -- but the state recorded distances the
+        run had not computed on the path it computed everything else on.
+        That is the `_centroid_cache` shape again: a determinism context that
+        does not reach a call site needing it.
+
+        `search`, `ceiling` and `state` all route through here, so after this
+        they agree by construction rather than by coincidence.
+        """
         from ...measures.crispness import centroid_dists
         probe = int(config.get("probe", _d("probe")))
-        _, q_r = centroid_dists(queries, built.state["centroids"], probe)
+        with deterministic_faiss(built.state.get("deterministic", True)):
+            _, q_r = centroid_dists(queries, built.state["centroids"], probe)
         return q_r
 
     # -- search ------------------------------------------------------------
@@ -349,7 +369,14 @@ class SemanticSharded:
             epsilon=eps, nearest_region=near.astype(np.int32))
 
         q_r = self._probed(built, queries, config)
-        sd, sr = centroid_dists(queries, cents, max(probe, 2))
+        # The same context as `_probed`'s, for the same reason: these are the
+        # distances the state RECORDS, and a recorded distance computed on a
+        # path the run did not use is a receipt of something that did not
+        # happen. Task 032b measured this one as 3,191 of 4,000 values
+        # differing across two machines while every base-side column was
+        # byte-identical.
+        with deterministic_faiss(st.get("deterministic", True)):
+            sd, sr = centroid_dists(queries, cents, max(probe, 2))
         reason = np.full(q_r.shape, S.ROUTE_PROBE, dtype=np.uint8)
         reason[:, 0] = S.ROUTE_DEFAULT
         route = S.RouteState(scored_region=sr.astype(np.int32),
