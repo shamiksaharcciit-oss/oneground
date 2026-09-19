@@ -171,9 +171,17 @@ What a card **must refuse to assert**:
 - **`comparable` unqualified**, which is the conjunction of both.
 
 So a card published today carries `couldnt_check` with the reason, and it
-carries it on its face rather than in a footnote. The way to earn
-`comparable` is to record the version that measured each row — a change to
-`simulate`, not to this document.
+carries it on its face rather than in a footnote.
+
+**The way to earn `comparable` was to record the version that measured each
+row, and task 033 records it**: every declared artifact carries an
+`oneground` field with the version, the commit where one is knowable, and a
+stated reason where it is not, and a card carries two of them — the baseline
+row's and the changed row's (`docs/VALIDATION.md`). A card whose two rows
+carry the same commit can say `comparable`; one whose rows differ can say
+`not_comparable` and mean it. **A card built from a workdir written before
+that field existed stays `couldnt_check`**, because nothing can add a version
+to an old artifact honestly, and a missing version is never read as a match.
 
 ### 2.3 The finding, so it can be read rather than decoded
 

@@ -47,7 +47,8 @@ import numpy as np
 from .. import intake
 from ..adapters import (AdapterError, engines as registered_engines,
                         get as get_engine, managed_namespace, namespace_for)
-from ..receipts import (library_versions, round_floats, sha256_file,
+from ..receipts import (library_versions, producing_version, round_floats,
+                        sha256_file,
                         write_json_stable, write_manifest)
 from ..sample import loaders
 from . import load as loadgen
@@ -1231,6 +1232,7 @@ def _write(req, workdir, result, requirements_path, engine_names,
              "compose_image": b.get("compose_image")}
             for b in result.get("engines", [])],
         "library_versions": versions,
+        "oneground": producing_version(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "requirements_file": {"path": os.path.abspath(requirements_path),

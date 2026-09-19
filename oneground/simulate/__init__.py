@@ -56,7 +56,8 @@ import numpy as np
 from .. import intake
 from ..models import Config, ConfigSpace, UnknownFamily, get as get_model
 from ..models.base import ParameterError, resolve_deterministic
-from ..receipts import (library_versions, round_floats, sha256_file,
+from ..receipts import (library_versions, producing_version, round_floats,
+                        sha256_file,
                         write_json_stable, write_manifest)
 from ..sample import loaders
 from ..truth import exact_knn
@@ -517,6 +518,7 @@ def run(requirements_path, log_fn=log, emit_state=False):
                         if cited_prediction else {})),
         "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
+        "oneground": producing_version(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "torch_cuda": torch_info["torch_cuda"],
@@ -594,6 +596,7 @@ def run(requirements_path, log_fn=log, emit_state=False):
                                              for e in state_entries), 3),
             "projection": projection_info,
             "library_versions": versions,
+            "oneground": producing_version(),
             "note": ("each state is written after its configuration's row is "
                      "measured and before its index is released; "
                      "simulate.json is identical with or without "
