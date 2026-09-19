@@ -8,7 +8,6 @@ __pycache__/
 # Small artifacts (MANIFEST.sha256, characterization.json, query_ids.json,
 # ground_truth.npy) ARE committed.
 fixtures/*/vectors.npy
-fixtures/*/queries.npy
 fixtures/*/projection.npy
 fixtures/*/sample.jsonl.zst
 
@@ -66,8 +65,13 @@ tasks/scratch/
 # Re-derivable from .github/scripts/make_ci_corpus.py and its seed.
 .ci/
 
-# sec-filings-10k ships its corpus as a release asset (692 MB compressed).
-fixtures/*/documents.jsonl.zst
+# sec-filings-10k ships its corpus and its query vectors as a release asset:
+# documents.jsonl.zst is 692 MB and queries.npy is 6 MB. Scoped to this fixture
+# on purpose, for the same reason glove's rules are: arxiv-smoke's queries.npy
+# is small and IS committed, and a blanket fixtures/*/queries.npy would
+# silently contradict that.
+fixtures/sec-filings-10k/documents.jsonl.zst
+fixtures/sec-filings-10k/queries.npy
 
 # Session tarballs fetched into the repo root; their contents are extracted
 # beside them and committed, the archive itself is not.
