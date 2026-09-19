@@ -48,6 +48,7 @@ class Chunk:
     text: str
     strategy: str
     unit: Optional[str] = None          # the structural unit it came from, if any
+    offsets_origin: str = "emitted"     # "emitted" by a strategy, or "derived"
 
     def as_record(self):
         return asdict(self)
