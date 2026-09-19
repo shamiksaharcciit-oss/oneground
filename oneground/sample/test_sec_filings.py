@@ -242,3 +242,55 @@ def test_the_rate_limiter_holds_the_aggregate_across_threads():
         t.join()
     span = max(stamps) - t0
     assert span >= 0.9 * (len(ts) - 1) * 0.02, span
+
+
+# ------------------------------------- the rule as a published artifact (031)
+
+RULE_SHA256 = "4766215f12ec83f14586d9d82fea7a21cad2889cb4b31924ee910924c2f32b87"
+
+
+def test_the_extraction_rule_digest_is_the_published_one():
+    """Task 031 makes 030's extraction rule a published artifact, because a
+    chunking result measured on this text is conditional on it.
+
+    If this fails, a threshold or a pattern changed. That is allowed -- it is
+    not allowed to happen quietly. Update `extraction.rule_sha256` in
+    fixtures/sec-filings-10k.fixture.yaml and this constant together, and say
+    in the changelog what moved and why.
+    """
+    assert sf.rule_digest() == RULE_SHA256, (
+        "the extraction rule changed; the fixture's published rule_sha256 and "
+        "this constant must be updated deliberately, together")
+
+
+def test_the_rule_parameters_cover_everything_that_changes_the_output():
+    """A parameter missing from `rule_parameters` is a silent change waiting
+    to happen: the digest would not move when the behaviour did."""
+    p = sf.rule_parameters()
+    for name in ("min_doc_chars", "min_sections", "core_items",
+                 "min_prose_chars", "min_prose_sections",
+                 "table_numeric_fraction", "heading_title_chars",
+                 "item_word_pattern", "heading_pattern", "toc_max_gap",
+                 "toc_min_run", "toc_max_position", "canonical_items",
+                 "rejection_categories"):
+        assert name in p, name
+    assert p["rejection_categories"] == sorted(sf.REJECTIONS)
+
+
+def test_changing_a_threshold_moves_the_digest():
+    """The guard has to actually guard."""
+    before = sf.rule_digest()
+    original = sf.MIN_DOC_CHARS
+    try:
+        sf.MIN_DOC_CHARS = original + 1
+        assert sf.rule_digest() != before
+    finally:
+        sf.MIN_DOC_CHARS = original
+    assert sf.rule_digest() == before
+
+
+def test_the_rule_declares_that_it_takes_no_seed():
+    """Task 031 asks for the rule's seed. There is not one, and the module
+    says so rather than inventing one."""
+    assert "takes no seed" in sf.TAKES_NO_SEED
+    assert "20260919" in sf.TAKES_NO_SEED

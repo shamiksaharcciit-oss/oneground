@@ -197,6 +197,42 @@ source:
 # and summarised here; the module is the normative text.
 extraction:
   module: oneground/sample/sec_filings.py
+
+  # A PUBLISHED ARTIFACT OF THIS FIXTURE, not an implementation detail
+  # (required by task 031). A chunking result measured on this text is
+  # conditional on the rule that produced the text, so the rule is declared
+  # here with its parameters, its digest and its rejection count, and travels
+  # with any result computed on this corpus.
+  #
+  # IT IS A REFERENCE FOR COMPARISON, NOT A RECOMMENDATION. It is one way to
+  # turn filer HTML into text, chosen to be defensible and written down in
+  # full; it is not advice about how to extract filings, and a different
+  # extractor on the same filings would give different text, different
+  # offsets and different numbers. Two results from differently-extracted
+  # text are two observations, never a comparison.
+  #
+  # oneground does not run extractors, and this is the one exception that
+  # proves the rule: it is run to BUILD a public fixture, whose text is then
+  # shipped, not run over a user's documents. The product path takes extracted
+  # text and declares what produced it.
+  rule_sha256: 4766215f12ec83f14586d9d82fea7a21cad2889cb4b31924ee910924c2f32b87
+  rule_digest_scope: >
+    sha256 over the canonical JSON of every declared value that can change
+    what the rule emits -- the thresholds, the heading and item-word patterns,
+    the canonical Item list and the rejection categories; see
+    `oneground.sample.sec_filings.rule_parameters`. Deliberately not a digest
+    of the module file, which is mostly prose explaining why each threshold is
+    what it is: a comment edit must not move a receipt, and a threshold edit
+    must. A test pins this value, so changing the rule is a deliberate act
+    that updates a published number.
+  seed: none
+  seed_note: >
+    The extraction rule is deterministic and takes no seed. Task 031 asks for
+    one; there is not one, and saying so is better than inventing one. Given
+    the same bytes the rule emits the same text and the same offsets. The
+    seeds this fixture carries belong to the steps that make a choice:
+    sampling.seed 20260919, queries.seed 20260920, near_duplicates.seed
+    20260919.
   rule: >
     (1) the SGML <TEXT> body of the <DOCUMENT> whose <TYPE> is 10-K;
     (2) comments, <script>, <style>, inline-XBRL <ix:header> and display:none
