@@ -455,6 +455,14 @@ CHUNK_TOKENS = 512
 CHUNK_OVERLAP = 64
 CHUNK_STRIDE = CHUNK_TOKENS - CHUNK_OVERLAP
 CHUNK_MIN_TOKENS = 32
+TOKENIZE_BATCH = 16
+"""Documents tokenised per call. Throughput only; it cannot move a cut point.
+
+A fast tokenizer parallelises across a batch in Rust and does not parallelise
+a single string, so one document per call leaves fifteen of sixteen cores
+idle. Small because a 10-K runs to about 80,000 tokens and the offset mapping,
+not the ids, is what costs memory.
+"""
 
 BASELINE_CHUNKING_IS_NOT_A_RECOMMENDATION = """\
 Fixed-size, section-blind, 512 tokens with 64 of overlap.
@@ -922,15 +930,25 @@ def sample_records(source, spec, n_total, seed, log=None, receipt=None):
               f"{CHUNK_OVERLAP} overlap, section-blind")
     t0 = time.time()
     index = []                      # (document, span) with no text, to bound memory
-    for i, d in enumerate(docs):
-        enc = tok(d["text"], add_special_tokens=False,
+    # Tokenised in batches, because a fast tokenizer parallelises across a
+    # batch in Rust and does not parallelise a single string. One document at
+    # a time measured 1.75 MB/s, which is ~30 minutes over this corpus and was
+    # the largest single uncertainty in the session budget. The batch size is
+    # small so peak memory stays bounded: a 10-K is ~80,000 tokens and the
+    # offset mapping is the expensive part. Chunk spans are a function of the
+    # offsets alone, so batching cannot change them -- and a test asserts that
+    # against the per-document path rather than trusting the argument.
+    for lo in range(0, len(docs), TOKENIZE_BATCH):
+        batch = docs[lo:lo + TOKENIZE_BATCH]
+        enc = tok([d["text"] for d in batch], add_special_tokens=False,
                   return_offsets_mapping=True, truncation=False)
-        offs = enc["offset_mapping"]
-        for c in chunk_document(d["text"], offs, len(offs)):
-            index.append((i, c))
-        if (i + 1) % 1000 == 0:
-            _say(log, f"  chunked {i + 1:,} documents, {len(index):,} chunks, "
-                      f"{time.time() - t0:.0f}s")
+        for k, d in enumerate(batch):
+            offs = enc["offset_mapping"][k]
+            for c in chunk_document(d["text"], offs, len(offs)):
+                index.append((lo + k, c))
+        if (lo + len(batch)) % 1000 < TOKENIZE_BATCH:
+            _say(log, f"  chunked {lo + len(batch):,} documents, "
+                      f"{len(index):,} chunks, {time.time() - t0:.0f}s")
     _say(log, f"chunks: {len(index):,} from {len(docs):,} documents in "
               f"{(time.time() - t0) / 60:.1f} min")
 

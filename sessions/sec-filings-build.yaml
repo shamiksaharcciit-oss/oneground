@@ -62,6 +62,16 @@ remote_log: /workspace/oneground-session.log
 done_marker: DONE                # run_fixture_build.sh prints it near the end
 
 outputs:
+  # The run log, FIRST and marked optional, so that a run which is terminated
+  # before it produces any artifact still comes home with its evidence.
+  #
+  # Session 20260918-233949 hit its cap mid-build. `watch` correctly fetched
+  # what existed, which was neither tarball, and terminated -- and the log
+  # went with the pod, so which phase the run had reached is unknowable. The
+  # phase timings and the rejection tally are the deliverable when the corpus
+  # is not, and they were sitting in a file nobody had declared.
+  - {remote: /workspace/oneground-session.log,
+     local: tasks/scratch/030-session-log/, optional: true}
   # The review bundle: receipts, the section statistics and the duplicate
   # rate. Small enough for the repo.
   - {remote: /workspace/sec-filings-10k-small.tgz, local: ./, extract: true}
@@ -79,16 +89,26 @@ outputs:
 stall_minutes: 20
 
 caps:
-  # The brief sets these. At the top of the live price range the other builds
-  # were billed at ($0.72/hr), two hours is $1.44, inside max_usd -- confirmed
-  # at the ceiling rather than the floor, which is what made an earlier
-  # session's cap hold by luck rather than by arithmetic.
+  # The brief set max_hours 2.0 and max_usd 2.50. The hours were raised to 3.0
+  # on the developer's explicit decision after session 20260918-233949 hit the
+  # two-hour cap mid-build and produced nothing; the dollar cap is unchanged
+  # and is still the real ceiling.
   #
-  # Two hours is not generous here, it is a real constraint: the fetch phase
-  # alone is projected at 25-40 minutes and is the one phase whose duration
-  # depends on a third party. If the cap binds, what survives is whatever the
-  # run had finished, because the runner packages the receipts the moment the
-  # MANIFEST is written and re-packages after every later stage.
-  max_hours: 2.0
+  # The money was never the binding constraint. At $0.72/hr -- the top of the
+  # live range, which is what the other builds were billed and what this cap
+  # is confirmed against, rather than the $0.34 floor -- three hours is $2.16,
+  # inside max_usd. max_usd alone would allow 3.47 h.
+  #
+  # Measured from the terminated session rather than estimated: fetch to
+  # 10,000 documents is ~29 min at 6.5 filings/s, and the phases after it
+  # total ~78 min, so a cold start needs about 1h55m. Three hours leaves an
+  # hour of margin on the phase whose duration depends on a third party.
+  #
+  # If the cap binds, what survives is whatever the run had finished: the
+  # runner packages the receipts the moment the MANIFEST is written and
+  # re-packages after every later stage, and the run log is now a declared
+  # output so a run that never reaches its MANIFEST still comes home with its
+  # phase timings and its rejection tally.
+  max_hours: 3.0
   max_concurrent: 1
   max_usd: 2.50
