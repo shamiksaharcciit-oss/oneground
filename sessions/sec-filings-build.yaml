@@ -62,8 +62,10 @@ remote_log: /workspace/oneground-session.log
 done_marker: DONE                # run_fixture_build.sh prints it near the end
 
 outputs:
-  # The run log, FIRST and marked optional, so that a run which is terminated
-  # before it produces any artifact still comes home with its evidence.
+  # The run log, FIRST, so that a run terminated before it produces any
+  # artifact still comes home with its evidence. An output that does not
+  # exist is already reported as couldnt-check rather than failing the fetch,
+  # so this needs no `optional` flag -- and `Output` has none.
   #
   # Session 20260918-233949 hit its cap mid-build. `watch` correctly fetched
   # what existed, which was neither tarball, and terminated -- and the log
@@ -71,7 +73,7 @@ outputs:
   # phase timings and the rejection tally are the deliverable when the corpus
   # is not, and they were sitting in a file nobody had declared.
   - {remote: /workspace/oneground-session.log,
-     local: tasks/scratch/030-session-log/, optional: true}
+     local: tasks/scratch/030-session-log/}
   # The review bundle: receipts, the section statistics and the duplicate
   # rate. Small enough for the repo.
   - {remote: /workspace/sec-filings-10k-small.tgz, local: ./, extract: true}
