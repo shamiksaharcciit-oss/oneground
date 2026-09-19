@@ -275,7 +275,8 @@ class SemanticSharded:
             shards=len(built.state["shards"]),
             index_bytes=sum(indexes.measured_bytes(s)
                             for s in built.state["shards"].values()),
-            vector_bytes=stored * int(built.dim) * 4,
+            vector_bytes=indexes.stored_vector_bytes(
+                built.config, stored, built.dim),
             copies_p50=int(np.percentile(copies, 50)),
             copies_p95=int(np.percentile(copies, 95)),
             copies_p99=int(np.percentile(copies, 99)),

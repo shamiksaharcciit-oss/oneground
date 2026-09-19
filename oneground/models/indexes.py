@@ -193,6 +193,39 @@ def set_search(index, config, knobs=None):
         index.nprobe = _knob(config, "nprobe", knobs)
 
 
+def code_size(config):
+    """Bytes per vector this algorithm stores.
+
+    `dim * 4` for anything that keeps the vectors -- flat, HNSW, and IVF,
+    whose lists hold full float32 vectors. For IVF-PQ it is the PQ code, which
+    faiss packs as `ceil(m * nbits / 8)` bytes and which is not a vector at
+    all. `dim` is needed only for the first case.
+    """
+    algorithm = algorithm_of(config)
+    if algorithm != IVF_PQ:
+        return None
+    return -(-_knob(config, "m") * _knob(config, "nbits") // 8)
+
+
+def stored_vector_bytes(config, n, dim):
+    """What the built index holds as vector data, in bytes.
+
+    Not "what these vectors would cost stored raw": that is the estimate, and
+    for a quantised index it is wrong by an order of magnitude. Measured
+    against it, `overhead_bytes` came out at -453 MB for an IVF-PQ index over
+    150,000 arXiv vectors -- a number that is not wrong by a little, it is a
+    sign the definition did not fit the algorithm.
+
+    With this, the overhead is the thing a reader wants: the graph for HNSW,
+    the coarse quantiser and the list structure for IVF, and for IVF-PQ the
+    codebooks -- which on a 256-shard partition cost more than the codes.
+    """
+    bytes_each = code_size(config)
+    if bytes_each is None:
+        bytes_each = int(dim) * 4
+    return int(n) * int(bytes_each)
+
+
 def measured_bytes(index):
     """The built index's size, as faiss reports it.
 

@@ -785,11 +785,19 @@ class Footprint:
     copies_p95: int = 1
     copies_p99: int = 1
     # Measured, not estimated (task 034). `index_bytes` is what faiss reports
-    # for the built index, summed over shards; `vector_bytes` is the payload
-    # it holds; `overhead_bytes` is the difference -- the graph, the lists, the
-    # codebooks. With quantisation `memory_bytes` above stopped being a
-    # description of anything, so it keeps its name, keeps being labelled an
-    # estimate, and sits beside these three.
+    # for the built index, summed over shards; `vector_bytes` is the vector
+    # data it holds -- float32 vectors for flat, HNSW and IVF, PQ codes for
+    # IVF-PQ, which are not vectors at all; `overhead_bytes` is the difference
+    # -- the graph, the coarse quantiser, the list structure, the codebooks.
+    #
+    # `vector_bytes` is deliberately not "what these vectors would cost stored
+    # raw". Measured that way the overhead of an IVF-PQ index came out at -453
+    # MB, which is not a number that is wrong by a little: it is a definition
+    # that did not fit the algorithm. See `indexes.stored_vector_bytes`.
+    #
+    # With quantisation `memory_bytes` above stopped being a description of
+    # anything, so it keeps its name, keeps being labelled an estimate, and
+    # sits beside these three.
     index_bytes: Optional[int] = None
     vector_bytes: Optional[int] = None
 

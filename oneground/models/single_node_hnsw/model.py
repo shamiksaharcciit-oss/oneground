@@ -152,7 +152,8 @@ class SingleNodeHNSW:
             fanout=1.0,
             shards=1,
             index_bytes=indexes.measured_bytes(built.state["index"]),
-            vector_bytes=int(built.n_base) * int(built.dim) * 4,
+            vector_bytes=indexes.stored_vector_bytes(
+                built.config, built.n_base, built.dim),
         )
 
     # -- state -------------------------------------------------------------

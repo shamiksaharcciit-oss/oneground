@@ -223,7 +223,8 @@ class HashSharded:
             shards=len(built.state["shards"]),
             index_bytes=sum(indexes.measured_bytes(s)
                             for s in built.state["shards"].values()),
-            vector_bytes=int(built.n_base) * int(built.dim) * 4,
+            vector_bytes=indexes.stored_vector_bytes(
+                built.config, built.n_base, built.dim),
         )
 
     # -- state -------------------------------------------------------------

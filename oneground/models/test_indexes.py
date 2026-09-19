@@ -261,16 +261,47 @@ def test_quantisation_is_measured_rather_than_estimated_synthetic():
 
 
 @pytest.mark.parametrize("family", FAMILIES)
-def test_the_footprint_carries_measured_bytes_and_their_difference(family):
+@pytest.mark.parametrize("algorithm", INDEX_ALGORITHMS)
+def test_the_footprint_carries_measured_bytes_and_their_difference(
+        family, algorithm):
     x, _ = _corpus()
     model = models.get(family)
-    cfg = _config_for(family, IVF_PQ)
+    cfg = _config_for(family, algorithm)
     d = model.footprint(model.build(x, cfg, seed=5)).as_dict()
     for key in ("index_bytes", "vector_bytes", "overhead_bytes"):
         assert key in d, (family, key)
     assert d["overhead_bytes"] == d["index_bytes"] - d["vector_bytes"]
+    # The overhead is the graph, the quantiser, the lists, the codebooks --
+    # never a negative number. It was one until `vector_bytes` stopped
+    # meaning "what these vectors would cost stored raw": an IVF-PQ index
+    # over 150,000 arXiv vectors reported -453 MB of overhead, which is a
+    # definition that does not fit the algorithm rather than a small error.
+    assert d["overhead_bytes"] >= 0, (family, algorithm, d)
+    assert d["vector_bytes"] <= d["index_bytes"], (family, algorithm, d)
     # and the estimate is still there, still named an estimate
     assert "est_memory_bytes" in d, sorted(d)
+
+
+def test_a_quantised_index_stores_codes_not_vectors_synthetic():
+    """What `vector_bytes` means, stated as a number.
+
+    IVF-PQ at m=16, nbits=8 packs one byte per sub-quantiser, so it holds 16
+    bytes per vector where a flat index holds dim x 4 -- 3,072 at dim 768.
+    """
+    pq = Config.make("single_node_hnsw", {"index": IVF_PQ, "nlist": 16,
+                                          "nprobe": 4, "m": 16, "nbits": 8})
+    assert indexes.code_size(pq) == 16
+    assert indexes.stored_vector_bytes(pq, 1000, 768) == 16000
+    # nbits that does not divide by 8 rounds up, as faiss packs it
+    pq5 = Config.make("single_node_hnsw", {"index": IVF_PQ, "nlist": 16,
+                                           "nprobe": 4, "m": 16, "nbits": 5})
+    assert indexes.code_size(pq5) == 10
+    # everything else holds the vectors themselves
+    for algorithm in (FLAT, HNSW, IVF):
+        cfg = Config.make("single_node_hnsw",
+                          dict(SMALL_KNOBS[algorithm], index=algorithm))
+        assert indexes.code_size(cfg) is None, algorithm
+        assert indexes.stored_vector_bytes(cfg, 1000, 768) == 1000 * 768 * 4
 
 
 # --------------------------------------------------------------- the sweep
