@@ -228,7 +228,7 @@ document.
 ## Where the evidence lives
 
 Every artifact this report cites is in the **main checkout**, at
-`C:/Users/polo2/projects/oneground/runs/chunking-sec-filings-10k/`, copied
+`<main checkout>/runs/chunking-sec-filings-10k/`, copied
 there from this worktree and **verified by digest after the copy** rather than
 assumed (CLAUDE.md rule 9):
 
