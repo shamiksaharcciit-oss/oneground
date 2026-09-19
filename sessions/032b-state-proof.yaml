@@ -46,7 +46,14 @@ env:
   ONEGROUND_OUT: /workspace/032b-state.tgz
   ONEGROUND_WORKDIR: runs/032b-state
   ONEGROUND_VECTORS: /workspace/arxiv-150k/vectors.npy
-  ONEGROUND_REQUIREMENTS: requirements.arxiv-150k.determinism.pod.yaml
+  # 032b's own file, not 029's. Session 20260919-144616 named 029's and failed
+  # before it measured anything: `simulate` takes its workdir from the
+  # requirements file, 029's says `runs/029-proof`, and this spec uploads into
+  # `runs/032b-state`. The inputs landed in one directory and `simulate`
+  # looked in another. `ONEGROUND_WORKDIR` above must equal this file's
+  # `run.workdir`; `oneground/pod/session.py` refuses at plan time if it does
+  # not, and the runner checks it again before it does any work.
+  ONEGROUND_REQUIREMENTS: requirements.arxiv-150k.determinism.032b.pod.yaml
   # THE PIN. The laptop half ran at this commit, and the runner refuses
   # unless `oneground/` here is identical to it. Both halves must be the same
   # simulator or the comparison measures the revision instead of the
@@ -54,7 +61,15 @@ env:
   # untangle after a row from one commit was subtracted from a row from
   # another. It compares the package rather than HEAD, so a later commit that
   # touches only a report or this file is still the pinned simulator.
-  ONEGROUND_PINNED_COMMIT: b0bfb118322409b1e4ec9cfaa1177ad3f17734bf
+  #
+  # Re-pinned for the third session. The first two ran at b0bfb11 and the
+  # second measured the residual that a974b1a fixes: the query-side routing
+  # in `state()` ran outside the determinism context the base side ran
+  # inside, so the state recorded distances the run had not computed on the
+  # path it computed everything else on. Both halves move to the fixed code
+  # together, or the comparison measures the revision rather than the
+  # environment.
+  ONEGROUND_PINNED_COMMIT: a974b1a8724f5291b9f5c0c9faef62be140c2025
 
 setup: corpora/POD_SETUP.md
 run: bash corpora/run_032b_state_proof.sh
