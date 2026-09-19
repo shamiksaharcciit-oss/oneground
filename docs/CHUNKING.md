@@ -90,10 +90,21 @@ retrievability of the corpus's own text, not accuracy on your users' questions, 
 this report does not measure."*
 
 **Two refinements that keep it honest.**
-- *Paraphrase distance, declared.* Optionally perturb the anchor (drop the first clause;
-  use only the sentence's noun phrases) to move the query away from verbatim overlap.
-  Each perturbation rule is seeded, named, and reported as its own column; none is a
-  model.
+- *Paraphrase distance, declared.* Optionally perturb the anchor to move the query away
+  from verbatim overlap. Each perturbation rule is seeded, named, and reported as its
+  own column; none is a model. Two are built: `drop_first_clause`, and
+  `function_words_removed`, which removes a published closed-class word list and keeps
+  whatever is left.
+
+  *Corrected in task 031, and the correction matters more than the perturbation.* This
+  paragraph previously asked for "use only the sentence's noun phrases". Noun-phrase
+  extraction needs a part-of-speech tagger, which is a model, and this path admits no
+  model — so the specification was asking for something its own rules forbid, which is
+  how a future implementer admits a tagger while believing they are following the
+  document. The refusal outranks the optional feature. What replaces it is named for
+  what it does rather than for what was wanted: a closed-class removal is not
+  noun-phrase extraction, what survives it includes verbs and adverbs, and the rule has
+  no idea which is which.
 - *Document-level agreement.* For real queries the team already has (logs, no labels),
   measure whether the top-k *documents* agree across chunkings. This is a stability
   measure — it says whether the chunking decision changes what a user would see — and

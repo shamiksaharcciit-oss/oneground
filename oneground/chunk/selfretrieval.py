@@ -176,8 +176,15 @@ def _drop_first_clause(text, rng):
     return out if out.strip() else text
 
 
-@_perturbation("content_words", caveat=NOUN_PHRASE_CAVEAT)
-def _content_words(text, rng):
+@_perturbation("function_words_removed", caveat=NOUN_PHRASE_CAVEAT)
+def _function_words_removed(text, rng):
+    """Removes a published list of function words and keeps what is left.
+
+    Named for what it does. An earlier name, `content_words`, suggested it
+    identifies content words, which a closed-class removal does not: what
+    survives includes verbs and adverbs, and the rule has no idea which is
+    which. The name claims nothing the rule cannot do.
+    """
     kept = [w for w in text.split() if w.lower().strip(".,;:()\"'") not in CLOSED_CLASS]
     return " ".join(kept) if kept else text
 

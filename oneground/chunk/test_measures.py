@@ -221,7 +221,7 @@ def test_short_spans_are_not_sampled():
 
 def test_perturbations_are_named_and_declared():
     assert set(sr.PERTURBATIONS) == {"verbatim", "drop_first_clause",
-                                     "content_words"}
+                                     "function_words_removed"}
     with pytest.raises(ValueError) as e:
         sr.perturb([], "paraphrase_with_an_llm", seed=1)
     assert "declared" in str(e.value)
@@ -232,18 +232,18 @@ def test_drop_first_clause_drops_it():
     assert sr.perturb(a, "drop_first_clause", seed=1) == ["we reduced exposure."]
 
 
-def test_content_words_does_not_claim_to_be_noun_phrases():
+def test_function_words_removed_does_not_claim_to_be_noun_phrases():
     """The specification asks for 'noun phrases only'. True NP chunking needs
     a POS tagger, which is a model, and no model may appear in path B. The
     perturbation is a published closed-class removal and is named and
     captioned as that, not as noun-phrase extraction."""
     a = [sr.Anchor("d", 0, 0, "The company is subject to the risk of loss.", "s")]
-    out = sr.perturb(a, "content_words", seed=1)[0]
+    out = sr.perturb(a, "function_words_removed", seed=1)[0]
     assert "the" not in out.lower().split()
     assert "company" in out and "risk" in out
     assert "APPROXIMATE" in sr.NOUN_PHRASE_CAVEAT
     assert "part-of-speech tagger, which is a model" in sr.NOUN_PHRASE_CAVEAT
-    assert sr.PERTURBATIONS["content_words"]["caveat"] is sr.NOUN_PHRASE_CAVEAT
+    assert sr.PERTURBATIONS["function_words_removed"]["caveat"] is sr.NOUN_PHRASE_CAVEAT
 
 
 def test_no_perturbation_is_a_model():
