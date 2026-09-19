@@ -19,9 +19,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..base import (BUILD, BuiltIndex, Candidates, Config, Footprint,
+from .. import indexes
+from ..base import (HNSW,
+                    BUILD, BuiltIndex, Candidates, Config, Footprint,
                     Param, declare_parameters, estimate_memory_bytes,
-                    exact_over, resolve_deterministic, single_threaded_faiss)
+                    exact_over, resolve_deterministic, single_threaded_faiss,
+                    HNSW_ONLY,
+                    index_params)
 
 NAME = "single_node_hnsw"
 
@@ -34,14 +38,15 @@ EF_CONSTRUCTION = 200
 # by an `include` entry, never swept.
 PARAMETERS = declare_parameters(NAME, (
     Param("M", int, minimum=1, swept=True, default=32,
-          note="HNSW links per node"),
+          belongs_to=HNSW_ONLY, note="HNSW links per node"),
     Param("efSearch", int, minimum=1, swept=True, default=128,
-          note="search beam width"),
+          belongs_to=HNSW_ONLY, note="search beam width"),
     Param("efConstruction", int, minimum=1, default=EF_CONSTRUCTION,
+          belongs_to=HNSW_ONLY,
           note="build beam width; pinned by include, not swept"),
     Param("deterministic", bool, role=BUILD,
           note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
-))
+) + index_params())
 
 
 def _d(key):
@@ -99,24 +104,14 @@ class SingleNodeHNSW:
         of minutes, and a run that prints nothing for that long is
         indistinguishable from a hung one.
         """
-        import faiss
         t0 = time.time()
         det = resolve_deterministic(config, deterministic)
-        idx = faiss.IndexHNSWFlat(vectors.shape[1], int(config.get("M", _d("M"))),
-                                  faiss.METRIC_INNER_PRODUCT)
-        idx.hnsw.efConstruction = int(config.get("efConstruction",
-                                                 _d("efConstruction")))
-        with single_threaded_faiss(det):
-            if add_chunk:
-                n = vectors.shape[0]
-                for i in range(0, n, int(add_chunk)):
-                    idx.add(np.ascontiguousarray(vectors[i:i + int(add_chunk)]))
-                    if progress:
-                        progress(min(i + int(add_chunk), n), n,
-                                 time.time() - t0)
-            else:
-                idx.add(vectors)
-        idx.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
+        # Task 034: the algorithm is the configuration's. `hnsw` is the
+        # default and takes exactly the path it took before -- same
+        # construction, same sequential adds, same knobs -- because every
+        # published value was measured under it.
+        idx = indexes.build(vectors, config, seed=seed, deterministic=det,
+                            add_chunk=add_chunk, progress=progress)
         return BuiltIndex(family=NAME, config=config, n_base=len(vectors),
                           dim=vectors.shape[1],
                           state={"index": idx, "vectors": vectors,
@@ -126,7 +121,7 @@ class SingleNodeHNSW:
     # -- search ------------------------------------------------------------
     def search(self, built, queries, k, config):
         idx = built.state["index"]
-        idx.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
+        indexes.set_search(idx, config)
         scores, ids = idx.search(queries, k)
         return Candidates(ids=ids.astype(np.int64),
                           scores=scores.astype(np.float32))
@@ -141,13 +136,18 @@ class SingleNodeHNSW:
 
     # -- footprint ---------------------------------------------------------
     def footprint(self, built):
-        M = int(built.config.get("M", _d("M")))
+        # The estimate stays and stays labelled one; beside it, what faiss
+        # reports for the index it actually built (task 034).
+        M = int(built.config.get("M", _d("M"))) \
+            if indexes.algorithm_of(built.config) == HNSW else 0
         return Footprint(
             stored_vectors=built.n_base,
             amplification=1.0,
             memory_bytes=estimate_memory_bytes(built.n_base, built.dim, M),
             fanout=1.0,
             shards=1,
+            index_bytes=indexes.measured_bytes(built.state["index"]),
+            vector_bytes=int(built.n_base) * int(built.dim) * 4,
         )
 
     # -- state -------------------------------------------------------------
@@ -180,7 +180,7 @@ class SingleNodeHNSW:
             probed_region=np.zeros((nq, 1), dtype=np.int32),
             probe_reason=np.full((nq, 1), S.ROUTE_FANOUT, dtype=np.uint8))
 
-        idx.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
+        indexes.set_search(idx, config)
         scores, ids = idx.search(queries, k)
         per_query = [(ids[q], np.zeros(len(ids[q]), dtype=np.int32),
                       scores[q]) for q in range(nq)]

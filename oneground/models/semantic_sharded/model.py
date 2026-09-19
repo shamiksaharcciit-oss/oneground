@@ -37,10 +37,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .. import indexes
 from ..base import (BUILD, CONSTANT, RUN, BuiltIndex, Candidates, Config,
-                    Footprint, Param, declare_parameters,
+                    Footprint, HNSW, Param, declare_parameters,
                     estimate_memory_bytes, exact_over, merge_candidates,
-                    resolve_deterministic, deterministic_faiss)
+                    resolve_deterministic, deterministic_faiss,
+                    HNSW_ONLY,
+                    index_params)
 
 NAME = "semantic_sharded"
 
@@ -82,16 +85,16 @@ PARAMETERS = declare_parameters(NAME, (
     Param("probe", int, minimum=1, swept=True, default=2,
           note="regions searched per query"),
     Param("M", int, minimum=1, swept=True, default=32,
-          note="HNSW links per node, per shard"),
+          belongs_to=HNSW_ONLY, note="HNSW links per node, per shard"),
     Param("efSearch", int, minimum=1, swept=True, default=96,
-          note="search beam width, per shard"),
+          belongs_to=HNSW_ONLY, note="search beam width, per shard"),
     Param("shard_depth", int, role=RUN, minimum=1, default=SHARD_DEPTH,
           note="candidates taken from each probed shard; set by simulate"),
     Param("efConstruction", int, role=CONSTANT, fixed=EF_CONSTRUCTION,
           note="every shard is built at EF_CONSTRUCTION"),
     Param("deterministic", bool, role=BUILD,
           note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
-))
+) + index_params())
 
 
 def _d(key):
@@ -151,7 +154,6 @@ class SemanticSharded:
         membership, which changes every graph built from it. Seeding is not
         sufficient for either half; one thread is.
         """
-        import faiss
         from ...measures.crispness import centroid_dists, kmeans
 
         t0 = time.time()
@@ -182,13 +184,18 @@ class SemanticSharded:
             # implementation detail of the loop above rather than on a choice.
             for r in sorted(members):
                 ids = np.asarray(members[r], dtype=np.int64)
-                s = faiss.IndexHNSWFlat(vectors.shape[1],
-                                        int(config.get("M", _d("M"))),
-                                        faiss.METRIC_INNER_PRODUCT)
-                s.hnsw.efConstruction = EF_CONSTRUCTION
-                s.add(vectors[ids])
-                s.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
-                shards[r], ids_of[r] = s, ids
+                # Task 034: the algorithm is the configuration's, one per
+                # region. `hnsw` is the default and takes the path it took
+                # before -- same construction, same efConstruction constant,
+                # same efSearch set after the add -- because every published
+                # value was measured under it. `where` names the region so an
+                # "nlist over too few vectors" refusal is actionable: a
+                # semantic partition's regions are not the same size.
+                shards[r] = indexes.build(
+                    vectors[ids], config, seed=seed, deterministic=det,
+                    dim=vectors.shape[1], where=f"region {r}",
+                    knobs={"efConstruction": EF_CONSTRUCTION})
+                ids_of[r] = ids
 
         return BuiltIndex(
             family=NAME, config=config, n_base=len(vectors),
@@ -209,7 +216,7 @@ class SemanticSharded:
     def search(self, built, queries, k, config):
         shards, ids_of = built.state["shards"], built.state["ids_of"]
         for s in shards.values():
-            s.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
+            indexes.set_search(s, config)
         q_r = self._probed(built, queries, config)
 
         ids = np.full((len(queries), k), -1, dtype=np.int64)
@@ -252,13 +259,21 @@ class SemanticSharded:
     def footprint(self, built):
         copies = built.state["copies"]
         stored = int(copies.sum())
-        M = int(built.config.get("M", _d("M")))
+        # The estimate stays and stays labelled one; beside it, what faiss
+        # reports for the indexes actually built, summed over regions (034).
+        # M is an HNSW link count, so it is 0 in the estimate under any other
+        # algorithm rather than a number from a formula that does not apply.
+        M = int(built.config.get("M", _d("M"))) \
+            if indexes.algorithm_of(built.config) == HNSW else 0
         return Footprint(
             stored_vectors=stored,
             amplification=float(stored / built.n_base),
             memory_bytes=estimate_memory_bytes(stored, built.dim, M),
             fanout=float(built.config.get("probe", _d("probe"))),
             shards=len(built.state["shards"]),
+            index_bytes=sum(indexes.measured_bytes(s)
+                            for s in built.state["shards"].values()),
+            vector_bytes=stored * int(built.dim) * 4,
             copies_p50=int(np.percentile(copies, 50)),
             copies_p95=int(np.percentile(copies, 95)),
             copies_p99=int(np.percentile(copies, 99)),
@@ -341,7 +356,7 @@ class SemanticSharded:
 
         shards, ids_of = st["shards"], st["ids_of"]
         for s in shards.values():
-            s.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
+            indexes.set_search(s, config)
         per_query, padded = S.collect_candidates(
             shards, ids_of, queries, q_r,
             int(config.get("shard_depth", _d("shard_depth"))))

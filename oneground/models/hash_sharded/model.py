@@ -46,10 +46,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .. import indexes
 from ..base import (BUILD, CONSTANT, BuiltIndex, Candidates, Config,
-                    Footprint, Param, declare_parameters,
+                    Footprint, HNSW, Param, declare_parameters,
                     estimate_memory_bytes, exact_over, merge_candidates,
-                    resolve_deterministic, deterministic_faiss)
+                    resolve_deterministic, deterministic_faiss,
+                    HNSW_ONLY,
+                    index_params)
 
 NAME = "hash_sharded"
 
@@ -66,9 +69,9 @@ PARAMETERS = declare_parameters(NAME, (
     Param("shards", int, minimum=1, swept=True, default=3,
           note="N shards by seeded hash; every query fans out to all"),
     Param("M", int, minimum=1, swept=True, default=32,
-          note="HNSW links per node, per shard"),
+          belongs_to=HNSW_ONLY, note="HNSW links per node, per shard"),
     Param("efSearch", int, minimum=1, swept=True, default=96,
-          note="search beam width, per shard"),
+          belongs_to=HNSW_ONLY, note="search beam width, per shard"),
     Param("shard_depth", int, role=CONSTANT,
           fixed=f"max({SHARD_DEPTH}, k), computed per search",
           note="not read from the config"),
@@ -76,7 +79,7 @@ PARAMETERS = declare_parameters(NAME, (
           note="every shard is built at EF_CONSTRUCTION"),
     Param("deterministic", bool, role=BUILD,
           note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
-))
+) + index_params())
 
 
 def _d(key):
@@ -148,7 +151,6 @@ class HashSharded:
         assignment was already seeded and deterministic; the graphs inside the
         shards were not.
         """
-        import faiss
         t0 = time.time()
         det = resolve_deterministic(config, deterministic)
         n_shards = int(config.get("shards", _d("shards")))
@@ -161,13 +163,15 @@ class HashSharded:
                 member = np.where(assign == r)[0].astype(np.int64)
                 if len(member) == 0:
                     continue
-                s = faiss.IndexHNSWFlat(vectors.shape[1],
-                                        int(config.get("M", _d("M"))),
-                                        faiss.METRIC_INNER_PRODUCT)
-                s.hnsw.efConstruction = EF_CONSTRUCTION
-                s.add(vectors[member])
-                s.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
-                shards[r], ids_of[r] = s, member
+                # Task 034: the algorithm is the configuration's, one index
+                # per shard. `hnsw` is the default and takes exactly the path
+                # it took before, because every published value was measured
+                # under it.
+                shards[r] = indexes.build(
+                    vectors[member], config, seed=seed, deterministic=det,
+                    dim=vectors.shape[1], where=f"shard {r}",
+                    knobs={"efConstruction": EF_CONSTRUCTION})
+                ids_of[r] = member
 
         return BuiltIndex(
             family=NAME, config=config, n_base=len(vectors),
@@ -180,7 +184,7 @@ class HashSharded:
     def search(self, built, queries, k, config):
         shards, ids_of = built.state["shards"], built.state["ids_of"]
         for s in shards.values():
-            s.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
+            indexes.set_search(s, config)
 
         ids = np.full((len(queries), k), -1, dtype=np.int64)
         scores = np.full((len(queries), k), -np.inf, dtype=np.float32)
@@ -204,7 +208,10 @@ class HashSharded:
 
     # -- footprint ---------------------------------------------------------
     def footprint(self, built):
-        M = int(built.config.get("M", _d("M")))
+        # The estimate stays and stays labelled one; beside it, what faiss
+        # reports for the indexes actually built, summed over shards (034).
+        M = int(built.config.get("M", _d("M"))) \
+            if indexes.algorithm_of(built.config) == HNSW else 0
         n_shards = int(built.config.get("shards", _d("shards")))
         return Footprint(
             stored_vectors=built.n_base,          # no replication
@@ -212,6 +219,9 @@ class HashSharded:
             memory_bytes=estimate_memory_bytes(built.n_base, built.dim, M),
             fanout=float(n_shards),               # the cost this family shows
             shards=len(built.state["shards"]),
+            index_bytes=sum(indexes.measured_bytes(s)
+                            for s in built.state["shards"].values()),
+            vector_bytes=int(built.n_base) * int(built.dim) * 4,
         )
 
     # -- state -------------------------------------------------------------
@@ -255,7 +265,7 @@ class HashSharded:
                                  dtype=np.uint8))
 
         for s in shards.values():
-            s.hnsw.efSearch = int(config.get("efSearch", _d("efSearch")))
+            indexes.set_search(s, config)
         per_query, padded = S.collect_candidates(
             shards, ids_of, queries, probed, max(SHARD_DEPTH, k))
         candidates = S.build_candidates(per_query, gt_ids,

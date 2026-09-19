@@ -34,7 +34,7 @@ from typing import Any, Dict, Tuple
 
 from .. import models
 from ..models.base import (CONSTANT, PARAMETER, Config, ParameterError,
-                           check_value, parameter_table)
+                           canonical_params, check_value, parameter_table)
 
 POLICY_FIELDS = ("family", "configuration", "changes", "rationale")
 CHANGE_FIELDS = ("param", "from", "to")
@@ -139,8 +139,17 @@ def validate_policy(doc):
             problem = check_value(family, table[key], configuration[key])
             if problem:
                 problems.append(f"configuration: {problem}")
-        missing = sorted(n for n, prm in table.items()
-                         if prm.role == PARAMETER and n not in configuration)
+        # "Every parameter" is what the *chosen* index algorithm reads, not
+        # every row of the table (task 034). `nlist` is a parameter of an IVF
+        # configuration and not of an HNSW one, and `index` itself elides at
+        # its default, so a policy over a published configuration names
+        # neither. `canonical_params` is the one function that knows which
+        # keys a configuration consists of; asking it here means a policy and
+        # a label cannot disagree about what "complete" means.
+        complete = canonical_params(family, dict(configuration))
+        missing = sorted(n for n in complete
+                         if n in table and table[n].role == PARAMETER
+                         and n not in configuration)
         if missing:
             problems.append(
                 f"configuration is missing {', '.join(missing)}: a policy "

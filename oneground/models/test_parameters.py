@@ -30,11 +30,24 @@ sys.path.insert(0, ROOT)
 
 from oneground import models  # noqa: E402
 from oneground.models import Config, ConfigSpace  # noqa: E402
-from oneground.models.base import (CONSTANT, NO_DEFAULT,  # noqa: E402
+from oneground.models.base import (CONSTANT, FLAT, HNSW,  # noqa: E402
+                                   INDEX_ALGORITHMS, IVF, IVF_PQ, NO_DEFAULT,
                                    PARAMETER, PARAMETER_TABLES,
                                    ParameterError, parameter_table)
 
 FAMILIES = sorted(models.REGISTRY)
+
+# Knob values small enough for the 240-vector synthetic corpus below, and for
+# one shard of it. The declared defaults (nlist=1024, nbits=8) cannot be
+# trained on 240 points -- faiss cannot learn more cells than it has points,
+# and a PQ with 8 bits wants 256 training points per sub-quantiser. The
+# defaults are exercised by the fixture sweeps, not here.
+SMALL_KNOBS = {
+    FLAT: {},
+    HNSW: {},
+    IVF: {"nlist": 4, "nprobe": 2},
+    IVF_PQ: {"nlist": 4, "nprobe": 2, "m": 4, "nbits": 4},
+}
 
 
 def _corpus(n=240, dim=16, n_q=12, seed=7):
@@ -53,6 +66,25 @@ def _small_config(family):
     return list(models.get(family).configs(space))[0]
 
 
+def _config_for(family, algorithm):
+    """The family's small config, re-pointed at `algorithm` (task 034).
+
+    A knob belongs to an algorithm, so this is not "the same config plus
+    `index`": the keys the chosen algorithm does not read are dropped, because
+    `Config.make` refuses them -- that refusal being the point of `belongs_to`.
+    """
+    table = parameter_table(family)
+    params = {}
+    for name, value in _small_config(family).params.items():
+        owned = table[name].belongs_to
+        if owned and algorithm not in tuple(owned[1]):
+            continue
+        params[name] = value
+    params["index"] = algorithm
+    params.update(SMALL_KNOBS[algorithm])
+    return Config.make(family, params)
+
+
 def test_every_registered_family_has_a_table():
     assert set(FAMILIES) <= set(PARAMETER_TABLES), (
         sorted(set(FAMILIES) - set(PARAMETER_TABLES)))
@@ -61,7 +93,13 @@ def test_every_registered_family_has_a_table():
 @pytest.mark.parametrize("family", FAMILIES)
 def test_the_keys_a_family_reads_are_exactly_its_declared_settings_synthetic(
         family, monkeypatch):
-    """Run build, search, ceiling and footprint, recording every key read."""
+    """Run build, search, ceiling and footprint, recording every key read.
+
+    Once per declared index algorithm since task 034: `nlist` is read only
+    when `index` is `ivf` or `ivf_pq`, so a single run at the default
+    algorithm would report four declared-and-never-read keys that are in fact
+    read -- under a configuration this loop now reaches.
+    """
     read = set()
     real_get = Config.get
 
@@ -72,11 +110,12 @@ def test_the_keys_a_family_reads_are_exactly_its_declared_settings_synthetic(
     monkeypatch.setattr(Config, "get", recording_get)
     x, q = _corpus()
     model = models.get(family)
-    cfg = _small_config(family)
-    built = model.build(x, cfg, 1)
-    model.search(built, q, 10, cfg)
-    model.ceiling(built, q, 10)
-    model.footprint(built)
+    for algorithm in INDEX_ALGORITHMS:
+        cfg = _config_for(family, algorithm)
+        built = model.build(x, cfg, 1)
+        model.search(built, q, 10, cfg)
+        model.ceiling(built, q, 10)
+        model.footprint(built)
 
     table = parameter_table(family)
     settable = {n for n, p in table.items() if p.role != CONSTANT}
@@ -244,9 +283,27 @@ def test_every_fixture_reference_configuration_is_valid():
 # as two configurations. `Config.make` fills the declared defaults.
 
 def _full_params(family):
-    """Every declared parameter of `family`, at its declared default."""
-    return {n: p.default for n, p in parameter_table(family).items()
-            if p.role == PARAMETER and p.default is not NO_DEFAULT}
+    """The default configuration of `family`, every parameter written out.
+
+    Task 034 made "every parameter with a default" stop being a
+    configuration: a knob belongs to an index algorithm, and `nlist` and `M`
+    cannot both appear in one. This is the *default algorithm's* set, which
+    is what every published label is made of, and `index` itself is left out
+    because it elides at its default.
+    """
+    table = parameter_table(family)
+    out = {}
+    for name, param in table.items():
+        if param.role != PARAMETER or param.default is NO_DEFAULT:
+            continue
+        if not param.in_label_at_default:
+            continue
+        if param.belongs_to:
+            owner, wanted = param.belongs_to
+            if table[owner].default not in tuple(wanted):
+                continue
+        out[name] = param.default
+    return out
 
 
 @pytest.mark.parametrize("family", FAMILIES)
