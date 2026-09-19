@@ -193,10 +193,13 @@ def main():
             f"({len(chunks)/t_embed:.0f} chunks/s)")
 
         t0 = time.time()
-        spans = [(s, e, "item") for d in docs for (s, e, _l) in units[d["accession"]]]
+        # Per document, NOT flattened. Offsets are positions in one
+        # document; a flat list lets a chunk of filing A contain a span of
+        # filing B, which does not raise and inflates both measures.
+        spans = {acc: [(s, e, "item") for (s, e, _l) in us]
+                 for acc, us in units.items()}
         path_a = M.path_a(
-            chunks, spans=spans,
-            units=[u for d in docs for u in units[d["accession"]]],
+            chunks, spans=spans, units=units,
             tokenizer=ST.WhitespaceTokens(), floor=mm["length_floor"],
             cap=mm["length_cap"],
             duplicate_threshold=mm["duplicate_threshold"],

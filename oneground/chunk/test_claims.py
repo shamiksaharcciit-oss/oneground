@@ -264,3 +264,70 @@ def test_no_perturbation_calls_a_model():
     for banned in ("spacy", "nltk", "transformers", "sentence_transformers",
                    "torch", "openai", "anthropic"):
         assert banned not in imported, f"path B imports {banned}"
+
+
+# ------------------------------- 6. the stage's refusals (oneground chunk)
+
+def test_vectors_give_couldnt_check_not_an_error(tmp_path, capsys):
+    """The paper requires the words, not an omitted section: a missing
+    section reads as 'no problem found'."""
+    from oneground.chunk import stage
+    req = tmp_path / "r.yaml"
+    req.write_text("corpus:\n  sample:\n    vectors:\n      path: x.npy\n",
+                   encoding="utf-8")
+    code = stage.run(str(req))
+    out = capsys.readouterr().out
+    assert code == 0, "couldn't-check is not a failure"
+    assert "couldn't-check" in out
+    assert "vectors were supplied, not text" in out
+    assert "out of this instrument's reach" in out
+
+
+def test_text_corpus_is_not_mistaken_for_vectors():
+    from oneground.chunk import stage
+    assert stage.corpus_is_vectors({"corpus": {"documents": "d.jsonl.zst"}}) is False
+    assert stage.corpus_is_vectors({"corpus": {"sample": {"vectors": {}}}}) is True
+
+
+def test_a_missing_extraction_declaration_refuses_before_any_work(tmp_path):
+    from oneground.chunk import stage
+    req = tmp_path / "r.yaml"
+    req.write_text("corpus:\n  documents: d.jsonl.zst\n", encoding="utf-8")
+    with pytest.raises(rp.DeclarationError) as e:
+        stage.run(str(req))
+    assert "does not run extractors" in str(e.value)
+
+
+def test_the_chunk_command_is_dispatchable_and_guarded():
+    from oneground import cli, environment as env
+    assert "oneground chunk" in cli.dispatchable_commands()
+    assert "oneground chunk" in env.GUARDED_COMMANDS
+
+
+def test_intake_accepts_a_text_corpus_and_requires_its_extraction(tmp_path):
+    """`characterize` accepts extracted text as well as vectors (task 031).
+    The chunking requirements file is the first to exercise that path, and it
+    failed the shipped-requirements test until intake learned it."""
+    from oneground import intake
+    good = tmp_path / "good.yaml"
+    good.write_text(
+        "oneground: 1\nrun: {name: t, mode: chunk, workdir: ./runs/t}\n"
+        "extraction: {tool: unstructured, version: '0.16'}\n"
+        "corpus: {documents: d.jsonl.zst}\n", encoding="utf-8")
+    req = intake.load(str(good))
+    assert req.data["corpus"]["documents"] == "d.jsonl.zst"
+
+    bare = tmp_path / "bare.yaml"
+    bare.write_text("oneground: 1\ncorpus: {documents: d.jsonl.zst}\n",
+                    encoding="utf-8")
+    with pytest.raises(intake.RequirementsError) as e:
+        intake.load(str(bare))
+    assert "does not run extractors" in str(e.value)
+
+    noreason = tmp_path / "noreason.yaml"
+    noreason.write_text(
+        "oneground: 1\nextraction: {tool: unknown}\n"
+        "corpus: {documents: d.jsonl.zst}\n", encoding="utf-8")
+    with pytest.raises(intake.RequirementsError) as e:
+        intake.load(str(noreason))
+    assert "nobody having asked" in str(e.value)

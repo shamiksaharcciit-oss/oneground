@@ -26,7 +26,7 @@ def ch(start, end, index=0, doc="d", strategy="fixed"):
 # --------------------------------------------------------------- path A
 
 def test_span_survival_counts_survived_and_split_by_kind():
-    spans = [(0, 46, "sentence"), (46, 84, "sentence")]
+    spans = {"d": [(0, 46, "sentence"), (46, 84, "sentence")]}
     chunks = [ch(0, 46, 0), ch(46, 84, 1)]
     r = m.span_survival(chunks, spans)
     assert r["survived"] == 2 and r["survival_rate"] == 1.0
@@ -39,7 +39,7 @@ def test_span_survival_counts_survived_and_split_by_kind():
 def test_span_survival_is_reported_per_unit_kind():
     """One number would hide a chunking that never splits a sentence and
     routinely splits a table row."""
-    spans = [(0, 46, "sentence"), (46, 84, "table_row")]
+    spans = {"d": [(0, 46, "sentence"), (46, 84, "table_row")]}
     r = m.span_survival([ch(0, 46)], spans)
     assert set(r["by_kind"]) == {"sentence", "table_row"}
     assert r["by_kind"]["sentence"]["survival_rate"] == 1.0
@@ -55,7 +55,7 @@ def test_boundary_alignment_is_couldnt_check_without_structure():
 
 
 def test_boundary_alignment_measures_where_structure_exists():
-    units = [(0, 46, "Item 1"), (46, 84, "Item 1A")]
+    units = {"d": [(0, 46, "Item 1"), (46, 84, "Item 1A")]}
     aligned = m.boundary_alignment([ch(0, 46), ch(46, 84)], units)
     assert aligned["alignment_rate"] == 1.0
     astray = m.boundary_alignment([ch(0, 30), ch(30, 84)], units)
@@ -105,7 +105,7 @@ def test_unresolved_references_admits_its_false_positives():
 
 
 def test_path_a_says_what_each_measure_needs():
-    units = [(0, 46, "Item 1"), (46, 84, "Item 1A")]
+    units = {"d": [(0, 46, "Item 1"), (46, 84, "Item 1A")]}
     a = m.path_a([ch(0, 46), ch(46, 84)], spans=units, units=units, floor=2,
                  cap=40)
     assert a["span_survival"]["needs_offsets"] is True
@@ -252,3 +252,52 @@ def test_no_perturbation_is_a_model():
         out = p["fn"]("The company is subject to the risk of loss.",
                       __import__("random").Random(0))
         assert isinstance(out, str) and out.strip(), name
+
+
+# ------------------------- the two positional measures are document-scoped
+
+def test_span_survival_does_not_count_a_chunk_of_another_document():
+    """Offsets are positions in ONE document. Pooling them lets a chunk of
+    filing A contain a span of filing B -- integers compare fine, nothing
+    raises, and the result is inflated. This happened across 1,000 filings on
+    the first pod run and was found by a number that looked wrong."""
+    a = Chunk("A", 0, 0, 100, "x" * 100, "fixed")
+    spans = {"A": [(0, 50, "item")], "B": [(0, 50, "item")]}
+    r = m.span_survival([a], spans)
+    assert r["total"] == 2
+    assert r["survived"] == 1, "document B's span was covered by A's chunk"
+    assert r["survival_rate"] == 0.5
+
+
+def test_boundary_alignment_does_not_align_across_documents():
+    a = Chunk("A", 0, 40, 90, "y" * 50, "fixed")
+    units = {"A": [(0, 40, "Item 1")], "B": [(0, 40, "Item 1")]}
+    r = m.boundary_alignment([a], units)
+    assert r["chunk_starts"] == 1
+    assert r["aligned_starts"] == 1
+    # B contributes edges but no chunks; A's single start must not be
+    # counted twice, nor B's edges lend A an alignment it did not earn.
+    assert r["alignment_rate"] == 1.0
+
+
+def test_a_flat_span_list_is_refused_rather_than_silently_pooled():
+    """The shape that caused the defect now raises instead of computing."""
+    with pytest.raises(TypeError) as e:
+        m.span_survival([ch(0, 46)], [(0, 46, "item")])
+    assert "across documents" in str(e.value)
+    with pytest.raises(TypeError) as e:
+        m.boundary_alignment([ch(0, 46)], [(0, 46, "item")])
+    assert "filing B" in str(e.value)
+
+
+def test_boundary_alignment_publishes_its_ceiling():
+    """A chunking cannot align more starts than it has units: a unit longer
+    than max_size is split and only its first piece begins on the edge. 0.11
+    against a ceiling of 0.12 and 0.11 against a ceiling of 1.00 are
+    different results."""
+    chunks = [Chunk("A", i, i * 10, i * 10 + 10, "z" * 10, "fixed")
+              for i in range(10)]
+    units = {"A": [(0, 50, "Item 1"), (50, 100, "Item 2")]}
+    r = m.boundary_alignment(chunks, units)
+    assert r["alignment_ceiling"] == 2 / 10
+    assert r["alignment_rate"] <= r["alignment_ceiling"]

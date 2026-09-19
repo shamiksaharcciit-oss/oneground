@@ -102,6 +102,22 @@ def _cmd_characterize(args, rest, env_stamp=None):
     return 0
 
 
+@envmod.guarded("oneground chunk")
+def _cmd_chunk(args, rest):
+    """The chunking stage, run alone (task 031).
+
+    Answers "is my chunking cutting through answers" without committing to a
+    full run. The same stage runs inside `characterize` when the corpus is
+    given as text; here it is the whole of the command.
+    """
+    from .chunk import stage
+    if rest:
+        raise SystemExit(f"oneground chunk: unexpected arguments: "
+                         f"{' '.join(rest)}")
+    return stage.run(args.requirements, documents=args.documents,
+                     anchors=args.anchors, device=args.device)
+
+
 @envmod.guarded("oneground simulate")
 def _cmd_simulate(args, rest):
     from . import simulate
@@ -316,6 +332,21 @@ def build_parser():
                         "produced one of its own.")
     envmod.add_argument(c)
 
+    ck = sub.add_parser("chunk",
+                        help="run the chunking stage alone and report "
+                             "(docs/CHUNKING.md)")
+    ck.add_argument("requirements",
+                    help="path to a chunking requirements.yaml "
+                         "(see requirements.chunking-sec-filings.yaml)")
+    ck.add_argument("--documents", type=int, default=None,
+                    help="override the declared subsample size")
+    ck.add_argument("--anchors", type=int, default=None,
+                    help="override the declared anchor count")
+    ck.add_argument("--device", default=None,
+                    help="embedding device; the requirements file decides "
+                         "when this is omitted")
+    envmod.add_argument(ck)
+
     s_ = sub.add_parser("simulate",
                         help="sweep architecture families on a characterized "
                              "sample")
@@ -431,6 +462,8 @@ def main(argv=None):
     args, rest = build_parser().parse_known_args(argv)
     if args.command == "characterize":
         return _cmd_characterize(args, rest)
+    if args.command == "chunk":
+        return _cmd_chunk(args, rest)
     if args.command == "simulate":
         return _cmd_simulate(args, rest)
     if args.command == "verify":

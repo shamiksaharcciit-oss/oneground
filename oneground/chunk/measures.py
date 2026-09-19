@@ -31,13 +31,28 @@ COULDNT_CHECK = "couldnt_check"
 
 # ------------------------------------------------------------ span survival
 
+def _by_doc(chunks):
+    out = {}
+    for c in chunks:
+        out.setdefault(c.doc_id, []).append(c)
+    return out
+
+
 def span_survival(chunks, spans):
     """Did the cut fall inside a unit?
 
-    `spans` are the document's own units as (start, end, kind) -- sentences,
-    list items, heading-scoped paragraphs. A span SURVIVES if some chunk
-    contains it entirely; it is SPLIT if every chunk that touches it cuts
-    through it.
+    `spans` maps doc_id -> [(start, end, kind)] -- the document's own units:
+    sentences, list items, heading-scoped paragraphs. A span SURVIVES if some
+    chunk OF THAT DOCUMENT contains it entirely; it is SPLIT if every chunk
+    that touches it cuts through it.
+
+    **Scoped per document, and that is not a detail.** Offsets are character
+    positions into one document, so pooling every document's spans into one
+    list and asking whether any chunk contains them compares a chunk of
+    filing A against a span of filing B. It does not raise -- integers
+    compare fine -- it just inflates the result. That is exactly what the
+    first run of this measure did, across 1,000 filings, and it took a
+    number that looked wrong to find it.
 
     Reported per unit kind, because a chunking that never splits a sentence
     and routinely splits a table row is a different thing from one that does
@@ -46,14 +61,23 @@ def span_survival(chunks, spans):
     Exact, and needs offsets: this is one of the two measures that a chunk of
     unknown position cannot contribute to.
     """
+    if isinstance(spans, (list, tuple)):
+        raise TypeError(
+            "span_survival takes spans as {doc_id: [(start, end, kind)]}. A "
+            "flat list has no document to belong to, and comparing offsets "
+            "across documents silently inflates survival.")
+    per_doc = _by_doc(chunks)
     by_kind = {}
-    for (s, e, kind) in spans:
-        rec = by_kind.setdefault(kind, {"total": 0, "survived": 0, "split": 0})
-        rec["total"] += 1
-        if any(c.contains(s, e) for c in chunks):
-            rec["survived"] += 1
-        else:
-            rec["split"] += 1
+    for doc_id, doc_spans in spans.items():
+        mine = per_doc.get(doc_id, [])
+        for (s, e, kind) in doc_spans:
+            rec = by_kind.setdefault(kind, {"total": 0, "survived": 0,
+                                            "split": 0})
+            rec["total"] += 1
+            if any(c.contains(s, e) for c in mine):
+                rec["survived"] += 1
+            else:
+                rec["split"] += 1
     for rec in by_kind.values():
         rec["survival_rate"] = (rec["survived"] / rec["total"]
                                 if rec["total"] else 0.0)
@@ -88,20 +112,39 @@ def boundary_alignment(chunks, units):
                       "not an alignment of zero: nothing was measured.",
             "needs_offsets": True,
         }
-    edges = set()
-    for (s, e, _kind) in units:
-        edges.add(s)
-        edges.add(e)
-    starts = [c.start for c in chunks]
-    aligned = sum(1 for s in starts if s in edges)
+    if isinstance(units, (list, tuple)):
+        raise TypeError(
+            "boundary_alignment takes units as {doc_id: [(start, end, kind)]}. "
+            "Pooling every document's edges into one set of integers lets a "
+            "chunk of filing A align with an edge of filing B.")
+    per_doc = _by_doc(chunks)
+    starts = aligned = edge_count = 0
+    ceiling_units = 0
+    for doc_id, doc_units in units.items():
+        edges = set()
+        for (s, e, _kind) in doc_units:
+            edges.add(s)
+            edges.add(e)
+        edge_count += len(edges)
+        ceiling_units += len(doc_units)
+        for c in per_doc.get(doc_id, []):
+            starts += 1
+            if c.start in edges:
+                aligned += 1
     return {
         "exact": True,
         "needs_offsets": True,
         "outcome": "measured",
-        "chunk_starts": len(starts),
+        "chunk_starts": starts,
         "aligned_starts": aligned,
-        "alignment_rate": aligned / len(starts) if starts else 0.0,
-        "unit_edges": len(edges),
+        "alignment_rate": aligned / starts if starts else 0.0,
+        "unit_edges": edge_count,
+        # A chunking cannot align more starts than it has units to align to:
+        # a unit longer than max_size is split, and only the first of its
+        # pieces can begin on the unit's edge. Published beside the rate
+        # because 0.11 against a ceiling of 0.12 and 0.11 against a ceiling
+        # of 1.00 are different results.
+        "alignment_ceiling": (ceiling_units / starts) if starts else 0.0,
     }
 
 
@@ -231,7 +274,11 @@ def unresolved_references(chunks):
 def path_a(chunks, spans=None, units=None, tokenizer=None, floor=None,
            cap=None, duplicate_threshold=0.80, duplicate_seed=20260919,
            duplicate_baseline=None):
-    """The five measures, each carrying whether it is exact and what it needs."""
+    """The five measures, each carrying whether it is exact and what it needs.
+
+    `spans` and `units` are {doc_id: [(start, end, kind)]}, not flat lists.
+    See `span_survival` for why that distinction is load-bearing.
+    """
     return {
         "span_survival": (span_survival(chunks, spans) if spans else {
             "exact": False, "outcome": COULDNT_CHECK, "needs_offsets": True,
