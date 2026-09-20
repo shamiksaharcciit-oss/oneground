@@ -91,18 +91,101 @@ running something can never bypass the receipts the read half renders.
 
 ## 4. The write half, and what it must do
 
-### 4.1 Configuration writes the file
+### 4.1 The front door: three paths in, one artifact out
 
-A form for `requirements.yaml`, with every field explained beside it and
-the file shown live as it is edited. Saving writes the file; the file is
-what runs. A user who opens it in a text editor sees exactly what the
-form produced, with the form's explanations preserved as comments, so the
-artifact teaches the schema rather than hiding it.
+All three end at the same file, and that is the property worth keeping:
+the YAML remains the thing that runs and the thing someone else can
+reproduce from.
 
-The form refuses what the CLI would refuse, using the CLI's own
-validator — an unknown parameter is named with the declared list, a
+**Fill in the form** — the primary path. Each field explained beside it,
+validated as it is typed by the CLI's own validator, so the form refuses
+exactly what the command refuses, with the same message. The file is shown
+live as it is edited. Saving writes it.
+
+**Upload one you have** — second. Validated on arrival, with any error
+named against the field it belongs to rather than as a parse failure, and
+then editable in the same form. A user arriving with a file from a
+colleague, a repository or an earlier run lands in the same place as a
+user starting empty.
+
+**Download a template** — third, and not a blank form; see below.
+
+**Why the form is primary and the template is the fallback.** A template
+downloaded, edited in a text editor without validation, and uploaded is
+the command-line experience with extra steps: the user finds out what was
+wrong from a refusal rather than while typing. The template exists for
+people who want a file under review, not as the ordinary way in.
+
+#### The file explains itself
+
+The form writes its reasoning into the file as comments — not field names
+restated, the *why*, in the words the form used beside each field:
+
+```yaml
+corpus:
+  sample:
+    # Ten to twenty thousand vectors, not your whole corpus. The exact
+    # answer key is computed by brute force over this sample, which is
+    # what makes it cheap; at full scale it would not be.
+    vectors: ./data/sample.npy
+    queries: ./data/queries.npy    # 50+ or the ambiguity measure
+                                   # cannot be computed
+  # Your real corpus size. Used for capacity arithmetic and for the
+  # caveat printed on every result: a sample does not tell you how the
+  # whole corpus behaves.
+  size_now: 2_100_000
+
+constraints:
+  # Measured at this concurrency, in the same environment, for the
+  # configuration the engine was actually built with. Anything else is
+  # reported couldn't-check rather than guessed.
+  latency_p95: {ms: 40, at_qps: 200, concurrency: 32}
+```
+
+Three consequences:
+
+- **The downloaded template is the tool explaining itself** in a file the
+  user keeps, rather than a blank form they must look up.
+- **A file that leaves the tool carries its own reasoning**, so a
+  colleague reading it in a pull request learns the schema from the
+  artifact.
+- **The comments are generated from the same strings the form shows**, so
+  they cannot drift from the interface. A test asserts that every field
+  with an explanation in the form has it in the written file, and that the
+  two are the same string.
+
+Comments are not read back as data. A user editing them by hand changes
+nothing about the run, and re-saving through the form rewrites them from
+the current strings — stated in the file itself, once, at the top.
+
+**What this costs, and it is not nothing.** There is no table of field
+explanations in the tree today. `intake` validates `requirements.yaml`
+with about twenty `raise RequirementsError(...)` statements whose messages
+are built at the raise site, and those are *refusals* — what is wrong —
+not *explanations* — what the field is for. The only declared table with
+per-key prose is `models/base.py`'s `Param.note`, and it covers the
+fourteen family parameters (`M`, `centroids`, `nprobe`, …), none of the
+fields above. The explanations the example shows currently exist only as
+hand-maintained comments in `requirements.example.yaml` (36 comment lines
+of 139) and `requirements.declared.example.yaml` (20 of 64).
+
+So this slice creates that table, on `Param.note`'s precedent, and the
+"one string" test is a test about it. Three consequences follow, and the
+third is the one to watch: the example files become generated from the
+table or are deleted rather than left to drift; the form and the writer
+share one origin, which is what makes the test meaningful; and **the
+explanation and the refusal for the same field remain two different
+strings in two places**, so a field can still be described one way and
+refused in another. §4.4 keeps refusals verbatim from the CLI; nothing
+yet keeps the explanation honest against them, and this paper does not
+solve that.
+
+The form's validation is the CLI's validation, not a second
+implementation — an unknown parameter is named with the declared list, a
 prediction without a threshold is refused, a `deployment:` block with one
-endpoint behaves as single-node. There is no separate validation.
+endpoint behaves as single-node. If the two could disagree, the front
+door would be the first place the UI drifted from the tool it is a
+front-end to.
 
 ### 4.2 Running is a job
 
@@ -223,9 +306,12 @@ caption, the projection's declared status — all as built.
 
 ## 7. What this position does not settle
 
-- The front door for a user with documents and no vectors: `chunk` is a
-  stage the UI runs, but the moment before it — choosing an extraction
-  tool, declaring it — is a form nobody has designed.
+- ~~The front door for a user with documents and no vectors.~~ **Settled
+  in §4.1**: three paths in — form, upload, template — one artifact out,
+  and the file carries the form's own explanations as comments. What
+  remains open inside it is narrower and named there: the explanation of
+  a field and the refusal for that field are still two strings in two
+  places, and nothing keeps them honest against each other.
 - Authentication beyond the loopback token, if the UI is ever exposed to
   a team rather than a person. Not designed, and the loopback default
   means it need not be yet.
