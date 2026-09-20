@@ -334,6 +334,53 @@ says are unreachable is not describing itself correctly.
 For families that reach everything, say so in code and in `MODEL.md`: routing
 loss is zero **by definition**, not by measurement.
 
+### Both scales, or neither (task 039)
+
+> **A gap between two measured numbers is reported on both scales — the
+> difference and the ratio — or it is not reported. Each is stated with the
+> sentence it supports.**
+
+The ceiling rule exists because one number without its decomposition cannot
+tell you whether to tune or re-architect. A gap has the same defect one level
+up: **it does not say which direction it points until a scale is chosen, and
+the choice is usually invisible.**
+
+Measured. Task 039 swept `nprobe` from 1 to 64 on both published fixtures and
+compared the two corpora's IVF loss. On one scale they converge; on the other
+they diverge; the rows are the same 84 rows:
+
+| | at `nprobe=8` | at `nprobe=64` | direction | the sentence it supports |
+|---|---|---|---|---|
+| difference of recall | +0.0982 | +0.0435 | closing | *"the two corpora converge as more cells are probed"* |
+| ratio of index loss | 1.686 | 5.833 | widening, monotonically | *"the two corpora diverge as more cells are probed"* |
+
+Both sentences are true of the measurements. Neither is wrong. **This rule
+does not decide which is correct** — that depends on the question being asked,
+and for these two corpora it is still open. What it forbids is publishing one
+of them without the other, because a reader given only the first has been
+handed a direction that the same data reverses.
+
+Why a rule and not a habit: the defect is invisible from inside. Task 039's
+own prediction was written in differences, stated a threshold in differences,
+and recorded neither that a scale had been chosen nor that another existed —
+so the prediction could only ever have been settled on the scale that
+flattered it. Nothing in the process caught that; the sweep did, by accident.
+
+It is the same defect as an alignment rate quoted without its ceiling: the
+number is true, the sentence it licenses is not, and nothing in the artifact
+tells a reader which one they are holding.
+
+**Status: written, not executable.** `claims.check` cannot enforce this today
+and the reason is structural — a gap is a *derived* quantity and a `Cite`
+carries a value with a `source` path into a run's artifacts, which a
+difference does not have. Measured in task 039b: a proposal card's `delta`
+mutated tenfold, sign-reversed, or silently replaced by a ratio passes
+`claims.check` unchanged, because a derived number is not cited and is
+therefore not checked. `oneground/proposals/verdict.py` computes that delta as
+a difference and judges it against a difference threshold, which is this rule's
+one live instance in code. What enforcement would need is in
+[`tasks/039b-both-scales-rule.report.md`](../tasks/039b-both-scales-rule.report.md).
+
 ---
 
 ## Adding a family
