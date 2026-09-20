@@ -120,6 +120,35 @@ not follow from its own rows does not get produced.
 4. If your claim asserts an outcome, set `asserts_outcome` and `holds_rule` so
    the checker recomputes rather than believes you.
 
+## A paragraph inside a measurement row is prose nobody reviewed as prose
+
+A narrower rule than the claim invariant, arrived at the same way — by a guard
+catching it. Task 035 attached an explanatory note to the return value of its
+decomposition, so every measured row carried the paragraph explaining what its
+three numbers meant. It seemed helpful: the explanation travelled with the
+thing it explained.
+
+It was caught by the verdict-language guard, on the word **"pass"** in "what
+the first pass lost". The guard was right for a reason adjacent to the one it
+was written for, and the word was the symptom rather than the fault.
+
+**A row carries measurements. A caption is a module constant that the report
+prints beside them.** Three reasons, in increasing order of importance:
+
+1. A paragraph repeated once per configuration is not readable, and a
+   twelve-row sweep carries it twelve times.
+2. A receipt is compared byte for byte across runs. Prose in it is prose that
+   has to be identical forever, or a wording improvement moves a digest.
+3. **Nobody reviews it as prose.** A sentence in a document is read by someone
+   deciding whether it is true. The same sentence inside a dict literal,
+   beside four floats, is read as plumbing — which is exactly how a claim
+   about what a number means avoids every check the project has for claims
+   about what a number means.
+
+The third is the general form and the reason this rule is here rather than in
+a style guide. It applies wherever a note is convenient to attach to a row,
+which is everywhere, because attaching it there is always the shortest path.
+
 ## What this does not do
 
 - **It does not check `Verdict.reason`.** A reason is the verdict layer's own
