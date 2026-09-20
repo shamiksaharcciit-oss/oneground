@@ -66,6 +66,7 @@ import numpy as np
 
 from .. import intake
 from ..models import Config, ConfigSpace, UnknownFamily, get as get_model
+from ..models import rerank
 from ..models.base import ParameterError, resolve_deterministic
 from ..receipts import (library_versions, producing_version, round_floats,
                         sha256_file,
@@ -318,6 +319,20 @@ def measure_config(model, config, base, queries, gt_ids, gt_scores, seed,
     cand = model.search(built, queries, k_max, config)
     query_seconds = time.time() - t0
 
+    # Task 035: what the SAME configuration costs without the rerank stage.
+    # Measured rather than subtracted: the first pass of a reranked search
+    # retrieves k x candidates, so `query_seconds - rerank_seconds` is the
+    # cost of the deeper retrieval, not the cost of not reranking. The
+    # difference between the two is what reranking is actually bought with.
+    without_seconds = None
+    if rerank.is_on(config):
+        plain = Config.make(config.family,
+                            {k: v for k, v in config.params.items()
+                             if k not in ("rerank", "candidates")})
+        t0 = time.time()
+        model.search(built, queries, k_max, plain)
+        without_seconds = time.time() - t0
+
     ceil_ids = model.ceiling(built, queries, 10)
     fp = model.footprint(built)
 
@@ -331,14 +346,47 @@ def measure_config(model, config, base, queries, gt_ids, gt_scores, seed,
     row["ceiling_at_10"] = recall_at(ceil_ids, gt_ids, 10)
     row["routing_loss"] = 1.0 - row["ceiling_at_10"]
     row["index_loss"] = row["ceiling_at_10"] - row["recall_at_10"]
+
+    # Task 035: the three-way split. `candidate_recall` is what the candidate
+    # set CONTAINED, before any rescoring reordered it -- which is why the
+    # search records `reranked_from` as it goes rather than being asked to
+    # search twice. With reranking off the candidate set is the returned
+    # top-k, so candidate_recall == recall, ordering_loss is 0 and
+    # candidate_loss is exactly the `index_loss` above: the two-way split is
+    # the three-way one with a zero in it, and no published value moves.
+    pre = cand.reranked_from if cand.reranked_from is not None else cand.ids
+    row["candidate_recall_at_10"] = rerank.present_at(pre, gt_ids, 10)
+    # The first pass's OWN top-10, before any rescore reordered it. The three
+    # terms decompose what that lost; the rescore then recovers the ordering
+    # term and the row's `recall_at_10` reflects it.
+    row["recall_at_10_before_rerank"] = recall_at(pre, gt_ids, 10)
+    row.update(rerank.decomposition(row["ceiling_at_10"],
+                                    row["candidate_recall_at_10"],
+                                    row["recall_at_10_before_rerank"]))
+    row["recall_recovered_by_rerank"] = (row["recall_at_10"]
+                                         - row["recall_at_10_before_rerank"])
+    row["rerank"] = rerank.mode_of(config)
+    row["candidates"] = rerank.multiplier_of(config) if rerank.is_on(config) else 1
     row["inv_ratio_at_10"] = inverse_ratio_at(cand.scores, gt_scores, 10)
     row.update(fp.as_dict())
     # Wall clock goes beside the row, not in it (task 020b). A timing is a
     # fact about this machine on this run; while it sat in the row, no two
     # runs of the same code wrote the same simulate.json. `run` declares it in
     # simulate_info.json instead.
+    # Timings stay beside the row rather than in it (task 020b): a timing is a
+    # fact about this machine on this run, and while they sat in the row no
+    # two runs of the same code wrote the same simulate.json. Task 035 needs
+    # the cost shown beside the recall it buys, which the REPORT does by
+    # joining the two -- the rule is about where a number is stored, not about
+    # what a reader is shown.
     timing = {"build_seconds": built.build_seconds,
               "query_seconds": query_seconds}
+    if cand.rerank_seconds is not None:
+        timing["rerank_seconds"] = cand.rerank_seconds
+        timing["first_pass_seconds"] = query_seconds - cand.rerank_seconds
+    if without_seconds is not None:
+        timing["query_seconds_without_rerank"] = without_seconds
+        timing["rerank_overhead_seconds"] = query_seconds - without_seconds
 
     if state_sink is not None:
         state_sink(model, built, queries, k_max, config)

@@ -47,11 +47,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from .. import indexes
+from .. import rerank
 from ..base import (BUILD, CONSTANT, HNSW, HNSW_ONLY, BuiltIndex, Candidates,
                     Config, Footprint, Param, coherent, declare_parameters,
                     deterministic_faiss, estimate_memory_bytes, exact_over,
                     index_combinations, index_params, merge_candidates,
-                    resolve_deterministic)
+                    rerank_params, resolve_deterministic)
 
 NAME = "hash_sharded"
 
@@ -78,7 +79,7 @@ PARAMETERS = declare_parameters(NAME, (
           note="every shard is built at EF_CONSTRUCTION"),
     Param("deterministic", bool, role=BUILD,
           note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
-) + index_params())
+) + index_params() + rerank_params())
 
 
 def _d(key):
@@ -188,9 +189,12 @@ class HashSharded:
         for s in shards.values():
             indexes.set_search(s, config)
 
-        ids = np.full((len(queries), k), -1, dtype=np.int64)
-        scores = np.full((len(queries), k), -np.inf, dtype=np.float32)
-        depth = max(SHARD_DEPTH, k)
+        # Task 035: keep `width` per query so the rescore has a candidate
+        # set. At `rerank: none` width is k and this is the merge it did.
+        width = rerank.depth_for(k, config)
+        ids = np.full((len(queries), width), -1, dtype=np.int64)
+        scores = np.full((len(queries), width), -np.inf, dtype=np.float32)
+        depth = max(SHARD_DEPTH, width)
         for qi in range(len(queries)):
             cid, csc = [], []
             for r, s in shards.items():          # every shard, every query
@@ -198,8 +202,9 @@ class HashSharded:
                 sc, loc = s.search(queries[qi:qi + 1], n)
                 cid.append(ids_of[r][loc[0]])
                 csc.append(sc[0])
-            ids[qi], scores[qi] = merge_candidates(cid, csc, k)
-        return Candidates(ids=ids, scores=scores)
+            ids[qi], scores[qi] = merge_candidates(cid, csc, width)
+        cand = Candidates(ids=ids, scores=scores)
+        return rerank.apply(built, cand, queries, k, config)
 
     # -- ceiling -----------------------------------------------------------
     def ceiling(self, built, queries, k):

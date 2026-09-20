@@ -20,10 +20,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from .. import indexes
+from .. import rerank
 from ..base import (BUILD, HNSW, HNSW_ONLY, BuiltIndex, Candidates, Config,
                     Footprint, Param, coherent, declare_parameters,
                     estimate_memory_bytes, exact_over, index_combinations,
-                    index_params, resolve_deterministic)
+                    index_params, rerank_params,
+                    resolve_deterministic)
 
 NAME = "single_node_hnsw"
 
@@ -44,7 +46,7 @@ PARAMETERS = declare_parameters(NAME, (
           note="build beam width; pinned by include, not swept"),
     Param("deterministic", bool, role=BUILD,
           note="single-threaded build; see base.DETERMINISTIC_DEFAULT"),
-) + index_params())
+) + index_params() + rerank_params())
 
 
 def _d(key):
@@ -127,9 +129,14 @@ class SingleNodeHNSW:
     def search(self, built, queries, k, config):
         idx = built.state["index"]
         indexes.set_search(idx, config)
-        scores, ids = idx.search(queries, k)
-        return Candidates(ids=ids.astype(np.int64),
+        # Task 035: retrieve at the rerank depth, then rescore exactly. With
+        # `rerank: none` the depth is k and `apply` returns the candidates
+        # unchanged, so this is the path it took before.
+        depth = rerank.depth_for(k, config)
+        scores, ids = idx.search(queries, depth)
+        cand = Candidates(ids=ids.astype(np.int64),
                           scores=scores.astype(np.float32))
+        return rerank.apply(built, cand, queries, k, config)
 
     # -- ceiling -----------------------------------------------------------
     def ceiling(self, built, queries, k):

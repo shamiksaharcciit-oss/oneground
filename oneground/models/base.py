@@ -362,6 +362,54 @@ def index_params():
     )
 
 
+# --------------------------------------------------------------------------
+# reranking (task 035)
+# --------------------------------------------------------------------------
+# A production pipeline often retrieves `k x n` approximately, scores those
+# candidates exactly, and keeps the best `k`. That is a stage the simulator
+# did not model, and it is one of the two standard uses of exact search.
+
+RERANK_NONE = "none"
+RERANK_EXACT = "exact"
+RERANK_MODES = (RERANK_NONE, RERANK_EXACT)
+
+#: `candidates` is read only when reranking is on. The same rule as an IVF
+#: knob under `hnsw`: a key the chosen mode does not read is refused, not
+#: accepted and ignored.
+RERANK_ONLY = ("rerank", (RERANK_EXACT,))
+
+
+def rerank_params():
+    """The rerank keys, for a family's declared table (task 035).
+
+    One definition, three families, for the same reason `index_params` is one
+    definition: a second scoring pass over a candidate set is a property of
+    the search path rather than of a partition.
+
+    `rerank` defaults to `none` and carries `in_label_at_default=False`, so a
+    configuration that does not name it is labelled exactly as it was before
+    this task -- task 032's rule, and the reason every published fixture value
+    is unaffected.
+
+    `candidates` is a MULTIPLIER of k, not an absolute count. A pipeline
+    describes this as "retrieve k x n and rescore", and k varies within one
+    run (`recall@10` and `recall@100` come from the same search), so an
+    absolute count would mean different things in the same row.
+    """
+    return (
+        Param("rerank", str, default=RERANK_NONE, in_label_at_default=False,
+              swept=True, choices=RERANK_MODES,
+              note="none | exact; exact rescores the candidate set with the "
+                   "corpus's own metric -- the `flat` index of task 034 "
+                   "applied to a candidate set rather than to the corpus"),
+        Param("candidates", int, minimum=1, maximum=1000, swept=True,
+              default=10, belongs_to=RERANK_ONLY,
+              note="multiplier of k retrieved before exact scoring; "
+                   "candidates: 1 retrieves exactly k and so rescores a set "
+                   "it cannot improve"),
+    )
+
+
 # The keys `index_params` adds beside `index` itself. A family's own HNSW
 # knobs are swept by its own `configs()` loops; these are crossed in by
 # `index_combinations` instead, because which of them exist depends on the
@@ -756,6 +804,13 @@ class Candidates:
 
     ids: np.ndarray
     scores: np.ndarray
+    # Task 035. When a search reranked, the candidate set it rescored, and
+    # what the rescore cost. Recorded as the search produces them rather than
+    # recovered afterwards: the decomposition needs the pre-rerank set, and
+    # reconstructing it would mean searching twice. Both are None when no
+    # rerank happened, which is how a caller tells the two cases apart.
+    reranked_from: Optional[np.ndarray] = None
+    rerank_seconds: Optional[float] = None
 
 
 @dataclass

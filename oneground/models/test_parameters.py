@@ -33,7 +33,8 @@ from oneground.models import Config, ConfigSpace  # noqa: E402
 from oneground.models.base import (CONSTANT, FLAT, HNSW,  # noqa: E402
                                    INDEX_ALGORITHMS, IVF, IVF_PQ, NO_DEFAULT,
                                    PARAMETER, PARAMETER_TABLES,
-                                   ParameterError, parameter_table)
+                                   RERANK_EXACT, ParameterError,
+                                   parameter_table)
 
 FAMILIES = sorted(models.REGISTRY)
 
@@ -66,7 +67,7 @@ def _small_config(family):
     return list(models.get(family).configs(space))[0]
 
 
-def _config_for(family, algorithm):
+def _config_for(family, algorithm, rerank=None):
     """The family's small config, re-pointed at `algorithm` (task 034).
 
     A knob belongs to an algorithm, so this is not "the same config plus
@@ -82,6 +83,12 @@ def _config_for(family, algorithm):
         params[name] = value
     params["index"] = algorithm
     params.update(SMALL_KNOBS[algorithm])
+    if rerank:
+        # Task 035: `candidates` belongs to `rerank: exact` exactly as `nlist`
+        # belongs to `ivf`, so it is only read under that mode. Same reason
+        # this function loops over algorithms at all.
+        params["rerank"] = rerank
+        params["candidates"] = 2
     return Config.make(family, params)
 
 
@@ -99,6 +106,10 @@ def test_the_keys_a_family_reads_are_exactly_its_declared_settings_synthetic(
     when `index` is `ivf` or `ivf_pq`, so a single run at the default
     algorithm would report four declared-and-never-read keys that are in fact
     read -- under a configuration this loop now reaches.
+
+    And once more with `rerank: exact` since task 035, for the same reason:
+    `candidates` is read only under that mode, so a run at the default would
+    report it declared-and-never-read.
     """
     read = set()
     real_get = Config.get
@@ -111,11 +122,12 @@ def test_the_keys_a_family_reads_are_exactly_its_declared_settings_synthetic(
     x, q = _corpus()
     model = models.get(family)
     for algorithm in INDEX_ALGORITHMS:
-        cfg = _config_for(family, algorithm)
-        built = model.build(x, cfg, 1)
-        model.search(built, q, 10, cfg)
-        model.ceiling(built, q, 10)
-        model.footprint(built)
+        for rerank in (None, RERANK_EXACT):
+            cfg = _config_for(family, algorithm, rerank=rerank)
+            built = model.build(x, cfg, 1)
+            model.search(built, q, 10, cfg)
+            model.ceiling(built, q, 10)
+            model.footprint(built)
 
     table = parameter_table(family)
     settable = {n for n, p in table.items() if p.role != CONSTANT}
@@ -183,7 +195,8 @@ def test_get_refuses_an_undeclared_key_synthetic():
                                          "efSearch": 128})
     with pytest.raises(ParameterError) as e:
         c.get("centroids")
-    assert "declares: M, deterministic, efConstruction, efSearch" in str(e.value)
+    assert ("declares: M, candidates, deterministic, efConstruction, "
+            "efSearch, index, m, nbits, nlist, nprobe, rerank") in str(e.value)
 
 
 def test_a_constant_is_refused_with_its_fixed_value_synthetic():
