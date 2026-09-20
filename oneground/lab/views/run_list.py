@@ -58,6 +58,13 @@ class RunListView(ReceiptView):
     receipt = RUN_INDEX
     reads = (
         "directory",
+        # Present only for `oneground ui --demo`. Declared here rather than
+        # rendered from the server so the label travels inside the drawing
+        # and survives a screenshot, as the lab's projection caption does.
+        "demo.label",
+        "demo.way_out",
+        "demo.fetched_note",
+        "demo.not_available",
         "runs[].name",
         "runs[].n_base",
         "runs[].dimension",
@@ -141,6 +148,13 @@ class RunListView(ReceiptView):
 
         figures = {"directory": f["directory"], "n_runs": len(names),
                    "outcome_order": list(OUTCOMES)}
+        if f.has("demo.label"):
+            figures["demo"] = {
+                "label": f["demo.label"],
+                "way_out": f["demo.way_out"],
+                "fetched_note": f["demo.fetched_note"],
+                "not_available": f["demo.not_available"],
+            }
         gaps = {}
         unverified = [n for n, v in zip(names, verified) if v is not True]
         if unverified:

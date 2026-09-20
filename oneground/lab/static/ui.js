@@ -129,6 +129,17 @@
       + d.figures.n_runs + ' run(s) · each verified against its own MANIFEST'));
     main.appendChild(h);
 
+    // Someone else's corpus, said in the view rather than as fine print, and
+    // placed above the runs so a screenshot of the table carries it.
+    if (d.figures.demo) {
+      const dm = el('section', 'demo-banner');
+      dm.appendChild(el('p', 'demo-label', d.figures.demo.label));
+      dm.appendChild(el('p', 'demo-note', d.figures.demo.fetched_note));
+      dm.appendChild(el('p', 'demo-gap',
+        'not available here: ' + d.figures.demo.not_available));
+      dm.appendChild(el('p', 'demo-way-out', d.figures.demo.way_out));
+      main.appendChild(dm);
+    }
     if (d.figures.unverified && d.figures.unverified.length) {
       const w = el('p', 'unverified-banner',
         'digests do not verify for: ' + d.figures.unverified.join(', ')
@@ -488,6 +499,7 @@
     notNavigable: document.querySelectorAll('.entry.not-navigable').length,
     navigable: document.querySelectorAll('.entry.navigable').length,
     joinedTables: document.querySelectorAll('table.joined').length,
+    demoBanner: document.querySelectorAll('.demo-banner').length,
     observations: document.querySelectorAll('.observation').length,
     verdict: (document.querySelector('.verdict-name') || {}).textContent
       || null,

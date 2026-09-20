@@ -242,3 +242,91 @@ def test_a_run_with_no_report_says_so_rather_than_rendering_empty():
         text = b.text(".finding")
         assert "has not reported" in text
         assert "verify" in text
+
+
+# ------------------------------------------------------------- step 2: --demo
+def test_the_demo_opens_a_real_run_not_a_mock():
+    """Real receipts, real digests verifying, the real report with its real
+    couldn't-checks. Nothing on the page is fabricated for the demonstration."""
+    from oneground.lab import runs as runsmod
+    ix = runsmod.demo_index()
+    row = ix["runs"][0]
+    assert row["manifest"]["all_verified"] is True
+    assert row["manifest"]["n_files"] >= 5, row["manifest"]
+    assert row["report"]["tier"] == 1
+    assert row["report"]["n_claims"] > 0
+    assert all(row["stages"].values()), row["stages"]
+
+
+def test_the_demo_downloads_nothing_and_says_so():
+    """The brief allows a fetch "if absent". Nothing the read half needs is
+    absent -- the fixture's report bundle is in the repository -- so there is
+    no download to name and no refusal to offer, and the page says that rather
+    than implying a fetch happened."""
+    from oneground.lab import runs as runsmod
+    demo = runsmod.demo_index()["demo"]
+    assert demo["fetched"] is None
+    assert "nothing was downloaded" in demo["fetched_note"]
+
+
+def test_the_demo_says_whose_corpus_it_is_inside_the_drawing():
+    """In the view, not as fine print, and carried in the drawing so it
+    survives a screenshot -- the rule the lab's projection caption follows."""
+    from oneground.lab import runs as runsmod
+    from oneground.lab.receipt import draw_receipt
+    from oneground.lab.views.run_list import RunListView
+    d = draw_receipt(RunListView(), runsmod.demo_index())
+    label = d.figures["demo"]["label"]
+    assert "not your data" in label
+    assert "arxiv-150k" in label
+    assert d.figures["demo"]["way_out"]
+    assert "requirements.yaml" in d.figures["demo"]["way_out"]
+
+
+def test_the_demo_names_what_it_cannot_show():
+    """The fixture ships no simulator state, so the ground and the trace are
+    not reachable. A gap with its reason, not a link that opens nothing."""
+    from oneground.lab import runs as runsmod
+    demo = runsmod.demo_index()["demo"]
+    assert "ground" in demo["not_available"]
+    assert "no simulator state" in demo["not_available"]
+
+
+def test_the_demo_banner_reaches_the_page():
+    from oneground.lab import runs as runsmod
+    if not os.path.isdir(os.path.join(runsmod.demo_root(), "report")):
+        pytest.skip("the arxiv-150k fixture is not in this checkout")
+    lab = labserver.LabServer(demo=True)
+    lab.start()
+    try:
+        with _browser() as b:
+            _go(b, lab.url, "#/runs")
+            b.wait_for("(() => !!document.querySelector('.demo-banner'))()",
+                       timeout=60)
+            s = _state(b)
+            assert s["demoBanner"] == 1
+            assert s["error"] is None
+            assert "not your data" in b.text(".demo-label")
+    finally:
+        lab.httpd.shutdown()
+        lab.httpd.server_close()
+
+
+def test_the_demo_writes_nothing_into_the_fixture():
+    from oneground.lab import runs as runsmod
+    fixture = runsmod.demo_root()
+    if not os.path.isdir(os.path.join(fixture, "report")):
+        pytest.skip("the arxiv-150k fixture is not in this checkout")
+    before = _snapshot(fixture)
+    lab = labserver.LabServer(demo=True)
+    lab.start()
+    try:
+        name = lab.index["runs"][0]["name"]
+        _get(lab, "/api/check")
+        _get(lab, "/api/runs")
+        _get(lab, "/api/headline", [("run", name)])
+        _get(lab, "/api/evidence", [("run", name)])
+    finally:
+        lab.httpd.shutdown()
+        lab.httpd.server_close()
+    assert _snapshot(fixture) == before, "the demo touched the fixture"

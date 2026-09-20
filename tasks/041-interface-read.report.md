@@ -281,6 +281,36 @@ which is the thing this task exists to have found.
 
 ---
 
+## Correction to the brief — the demo downloads nothing
+
+Step 2 specifies that `--demo` fetches the fixture it needs "if absent, with
+the download **named and sized before it starts** and a refusal if the user
+declines". Built as specified, that machinery would never run: the published
+`arxiv-150k` fixture's report bundle is in the repository, 256 KB of real
+receipts with real digests, and nothing the read half reads is absent. The
+only thing a fetch could pull is the 460 MB of vectors, which no page in this
+slice reads.
+
+**Recorded as a correction to the brief rather than as a deviation from it.**
+A fetch that never fires is a feature that lies about what it does: it
+advertises a consent step nobody is ever asked for, and it would have to be
+maintained, tested and documented as though it were real. The demo says
+`nothing was downloaded: every receipt this page reads is in the repository`,
+which is both shorter and true.
+
+The brief's conditional — "if absent" — is doing the work. Nothing is absent,
+so nothing is fetched, and the page says which of those two facts it is acting
+on.
+
+**What the fixture genuinely does not ship is simulator state**, so the demo
+opens the run list, the run's finding and the report with its drawer, and
+cannot open the ground or the trace. It cannot open the side-by-side either,
+for an unrelated reason: that needs two runs and the demo is one. All three
+limits are stated on the page and in `docs/UI.md` as facts about what a
+fixture publishes, not as missing features.
+
+---
+
 ## What was built
 
 **The contract, generalised** (`oneground/lab/receipt.py`). The rule every

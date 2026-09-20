@@ -196,16 +196,46 @@ def _rows(drawing):
             for i, n in enumerate(m["name"])}
 
 
-def test_the_view_reads_every_path_it_declares():
+def test_the_view_reads_every_path_it_declares_that_this_document_carries():
     """An accept-and-ignore declaration is the defect 026 exists to refuse,
     and a view's `reads` is the drawing's stated provenance: a path declared
-    and never read overstates what the drawing was built from."""
-    v = RunListView()
-    d = draw_receipt(v, _index(LOCAL) if os.path.isdir(LOCAL) else
-                     {"kind": "run_index", "directory": ".", "runs": []})
+    and never read overstates what the drawing was built from.
+
+    Refined once, when `--demo` added `demo.label` and the rest: those are
+    present on a demo index and absent from an ordinary one. Declared AND
+    PRESENT implies read; declared and absent is a view handling two shapes
+    of the same document, which is the case `has` exists for. The first form
+    of this assertion would have forced every optional field into its own
+    view.
+    """
     if not os.path.isdir(LOCAL):
         pytest.skip("no local runs/041-ui")
-    assert set(v.reads) - set(d.reads) == set()
+    v = RunListView()
+    for doc in (_index(LOCAL), R.demo_index()):
+        d = draw_receipt(v, doc)
+        unread = set(v.reads) - set(d.reads)
+        present = [p for p in unread
+                   if _present(doc, p)]
+        assert present == [], (doc.get("demo") and "demo" or "plain", present)
+
+
+def _present(doc, path):
+    """Whether a declared path exists in this document at all."""
+    node = doc
+    for seg in path.split("."):
+        if seg.endswith("[]"):
+            seg = seg[:-2]
+            if not isinstance(node, dict) or seg not in node:
+                return False
+            node = node[seg]
+            if not isinstance(node, list) or not node:
+                return False
+            node = node[0]
+            continue
+        if not isinstance(node, dict) or seg not in node:
+            return False
+        node = node[seg]
+    return True
 
 
 def test_all_three_counts_always_including_zeros():

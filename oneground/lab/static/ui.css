@@ -191,3 +191,17 @@ table.ingredients th, table.ingredients td {
 @media (min-width: 60rem) {
   .observations { grid-template-columns: 1fr 1fr; }
 }
+
+/* The demo says whose corpus this is, in the view. It is placed above the
+ * table and styled to be read, not to be dismissed: a label a screenshot
+ * crops out has not done its job. */
+.demo-banner {
+  border: 2px solid var(--warn); border-radius: .4rem;
+  background: #fffaf0; padding: .85rem 1rem; margin: 0 0 1rem;
+}
+.demo-label { margin: 0 0 .4rem; font-weight: 700; color: var(--warn);
+              font-size: 1.02rem; }
+.demo-note, .demo-gap, .demo-way-out {
+  margin: .3rem 0 0; font-size: .88rem; color: var(--ink-soft);
+}
+.demo-way-out { color: var(--ink); }

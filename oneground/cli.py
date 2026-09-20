@@ -215,8 +215,10 @@ def _cmd_ui(args, rest):
 
     try:
         labserver.check_host(args.host, args.i_know)
-        lab = labserver.LabServer(runs_dir=args.runs_dir, host=args.host,
-                                  port=args.port, i_know=args.i_know)
+        lab = labserver.LabServer(
+            runs_dir=None if args.demo else args.runs_dir,
+            demo=args.demo, host=args.host, port=args.port,
+            i_know=args.i_know)
     except (LabRunError, labserver.LabRefused) as e:
         print(f"oneground ui: refused. {e}", file=sys.stderr)
         return 2
@@ -227,7 +229,8 @@ def _cmd_ui(args, rest):
     if lab.warning:
         print(lab.warning, file=sys.stderr)
     lab.start()
-    print(lab.ui_startup_line(time.perf_counter() - started, args.runs_dir),
+    print(lab.ui_startup_line(time.perf_counter() - started,
+                              lab.runs_dir if args.demo else args.runs_dir),
           flush=True)
     if args.open:
         webbrowser.open(lab.url)
@@ -502,6 +505,10 @@ def build_parser():
                              "local, read-only server (docs/UI.md)")
     ui.add_argument("runs_dir", nargs="?", default="runs",
                     help="a directory of run directories (default: ./runs)")
+    ui.add_argument("--demo", action="store_true",
+                    help="open the published arxiv-150k fixture's own run: "
+                         "real receipts, real digests, real report. It is "
+                         "someone else's corpus and the page says so")
     ui.add_argument("--port", type=int, default=0,
                     help="default: an ephemeral port")
     ui.add_argument("--host", default="127.0.0.1",

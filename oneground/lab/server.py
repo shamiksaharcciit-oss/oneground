@@ -283,7 +283,8 @@ class LabServer:
     """
 
     def __init__(self, run=None, host="127.0.0.1", port=0, mode=None,
-                 i_know=False, draws=MODE_DRAWS, token=None, runs_dir=None):
+                 i_know=False, draws=MODE_DRAWS, token=None, runs_dir=None,
+                 demo=False):
         """One session, over one run (`oneground lab`) or over a directory of
         them (`oneground ui`).
 
@@ -296,6 +297,8 @@ class LabServer:
         there is nothing to draw -- measuring it against an arbitrary run
         would report a number about a run the reader did not ask for.
         """
+        if demo and run is None and runs_dir is None:
+            runs_dir = runsmod.demo_root()
         if (run is None) == (runs_dir is None):
             raise LabRefused("a lab session serves one run or one runs "
                              "directory, not both and not neither")
@@ -321,8 +324,13 @@ class LabServer:
                        if run is not None else None)
         self.digests = (verify_manifests(run.digest_directories())
                         if run is not None else [])
-        self.index = (runsmod.index_runs(self.runs_dir, verify_manifests)
-                      if self.runs_dir else None)
+        self.demo = bool(demo)
+        if demo:
+            self.index = runsmod.demo_index()
+            self.runs_dir = self.index["directory"]
+        else:
+            self.index = (runsmod.index_runs(self.runs_dir, verify_manifests)
+                          if self.runs_dir else None)
         self.static = self._load_static()
 
         bind = host.strip("[]")
@@ -402,6 +410,7 @@ class LabServer:
         }
         if self.index is not None:
             return {**common,
+                    "demo": self.index.get("demo"),
                     "runs_dir": self.runs_dir,
                     "n_runs": len(self.index["runs"]),
                     "unverified": [r["name"] for r in self.index["runs"]

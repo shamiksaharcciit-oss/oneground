@@ -11,6 +11,7 @@ requirements file name a run declared. `guard.check_transport` holds it to
 that.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -565,4 +566,128 @@ def comparison_document(left, right):
         "reason": v["reason"],
         "findings": v["findings"],
         "runs": [run_row(left), run_row(right)],
+    }
+
+
+# ------------------------------------------------- the demo (task 041, step 2)
+# "A real run, one command from install." The published arxiv-150k fixture
+# bundles its own report and the three receipts that report was judged from,
+# and all of it is in the repository: 256 KB of real values with real digests.
+#
+# SO THE DEMO FETCHES NOTHING, AND THAT IS THE FINDING RATHER THAN A SHORTCUT.
+# The brief says it fetches "what it needs if absent, with the download named
+# and sized before it starts". Nothing the read half needs is absent, so there
+# is no download to name, no size to state and no refusal to offer. Building a
+# fetch that never fires -- or fetching the 460 MB of vectors nothing on these
+# pages reads -- would be worse than saying so.
+#
+# What the fixture does NOT ship is simulator state, so the ground and the
+# trace are not reachable from the demo. That is a gap with its reason, on the
+# page, rather than a link that opens nothing.
+
+#: Spelled here rather than imported from `oneground.receipts`, which defines
+#: the same constant. That package reaches `torch`, and the lab's guard refuses
+#: the server any module that measures -- it caught this import the first time
+#: it was written. A four-word string is not worth the breach, and the guard
+#: was right to say so.
+MANIFEST_NAME = "MANIFEST.sha256"
+
+DEMO_FIXTURE = "arxiv-150k"
+
+#: Said in the view, not as fine print, and carried in the drawing so it
+#: survives a screenshot -- the same rule the lab's projection caption follows.
+DEMO_LABEL = ("this is the public arxiv-150k fixture, not your data: every "
+              "figure here was measured on someone else's corpus")
+
+DEMO_WAY_OUT = (
+    "To look at your own vectors: write a requirements.yaml naming a sample "
+    "of 10-20k vectors and 50+ queries, run `oneground characterize` and "
+    "`oneground simulate` against it, then `oneground ui` on the directory "
+    "those runs were written to. docs/UI.md says what each field is for.")
+
+
+def demo_root(repo=None):
+    """Where the published fixture's report bundle lives."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    base = repo or os.path.dirname(os.path.dirname(here))
+    return os.path.join(base, "fixtures", DEMO_FIXTURE)
+
+
+def _fixture_verifier(fixture):
+    """A verifier for the bundle, reading the FIXTURE's MANIFEST.
+
+    The bundle sits in `report/` and the manifest that covers it sits one
+    level up, so `verify_manifests` -- which looks for a MANIFEST beside the
+    files -- would report couldnt_check for a directory whose digests are in
+    fact recorded and checkable. This reads the real entries for `report/*`
+    rather than letting the demo show an unverified run it could verify.
+    """
+    manifest = os.path.join(fixture, MANIFEST_NAME)
+
+    def verify(directories):
+        out = []
+        for d in directories:
+            entry = {"directory": d, "files": [], "manifest": None}
+            if not os.path.isfile(manifest):
+                entry["note"] = (f"{COULDNT_CHECK}: no {MANIFEST_NAME} for "
+                                 "this fixture")
+                out.append(entry)
+                continue
+            entry["manifest"] = os.path.relpath(manifest, d).replace("\\", "/")
+            prefix = os.path.basename(d.rstrip("/\\")) + "/"
+            with open(manifest, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    digest, _, name = line.partition("  ")
+                    name = name.lstrip("*")
+                    if not name.startswith(prefix):
+                        continue
+                    path = os.path.join(d, name[len(prefix):])
+                    actual = None
+                    if os.path.isfile(path):
+                        h = hashlib.sha256()
+                        with open(path, "rb") as fh:
+                            for block in iter(lambda: fh.read(1 << 20), b""):
+                                h.update(block)
+                        actual = h.hexdigest()
+                    entry["files"].append({"name": name[len(prefix):],
+                                           "sha256": digest,
+                                           "verified": actual == digest})
+            entry["all_verified"] = bool(entry["files"]) and all(
+                f["verified"] for f in entry["files"])
+            out.append(entry)
+        return out
+
+    return verify
+
+
+def demo_index(repo=None):
+    """The published fixture's run, indexed as any other run is.
+
+    Nothing is fabricated: the receipts are the published ones, the digests
+    are checked against the fixture's own MANIFEST, and the report is the real
+    one with its real couldn't-checks.
+    """
+    fixture = demo_root(repo)
+    bundle = os.path.join(fixture, "report")
+    if not os.path.isdir(bundle):
+        raise LabRunError(
+            f"the {DEMO_FIXTURE} fixture is not in this checkout "
+            f"({bundle} is missing), so there is no demo to open")
+    row = run_row(bundle, _fixture_verifier(fixture)([bundle])[0])
+    row["name"] = f"{DEMO_FIXTURE} (published fixture)"
+    return {
+        "kind": RUN_INDEX,
+        "directory": bundle,
+        "runs": [row],
+        "demo": {"fixture": DEMO_FIXTURE, "label": DEMO_LABEL,
+                 "way_out": DEMO_WAY_OUT,
+                 "fetched": None,
+                 "fetched_note": ("nothing was downloaded: every receipt this "
+                                  "page reads is in the repository"),
+                 "not_available": ("the ground and the query trace: the "
+                                   "fixture ships no simulator state, so "
+                                   "there is nothing to draw them from")},
     }
