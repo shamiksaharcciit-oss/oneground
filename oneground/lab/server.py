@@ -73,6 +73,9 @@ STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/static/lab.css": ("lab.css", "text/css; charset=utf-8"),
     "/static/lab.js": ("lab.js", "text/javascript; charset=utf-8"),
+    "/static/boot.js": ("boot.js", "text/javascript; charset=utf-8"),
+    "/static/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/static/ui.css": ("ui.css", "text/css; charset=utf-8"),
 }
 ENDPOINTS = {
     "/api/check": "check",
@@ -380,18 +383,36 @@ class LabServer:
         return value
 
     def check(self, params):
-        return {
-            "workdir": self.run.workdir,
-            "also": self.run.also,
-            "files": self.run.present,
-            "digests": self.digests,
-            "render": self.render.as_dict(),
-            "writes": "nothing: the lab has no write path",
-            "token": ("required on every request; see docs/LAB.md for what "
+        """What this session is, in both modes.
+
+        `mode` is "run" for `oneground lab` and "runs" for `oneground ui`.
+        The page reads it to decide what it is looking at; without it the
+        page would have to infer the mode from a missing field, which is the
+        kind of inference that renders an empty table as a result.
+        """
+        common = {
+            "mode": "runs" if self.index is not None else "run",
+            "writes": "nothing: this server has no write path",
+            "runs": ("nothing: no job, no written file, no session is "
+                     "created from this page"),
+            "token": ("required on every request; see docs/UI.md for what "
                       "it protects against and what it does not"),
             "package": os.path.dirname(os.path.dirname(
                 os.path.abspath(__file__))),
         }
+        if self.index is not None:
+            return {**common,
+                    "runs_dir": self.runs_dir,
+                    "n_runs": len(self.index["runs"]),
+                    "unverified": [r["name"] for r in self.index["runs"]
+                                   if r["manifest"]["all_verified"]
+                                   is not True]}
+        return {**common,
+                "workdir": self.run.workdir,
+                "also": self.run.also,
+                "files": self.run.present,
+                "digests": self.digests,
+                "render": self.render.as_dict()}
 
     def describe_run(self, params):
         return {**self.run.describe(), "render": self.render.as_dict()}

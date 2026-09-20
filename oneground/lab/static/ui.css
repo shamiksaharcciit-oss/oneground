@@ -1,0 +1,193 @@
+/* The read half, over many runs (task 041).
+ *
+ * LAYOUT DRIFTS; STRUCTURE DOES NOT.
+ *
+ * The guarantees this slice makes live in the drawings, not here: the three
+ * outcome counts arrive as three entries so none can be dropped, and two runs
+ * arrive joined only when the verdict permits it so none can be lined up. This
+ * file therefore cannot break those rules by omission -- only by deliberately
+ * styling one of the three into invisibility, which is what the rule below
+ * exists to make obvious to whoever next edits this file.
+ *
+ * THE EQUAL-WEIGHT RULE, IN THE ONE PLACE A STYLESHEET COULD BREAK IT
+ * -------------------------------------------------------------------
+ * `.count` is one rule for all three outcomes: one font size, one weight, one
+ * opacity, one padding. The outcome-specific rules that follow may set a hue
+ * and nothing else. A couldn't-check that is smaller, lighter, greyer or
+ * collapsed is the failure this whole page exists to refuse, and it would be
+ * one `font-size` away. Anyone adding a fourth property to `.outcome-*` is
+ * changing that, and should mean to.
+ */
+
+:root {
+  --ink: #16161a;
+  --ink-soft: #4a4a55;
+  --rule: #d8d8e0;
+  --page: #ffffff;
+  --panel: #f6f6f9;
+  --meets: #1d6f42;
+  --fails: #a11d2e;
+  --couldnt: #7a4bbd;
+  --warn: #8a5a00;
+}
+
+body.mode-runs { background: var(--page); color: var(--ink); }
+body.mode-runs #lab-panels { display: none; }
+
+.ui-main { max-width: 68rem; margin: 0 auto; padding: 1rem 1.25rem 4rem; }
+
+.page-head { border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem; }
+.page-head h1 { font-size: 1.5rem; margin: .25rem 0 .5rem; }
+.ui-main .sub { color: var(--ink-soft); font-size: .9rem; margin: .25rem 0 .75rem; }
+.back { display: inline-block; font-size: .85rem; margin-top: .5rem; }
+
+/* ---------------------------------------------- the three, at equal weight */
+.counts { list-style: none; display: flex; flex-wrap: wrap;
+          gap: .5rem; margin: .75rem 0; padding: 0; }
+.count {
+  display: flex; align-items: baseline; gap: .4rem;
+  /* one size, one weight, one opacity, one padding -- for all three */
+  font-size: 1rem;
+  font-weight: 600;
+  opacity: 1;
+  padding: .35rem .6rem;
+  border: 1px solid var(--rule);
+  border-radius: .3rem;
+  background: var(--panel);
+}
+.count-n { font-variant-numeric: tabular-nums; }
+.count-label { font-weight: 500; }
+/* Hue only. Nothing else belongs in these three rules. */
+.outcome-meets { color: var(--meets); }
+.outcome-fails { color: var(--fails); }
+.outcome-couldnt_check { color: var(--couldnt); }
+
+.counts-gap, .not-reported { color: var(--ink-soft); font-style: italic; }
+
+/* ------------------------------------------------------------ the run list */
+table.runs { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+table.runs th, table.runs td {
+  text-align: left; padding: .5rem .5rem; border-bottom: 1px solid var(--rule);
+  vertical-align: top; font-size: .92rem;
+}
+table.runs th { font-size: .78rem; text-transform: uppercase;
+                letter-spacing: .04em; color: var(--ink-soft); }
+.row-unverified { background: #fff8f8; }
+.run-link { font-weight: 600; }
+.corpus, .stages { color: var(--ink-soft); }
+.ok { color: var(--meets); }
+.bad { color: var(--fails); font-weight: 600; }
+.unknown { color: var(--couldnt); border-bottom: 1px dotted var(--couldnt);
+           cursor: help; }
+.unverified-banner {
+  border: 1px solid var(--fails); color: var(--fails);
+  background: #fff6f7; padding: .6rem .75rem; border-radius: .3rem;
+}
+
+.compare-picker { margin-top: 2rem; padding-top: 1rem;
+                  border-top: 1px solid var(--rule); }
+.compare-picker select { margin-right: .5rem; padding: .3rem; }
+.compare-picker button { padding: .35rem .8rem; }
+
+/* ------------------------------------------------------- one run's finding */
+.finding { background: var(--panel); border: 1px solid var(--rule);
+           border-radius: .4rem; padding: 1rem 1.1rem; }
+.headline { font-size: 1.15rem; line-height: 1.5; margin: 0 0 .5rem; }
+.source { font-size: .85rem; color: var(--ink-soft); margin: 0 0 .5rem; }
+.source code { background: #fff; padding: .1rem .3rem; border-radius: .2rem; }
+.from-rule { color: var(--couldnt); font-weight: 600; }
+.next { font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: .88rem; }
+.run-tabs { margin-top: 1rem; }
+
+/* --------------------------------------------------- the evidence drawer */
+ol.claims { list-style: none; padding: 0; }
+.claim { border: 1px solid var(--rule); border-radius: .35rem;
+         padding: .75rem .9rem; margin: .6rem 0; }
+.claim-text { margin: 0 0 .5rem; line-height: 1.5; }
+.drawer { list-style: none; padding: 0; margin: 0; }
+.entry {
+  display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline;
+  font-size: .85rem; padding: .35rem .5rem; border-radius: .25rem;
+  border-left: 3px solid var(--rule); margin: .25rem 0; background: #fbfbfd;
+}
+.entry-source { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.entry-value { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.entry-note { color: var(--ink-soft); }
+/* A citation that resolves is visibly a different thing from one that names
+ * a rule. Neither is styled as a dead link, because neither is one. */
+.entry.navigable { border-left-color: var(--meets); }
+.entry.not-navigable { border-left-color: var(--couldnt); background: #fbf8ff; }
+.entry-kind {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+  border: 1px solid var(--couldnt); color: var(--couldnt);
+  border-radius: .2rem; padding: .05rem .3rem;
+}
+.entry.disagrees { border-left-color: var(--fails); background: #fff6f7; }
+.entry-bad { color: var(--fails); font-weight: 700; }
+.entry-remedy { border-left-color: var(--couldnt); }
+.entry-remedy .entry-kind { border-color: var(--couldnt); }
+
+/* --------------------------------------------------------- two runs */
+.verdict { border: 1px solid var(--rule); border-radius: .4rem;
+           padding: 1rem 1.1rem; background: var(--panel); }
+.verdict-name { font-size: 1.2rem; font-weight: 700; margin: 0 0 .35rem;
+                text-transform: lowercase; }
+.verdict-comparable .verdict-name { color: var(--meets); }
+.verdict-not_comparable .verdict-name { color: var(--fails); }
+.verdict-couldnt_check .verdict-name { color: var(--couldnt); }
+.verdict-means { margin: 0 0 .4rem; }
+.verdict-why { margin: 0; color: var(--ink-soft); font-size: .9rem; }
+
+table.ingredients { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+table.ingredients th, table.ingredients td {
+  text-align: left; padding: .4rem .5rem; font-size: .88rem;
+  border-bottom: 1px solid var(--rule); vertical-align: top;
+}
+.state-same td:nth-child(2) { color: var(--meets); }
+.state-differs td:nth-child(2) { color: var(--fails); font-weight: 600; }
+.state-unknown td:nth-child(2) { color: var(--couldnt); font-weight: 600; }
+.ingredient-note td { color: var(--ink-soft); font-size: .82rem;
+                      border-bottom: 1px solid var(--rule); padding-top: 0; }
+.side { font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: .8rem; word-break: break-all; }
+
+/* Two observations, kept apart. The divider is the point: these are not
+ * columns of one table, and the layout must not suggest they are. */
+.two-observations { font-weight: 600; margin-top: 1.25rem; }
+.observations { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+.observation { border: 1px solid var(--rule); border-radius: .4rem;
+               padding: .9rem 1rem; }
+.observation h3 { margin: 0 0 .3rem; font-size: 1rem; }
+.observation .headline { font-size: .95rem; }
+
+/* ------------------------------------------------------------------ gaps */
+.gaps { list-style: none; padding: 0; margin: 1rem 0 0; }
+.gaps li { border-left: 3px solid var(--couldnt); background: #fbf8ff;
+           padding: .5rem .75rem; margin: .4rem 0; border-radius: .25rem; }
+.gap-name { display: block; font-size: .72rem; text-transform: uppercase;
+            letter-spacing: .05em; color: var(--couldnt); font-weight: 700; }
+.gap-why { display: block; font-size: .88rem; }
+
+.fatal { color: var(--fails); border: 1px solid var(--fails);
+         background: #fff6f7; padding: .6rem .75rem; margin: 1rem auto;
+         max-width: 66rem; border-radius: .3rem; }
+
+/* 500 px: the run table becomes rows, and the two observations stay stacked,
+ * which they already were. Nothing is hidden at any width -- a count that
+ * disappears on a narrow screen is the equal-weight rule broken by media
+ * query. */
+@media (max-width: 40rem) {
+  .ui-main { padding: .75rem .8rem 3rem; }
+  table.runs, table.runs tbody, table.runs tr, table.runs td { display: block; }
+  table.runs tr:first-child { display: none; }
+  table.runs tr { border: 1px solid var(--rule); border-radius: .35rem;
+                  margin: .6rem 0; padding: .4rem; }
+  table.runs td { border-bottom: none; padding: .2rem .3rem; }
+  .counts { gap: .35rem; }
+  .count { font-size: .95rem; }
+}
+
+@media (min-width: 60rem) {
+  .observations { grid-template-columns: 1fr 1fr; }
+}

@@ -11,6 +11,7 @@
      nothing the server did not send. -->
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/lab.css?token=__ONEGROUND_LAB_TOKEN__">
+<link rel="stylesheet" href="/static/ui.css?token=__ONEGROUND_LAB_TOKEN__">
 </head>
 <body>
 
@@ -52,6 +53,8 @@
 </section>
 
 <main>
+<div id="ui-main" class="ui-main"></div>
+<div id="lab-panels">
 
 <!-- ============================================================ overview -->
 <section class="view" id="view-overview" aria-labelledby="ov-title">
@@ -202,8 +205,12 @@
   </div>
 </section>
 
+</div>
 </main>
 
-<script src="/static/lab.js?token=__ONEGROUND_LAB_TOKEN__"></script>
+<!-- boot.js asks the server which mode it is in, then loads lab.js
+     (one run) or ui.js (a directory of them). Asking first rather
+     than letting one fail is the same rule the views follow. -->
+<script src="/static/boot.js?token=__ONEGROUND_LAB_TOKEN__"></script>
 </body>
 </html>
