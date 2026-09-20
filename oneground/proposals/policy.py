@@ -41,7 +41,10 @@ CHANGE_FIELDS = ("param", "from", "to")
 
 NO_SCOPE = ("a policy has no scope: it is a parameter change over a whole "
             "configuration. A change to a subset of queries or vectors "
-            "requires a family that does not exist")
+            "requires a family that does not exist -- and a family is a "
+            "contribution unit, not a dead end: docs/FAMILIES.md says what "
+            "one is, what the protocol requires, and how to check it with "
+            "`oneground models conformance`")
 
 
 class PolicyError(ValueError):

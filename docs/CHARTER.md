@@ -216,6 +216,37 @@ varies rather than about how many engines it can reach.
 - No adapter ships with a tuned configuration supplied by its vendor. Every
   engine is measured as deployed, and the report says how it was configured.
 
+### Phase 3b2 — A family is a contribution unit, concretely (task 042)
+
+The charter has always named an architecture family as one of the contribution
+units. Until task 042 that claim rested on a protocol a contributor could
+discover only by reading `models/base.py`, and on whatever acceptance criteria
+each family's own task happened to carry. Both are now specific:
+
+- **The protocol is six methods**, documented method by method with what each
+  is for and what depends on it, in [FAMILIES.md](FAMILIES.md). `ceiling()` is
+  the one that is not negotiable: it is what makes routing loss meaningful,
+  and therefore what separates *tune it* from *re-architect*.
+- **The gate is a command**, the same shape adapters have:
+  `oneground models conformance --module path/to/model.py`, runnable **before**
+  a family is registered. Eight checks, each stating what it measured and what
+  it means, and naming the protocol requirement on failure.
+- **A worked example**, `examples/random_sharded/`, deliberately a bad
+  architecture: it partitions and routes at random, so its routing loss is
+  large and predictable, and it demonstrates every method without teaching
+  anyone to deploy it. It is not registered and cannot be selected.
+- **The suite found two defects in the shipped families on its first run** —
+  `hash_sharded` accepts more shards than there are vectors without refusing,
+  and `semantic_sharded` lets faiss raise where a refusal belongs. Both are
+  recorded as findings in `tasks/042-family-conformance.report.md`. A suite
+  that had passed everything on the day it was written would not have been
+  worth writing.
+
+**No family has been contributed from outside this team.** Three ship, all
+written here. The protocol, the document and the gate now exist; whether they
+are enough for someone else is not something this project can assert on its
+own behalf, and it stays couldn't-check until somebody does it.
+
 ### Phase 3c — Chunking measurement (v0.2 at the earliest)
 
 A `characterize` feature, not a separate command: chunking is the

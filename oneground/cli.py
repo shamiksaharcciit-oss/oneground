@@ -55,6 +55,11 @@ UNGUARDED = {
         "records the answer. It measures nothing on this machine and writes "
         "no canonical artifact -- what it records is a fact about an engine "
         "at a version, and the version it asked is in the record (task 034)"),
+    "oneground models": (
+        "runs the family conformance suite on a small synthetic corpus and "
+        "prints per-check results. It writes no file and reads no fixture: "
+        "what it checks is the protocol's contract, not any published value "
+        "(task 042, docs/FAMILIES.md)"),
 }
 
 
@@ -329,6 +334,17 @@ def _cmd_adapters(argv):
     return coverage_main(argv)
 
 
+def _cmd_models(argv):
+    """`oneground models conformance` -- the family contribution gate."""
+    from .models.conformance import main as conformance_main
+    if argv and argv[0] == "conformance":
+        return conformance_main(argv[1:])
+    print("usage: oneground models conformance [--family NAME] "
+          "[--module path/to/model.py]\n"
+          "       runs the family conformance suite. See docs/FAMILIES.md.")
+    return 2
+
+
 def build_parser():
     ap = argparse.ArgumentParser(
         prog="oneground",
@@ -470,6 +486,9 @@ def build_parser():
     sub.add_parser("adapters",
                    help="ask each engine which index families it builds",
                    add_help=False)
+    sub.add_parser("models",
+                   help="run the family conformance suite",
+                   add_help=False)
     return ap
 
 
@@ -486,6 +505,8 @@ def main(argv=None):
         return _cmd_pod(argv[1:])
     if argv and argv[0] == "adapters":
         return _cmd_adapters(argv[1:])
+    if argv and argv[0] == "models":
+        return _cmd_models(argv[1:])
 
     args, rest = build_parser().parse_known_args(argv)
     if args.command == "characterize":
