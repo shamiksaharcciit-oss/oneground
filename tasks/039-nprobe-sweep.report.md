@@ -31,8 +31,15 @@ Both published fixtures swept over `index: [ivf, ivf_pq]` ×
 with `nlist`, `m` and `nbits` at 034's values. 42 configurations per corpus,
 84 in total. No pod; both ran in the background on the laptop.
 
+Afterwards, on the developer's three rulings: the rise-then-fall was made the
+leading finding rather than a consequence of the predictions; both scales were
+put beside each other wherever the gap is quoted, with the statement each one
+supports named; the closed-form decomposition check was given its own section;
+and one paragraph of `docs/MODELS.md` gained where 034's operating point sits
+on the curve.
+
 Nothing else was changed. No gate, threshold, seed or fixture value was
-touched.
+touched, and no code.
 
 ## Measurements
 
@@ -123,6 +130,104 @@ The 034 index losses the brief's "Why" table quotes are reproduced exactly
 at the matching `nprobe`: 0.1431, 0.0603, 0.1882 on arxiv and 0.2414,
 0.1552, 0.2138 on stackexchange.
 
+## The finding: the gap rises before it falls, and the two scales disagree about its direction
+
+This leads because it outranks the predictions. Neither the hypothesis nor
+any of the three anticipated failure shapes describes what the curves did.
+
+**The IVF gap rises before it falls.** It is not monotonically narrowing
+(the hypothesis), not flat, and not widening. It peaks in mid-range:
+
+| family | peak gap | at nprobe | 034's reference nprobe | gap there | share of peak |
+|---|---|---|---|---|---|
+| single_node_hnsw | +0.0982 | 8 | 8 | +0.0982 | **100.0%** |
+| hash_sharded | +0.1041 | 4 | 8 | +0.0949 | 91.2% |
+| semantic_sharded | +0.0894 | 8 | 4 | +0.0892 | **99.8%** |
+
+**034's published operating point sits at or within 9% of the maximum of
+this curve in all three families** — exactly at the peak for single_node,
+99.8% of it for semantic, 91.2% for hash. The 0.098
+single_node gap that 034 published and that prediction 1 was built on is not
+a point on a falling curve — it is the top of the curve.
+
+The consequence is worth more than the prediction was: **a between-corpora
+gap quoted at 034's reference `nprobe` is the largest value that gap takes
+anywhere in this range, not a typical one.** Anyone reading 0.098 as a
+general property of these two corpora under IVF is reading the maximum as an
+average. `docs/MODELS.md` now says so where the table that produces it is
+printed.
+
+### Both scales, or neither
+
+The prediction was written in **differences of recall**. Written instead as a
+**ratio of index losses** — stackexchange's over arxiv's, which is scale-free
+and does not compress as both curves approach the ceiling — the gap **widens
+monotonically across the whole range, in every family**:
+
+| nprobe | difference (s_node) | ratio (s_node) | ratio (hash) | ratio (semantic) |
+|---|---|---|---|---|
+| 1 | +0.0561 | 1.102 | 1.172 | 0.983 |
+| 2 | +0.0776 | 1.196 | 1.367 | 1.038 |
+| 4 | +0.0924 | 1.364 | 1.738 | 1.136 |
+| 8 | **+0.0982** | 1.686 | 2.575 | 1.264 |
+| 16 | +0.0879 | 2.250 | 4.200 | 1.445 |
+| 32 | +0.0700 | 3.574 | 7.562 | 1.897 |
+| 64 | +0.0435 | **5.833** | **12.038** | undefined (both losses 0) |
+
+The same 84 rows support both of these, and they point opposite ways:
+
+- **the difference supports** *"the two corpora converge as `nprobe` rises"* —
+  true past the peak, +0.0982 falling to +0.0435;
+- **the ratio supports** *"the two corpora diverge as `nprobe` rises"* — true
+  throughout, 1.686 rising to 5.833, monotonically, in all three families.
+
+**Neither is reported alone, here or anywhere after this.** Which scale is
+*correct* for this question is a decision and it is not mine; what is settled
+is that presenting one of them silently is not allowed. An unstated choice of
+scale is the same defect as an alignment rate quoted without its ceiling: the
+number is true, the sentence it licenses is not, and nothing in the artifact
+tells a reader which they are holding.
+
+**I made that defect writing the prediction.** I chose differences of recall
+in `tasks/039-nprobe-sweep.md`, stated a threshold in them, and did not record
+that a choice had been made or that another scale existed — so prediction 1
+could only ever have been settled on the scale that happened to flatter it.
+The sweep caught it; nothing in the process would have.
+
+One further sign disagreement, at the bottom of the range: for semantic at
+`nprobe=1`, arxiv has the higher recall (+0.0561) but the **higher** index
+loss (0.4536 against stackexchange's 0.4461). Recall difference and
+index-loss difference do not agree in sign there, because recall carries the
+partition ceiling and index loss does not. It is the only cell in the sweep
+where they disagree, and it is a third reading of "which corpus is worse".
+
+**Also measured, and not predicted either: IVF-PQ saturates early.** It stops
+moving at `nprobe=8` (hash, both corpora), `nprobe=16` (single_node, both) and
+`nprobe=32` (semantic, both), and plateaus far below flat — 0.2462/0.2478 for
+hash against a flat 1.0000. Past its saturation point `nprobe` buys nothing
+at all for IVF-PQ while still costing query time.
+
+### What this does to 034's hypothesis
+
+034's explanation was:
+
+> the coarse quantiser's cell structure is corpus-dependent in a way the
+> product quantiser's additional loss is not, because the PQ error is large
+> enough on both corpora to swamp the difference between them.
+
+**Not settled by this sweep, and not withdrawn.**
+
+- Its PQ half (prediction 2) held cleanly, in all three families.
+- Its IVF half made one falsifiable quantitative claim (prediction 1) and
+  that claim failed.
+- None of the three shapes the brief said would withdraw it occurred.
+
+So it stays a hypothesis, now carrying a known-false consequence and a
+measured shape it does not account for. Per the brief, no replacement
+explanation is offered here. The rise-then-fall and the scale disagreement
+are reported as measured; I have candidate stories for both and this run
+tested neither, so they are not in this report.
+
 ## The three predictions
 
 ### 1. Did not hold
@@ -137,6 +242,13 @@ The starting point reproduces: the gap at `nprobe=8` is +0.0982, which is
 034's 0.098. The gap did fall from there, by 56% of its value, but it did
 not fall below the line the prediction drew, and it was still falling at the
 top of the range rather than having flattened.
+
+**On the other scale it did not fall at all.** The same two configurations
+give an index-loss ratio of 1.686 at `nprobe=8` and 5.833 at `nprobe=64` —
+stackexchange's IVF loses 5.8× what arxiv's does at the top of the range,
+against 1.7× at the bottom. The prediction is settled as *did not hold* on
+the scale it was written in; on the scale it was not written in, it is not
+merely unmet but pointed the wrong way.
 
 ### 2. Held
 
@@ -189,94 +301,49 @@ is a real approximation only for single_node (`nlist=1024`) and hash
 HNSW at the top of the range.** Whether that counts as "approaches" is a
 matter of what the word was meant to bear; it is reported as the number.
 
-The semantic zeros do buy one thing — **a cross-check of the decomposition**.
-At `nprobe=64` semantic's index loss is exactly 0.0000 on both corpora, so
-all remaining recall difference must be the partition. Measured difference
-+0.0636; ceiling difference 0.9328 − 0.8692 = **0.0636**. The two agree
-exactly, which is the decomposition proving itself at the one point where it
-can be checked in closed form.
+The semantic zeros do buy one thing, and it is worth more than the prediction
+they were meant to settle: they make the decomposition checkable in closed
+form. That has its own section below.
 
-## The finding: the gap is non-monotonic, and the two scales disagree about its direction
+## The decomposition proves itself in closed form
 
-Neither the hypothesis nor any of the three anticipated failure shapes
-describes what the curves did.
+The two degenerate semantic rows were a weakness in prediction 3. They are
+also the strongest evidence in this run that `routing_loss` and `index_loss`
+mean what they claim, because they are the only place in the project where
+the decomposition can be checked without measuring anything further.
 
-**The IVF gap rises before it falls.** It is not monotonically narrowing
-(the hypothesis), not flat, and not widening. It peaks in mid-range:
+`semantic_sharded` runs `nlist=64`. At `nprobe=64` every list is probed, so
+the IVF is exhaustive and **its index loss must be exactly zero**. It is:
+0.0000 on both corpora. Everything the family still fails to retrieve at that
+point must therefore be the partition's doing and nothing else — no
+approximation is left in the index to blame.
 
-| family | peak gap | at nprobe | 034's reference nprobe | gap there | share of peak |
-|---|---|---|---|---|---|
-| single_node_hnsw | +0.0982 | 8 | 8 | +0.0982 | **100%** |
-| hash_sharded | +0.1041 | 4 | 8 | +0.0949 | 91% |
-| semantic_sharded | +0.0894 | 8 | 4 | +0.0892 | **100%** |
+That makes the remaining recall difference between the two corpora a
+prediction with only one allowed answer, and the answer is the ceiling
+difference, which was measured independently and from a different quantity:
 
-**034's published operating point sits at or within 9% of the maximum of
-this curve in all three families.** The 0.098 single_node gap that prediction
-1 was built on is not a point on a falling curve — it is the top of the
-curve. That is the part neither of us anticipated, and it has a consequence
-worth more than the prediction: a between-corpora gap quoted at 034's
-reference `nprobe` is the largest value that gap takes anywhere in this
-range, not a typical one.
+```
+  arxiv        recall@10 at nprobe=64   0.9328      ceiling@10   0.9328
+  stackexchange recall@10 at nprobe=64  0.8692      ceiling@10   0.8692
 
-**And the difference and the ratio disagree about the direction.** The
-prediction was written in differences of recall. Written instead as a ratio
-of index losses — stackexchange's loss over arxiv's, which is scale-free and
-does not compress as both curves approach the ceiling — the gap **widens
-monotonically across the whole range, in every family**:
+  recall difference     0.9328 - 0.8692  =  0.0636
+  ceiling difference    0.9328 - 0.8692  =  0.0636      agree to the digit
+```
 
-| nprobe | single_node ratio | hash ratio | semantic ratio |
-|---|---|---|---|
-| 1 | 1.102 | 1.172 | 0.983 |
-| 2 | 1.196 | 1.367 | 1.038 |
-| 4 | 1.364 | 1.738 | 1.136 |
-| 8 | 1.686 | 2.575 | 1.264 |
-| 16 | 2.250 | 4.200 | 1.445 |
-| 32 | 3.574 | 7.562 | 1.897 |
-| 64 | **5.833** | **12.038** | undefined (both losses 0) |
+The ceiling comes from exact search over what each query can reach under the
+partition; the recall comes from an IVF index built, trained and searched
+over 150,000 vectors. The two are computed by different code from different
+inputs, and at the one operating point where theory forces them to coincide,
+they coincide exactly — to four decimal places, on both corpora, with routing
+loss holding at its family constant (0.0672 and 0.1308) across all fourteen
+index choices.
 
-So the same 84 rows support "the corpora converge as `nprobe` rises"
-(differences, past the peak) and "the corpora diverge as `nprobe` rises"
-(ratios, throughout). Both statements are true of the measurements and they
-point opposite ways. **Which one a report makes depends on a choice of scale
-that nobody in 034 or in this brief made explicitly** — including me, when I
-wrote the prediction.
-
-I am not claiming which scale is the right one for this question. That is
-a decision, and it is not mine.
-
-One more sign disagreement, at the bottom of the range: for semantic at
-`nprobe=1`, arxiv has the higher recall (+0.0561) but the **higher** index
-loss (0.4536 against stackexchange's 0.4461). Recall difference and
-index-loss difference do not agree in sign there, because recall carries the
-partition ceiling and index loss does not. It is the only cell in the sweep
-where they disagree.
-
-**Also measured, and not predicted either: IVF-PQ saturates early.** It stops
-moving at `nprobe=8` (hash, both corpora), `nprobe=16` (single_node, both) and
-`nprobe=32` (semantic, both), and plateaus far below flat — 0.2462/0.2478 for
-hash against a flat 1.0000. Past its saturation point `nprobe` buys nothing
-at all for IVF-PQ while still costing query time.
-
-### What this does to 034's hypothesis
-
-034's explanation was:
-
-> the coarse quantiser's cell structure is corpus-dependent in a way the
-> product quantiser's additional loss is not, because the PQ error is large
-> enough on both corpora to swamp the difference between them.
-
-**Not settled by this sweep, and not withdrawn.**
-
-- Its PQ half (prediction 2) held cleanly, in all three families.
-- Its IVF half made one falsifiable quantitative claim (prediction 1) and
-  that claim failed.
-- None of the three shapes the brief said would withdraw it occurred.
-
-So it stays a hypothesis, now carrying a known-false consequence and a
-measured shape it does not account for. Per the brief, no replacement
-explanation is offered here. The rise-then-fall and the difference/ratio
-disagreement are reported as measured; I have candidate stories for both and
-this run tested neither, so they are not in this report.
+This is what the ceiling rule asserts and it has not previously been checkable
+in closed form: **index loss is what the index costs, routing loss is what
+the partition costs, and they do not leak into one another.** Every other row
+in the project tests that claim only in the weak sense of not contradicting
+it. This row tests it in the strong sense — a leak of any size in either
+direction would have shown up as a non-zero residual here, and there is none.
 
 ## Verification
 
@@ -363,15 +430,32 @@ this report comes from the artifacts as written rather than from a
 recomputation of my own. That is deliberate — in 032b a recomputation of
 mine disagreed with the run's own comparison and was the wrong answer.
 
-No source file was changed by this task.
+No source file was changed by this task. One document was, on the
+developer's ruling after the sweep:
+
+- `docs/MODELS.md` — the "One operating point, not a curve" paragraph gains
+  where that point sits on the curve, and both scales beside the table that
+  quotes the gap.
 
 ## Blocked on developer
 
 Nothing for this task.
 
-One decision is raised by it and is not mine: **whether a between-corpora
-gap is reported as a difference of recalls or as a ratio of index losses.**
-The two disagree about direction on this data, `docs/MODELS.md` quotes
-differences, and 034's published gap sits at the maximum of the difference
-curve. Whatever is decided, it should be decided once and written down
-rather than chosen per report.
+The scale question this sweep raised has been **half decided** by the
+developer and the half that remains is deliberately open:
+
+- **Decided:** both scales are reported, always together, never one alone,
+  each with the statement it supports named. Presenting one silently is not
+  allowed. Applied above and in `docs/MODELS.md`.
+- **Not decided, and not to be decided by me:** which scale is *correct* for
+  the question "do these two corpora diverge under IVF". The measurements do
+  not settle it and this report does not argue it.
+
+One consequence of the decided half is not yet discharged: it is a standing
+rule about how any between-corpora gap is presented, and it currently lives
+only in this report and in the one paragraph of `docs/MODELS.md` that the
+ruling named. Nothing enforces it and no document states it as a rule. The
+natural homes are the ceiling-rule section of `docs/MODELS.md` or the claim
+invariant, which already checks that a quoted number is cited and could
+plausibly check that a quoted gap names its scale. Not done — the ruling
+named one paragraph and I have changed one paragraph.

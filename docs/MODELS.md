@@ -191,6 +191,21 @@ numbers say what those settings cost on these corpora. They do not say what
 IVF-PQ costs, and a reader who reads them as a property of the algorithm will
 be wrong about a different `nprobe`.
 
+**And where that point sits on the curve is now measured (task 039).** Swept
+over `nprobe` 1–64 on both corpora, the between-corpora IVF gap **rises before
+it falls, peaking in mid-range**, and the `nprobe` these rows use sits at or
+within 9% of that peak in all three families — exactly at the peak for
+single_node, 99.8% of it for semantic. So the 0.0982 single_node IVF gap in
+this table (0.8569 against
+0.7587) is the **largest** value that gap takes anywhere in the range, not a
+typical one. Read on the other scale it points the other way: the ratio of
+index losses, which does not compress as both curves approach the ceiling,
+**widens monotonically** across the whole range, 1.686 here and 5.833 at
+`nprobe=64`. Both belong to any statement about these two corpora diverging —
+the difference supports "they converge as more cells are probed", the ratio
+supports "they diverge", and neither is reported alone. See
+[`tasks/039-nprobe-sweep.report.md`](../tasks/039-nprobe-sweep.report.md).
+
 **The estimate is not the measurement.** `est_memory_bytes` is 460.8 MB for
 every single-node row, including the IVF-PQ one that measures 7.5 MB — wrong
 by 61×. That is the whole reason `footprint()` stopped being arithmetic.
