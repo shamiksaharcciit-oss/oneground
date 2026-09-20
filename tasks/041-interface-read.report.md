@@ -205,6 +205,17 @@ declared corpus size stays the sentence `"couldnt_check: declared, not
 measured"` rather than being cast to a number; a run whose digests fail is
 listed with the failing file named.
 
+**A declared path that is never read is refused.** A view's `reads` is the
+drawing's stated provenance, so declaring a path and not reading it overstates
+what the drawing was built from — the accept-and-ignore shape 026 exists to
+refuse, arriving one layer up. The assertion found **two** on the very run
+that introduced it: `run_list` declared `report.kind`, which nothing read and
+which `tier` already distinguishes, and `manifest.note`, which carries the
+couldn't-check reason when a run has no MANIFEST at all and was being dropped
+on the floor. The first was removed and the second wired through to the row,
+so a run with no manifest now shows why rather than showing nothing. The
+contract grew a tooth on first use.
+
 **The fixture rebuild.** `report/report.json` `e75387ff` → `bbd8a8b0`,
 `report/report.html` `e462a6b4` → `56dde95e`, MANIFEST updated. 2044 leaves
 before, 2107 after, **0 numeric values changed**.

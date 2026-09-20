@@ -256,7 +256,7 @@ def check_views():
 # pulled in to the same rules, numpy allowed.
 
 LAB_DIR = os.path.dirname(os.path.abspath(__file__))
-TRANSPORT_MODULES = ("server.py", "runs.py")
+TRANSPORT_MODULES = ("server.py", "runs.py", "citations.py")
 MEASURING = (
     "faiss", "sklearn", "scipy", "torch", "umap", "sentence_transformers",
     "pynndescent", "numba", "hnswlib", "annoy",

@@ -56,20 +56,33 @@ NOT_EPSILON = "not_epsilon"
 RECEIPTS = ("characterization.json", "simulate.json", "verify.json",
             "report.json")
 
-#: The one document a view may read that is not a file on disk: transport's
-#: index over many runs, which the run list draws.
-#:
-#: It is named rather than smuggled in, because "drawn from a file whose
-#: digest was checked" is the property the other four have and this one does
-#: not. What it has instead is narrower and stated here: every value in it is
-#: copied from a named receipt of a named run without being recomputed, and
-#: each row carries that run's digest verification beside the values, so a row
-#: built from files that failed their manifest says so on the row itself.
-#: `runs.index_runs` builds it; nothing else may.
+# Documents a view may read that are not files on disk. They are named rather
+# than smuggled in, because "drawn from a file whose digest was checked" is the
+# property the four receipts have and these do not. What they have instead is
+# narrower, and it is the condition of being on this list:
+#
+#   every value in a transport document is copied from a named receipt,
+#   without being recomputed, and carries where it came from
+#
+# A view drawing one of these is therefore still drawing recorded values with
+# stated provenance -- the provenance is simply per-value rather than per-file.
+# Only the named builder may construct each one.
+
+#: Transport's index over many runs (`runs.index_runs`). Each row carries its
+#: own run's digest verification, so a row built from files that failed their
+#: manifest says so on the row itself.
 RUN_INDEX = "run_index"
 
+#: One report's citations, each resolved against the receipt it names
+#: (`runs.resolve_citations`). Carries both the value the claim cites and the
+#: value at the field it names, so the drawer can show them side by side
+#: without computing either.
+CITATIONS = "citations"
+
+TRANSPORT_DOCS = (RUN_INDEX, CITATIONS)
+
 #: What `draw_receipt` will accept as a view's `receipt`.
-DRAWABLE = RECEIPTS + (RUN_INDEX,)
+DRAWABLE = RECEIPTS + TRANSPORT_DOCS
 
 #: Fields by which a member of a list is named, in order. `rows[LABEL]` finds
 #: the row whose `config` is LABEL; `engines[qdrant]` finds the engine.
@@ -224,8 +237,13 @@ class ReceiptFields:
         Each reader's declared leaves are those declared under `name[]`, and
         reading one records `name[].leaf` once however many members there are.
         """
-        prefix = f"{self._prefix}{name}[]."
-        leaves = {r[len(prefix):] for r in self._reads if r.startswith(prefix)}
+        # Match on the LOCAL prefix, because `_reads` is local to this
+        # reader; record with the global one, because provenance is absolute.
+        # Conflating the two broke `each` at the top level, and would have
+        # broken a nested `each` -- claims[].entries[] -- in the same way.
+        local = f"{name}[]."
+        prefix = f"{self._prefix}{local}"
+        leaves = {r[len(local):] for r in self._reads if r.startswith(local)}
         if not leaves:
             raise UndeclaredField(
                 f"{self.receipt}: this view declares no fields under "
