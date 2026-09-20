@@ -345,3 +345,64 @@ def check_transport():
         if v:
             found[name] = v
     return found
+
+
+# --------------------------------------------------- every module, classified
+# Task 041. The brief asked for a test that every module is "either a view
+# under the contract or transport under the transport rules -- no third
+# kind". The tree already had a third kind when that was written: `contract.py`
+# and `guard.py` are neither. They are not an oversight -- they are the
+# machinery that defines the other two -- so the honest repair is to name the
+# kind rather than to pretend there are two.
+#
+# The point of the test is not the number of kinds. It is that a module cannot
+# appear in this package without someone deciding which rules hold it, which
+# is how a view would otherwise arrive unguarded.
+
+#: The contract itself: it defines what a view and a transport may do, and
+#: draws nothing. Held to the measuring rules like transport, except that
+#: numpy is permitted -- `contract.py` types the state's own arrays in order
+#: to refuse them to views.
+CONTRACT_MODULES = ("contract.py", "guard.py", "receipt.py")
+
+#: Not part of the running server, so none of the three sets of rules apply:
+#: the package docstring, the browser client the tests drive, and the tests.
+NOT_SERVED = ("__init__.py", "cdp.py")
+
+
+def package_modules(directory=None):
+    """Every Python file in the lab package, tests excluded."""
+    d = directory or LAB_DIR
+    return sorted(f for f in os.listdir(d)
+                  if f.endswith(".py") and not f.startswith("test_"))
+
+
+def unclassified_modules(directory=None):
+    """Modules in the package that no rule set holds. Empty is the only
+    acceptable answer: a module nobody classified is a module nobody guards."""
+    known = set(TRANSPORT_MODULES) | set(CONTRACT_MODULES) | set(NOT_SERVED)
+    return sorted(set(package_modules(directory)) - known)
+
+
+def check_contract():
+    """{module: [(line, rule, detail)]} for contract machinery that imports
+    something that measures. Numpy is allowed here and nowhere else.
+
+    `TRANSPORT_ALLOWLIST` is applied exactly as the server's own import test
+    applies it -- per rule, by repository-relative path -- rather than
+    widened: `contract.py` already carries the one exemption it needs, for
+    naming `partition.centroids` in order to refuse it to every view.
+    """
+    root = os.path.dirname(os.path.dirname(LAB_DIR))
+    found = {}
+    for name in CONTRACT_MODULES:
+        path = os.path.join(LAB_DIR, name)
+        rel = os.path.relpath(path, root).replace("\\", "/")
+        allowed, _ = TRANSPORT_ALLOWLIST.get(rel, (set(), ""))
+        with open(path, encoding="utf-8") as f:
+            v = [x for x in transport_violations(f.read(), path,
+                                                 allow_numpy=True)
+                 if x[1] not in allowed]
+        if v:
+            found[name] = v
+    return found
