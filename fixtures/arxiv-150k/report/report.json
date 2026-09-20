@@ -502,7 +502,7 @@
           "member": "pgvector",
           "outcome": "fails",
           "reason": "did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator's tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-          "source": "verify.json:load.completed",
+          "source": "verify.json:load.achieved_qps",
           "value": 119.1
         }
       ],
@@ -524,7 +524,7 @@
       "scope": [
         "pgvector"
       ],
-      "source": "verify.json:load.completed",
+      "source": "verify.json:load.achieved_qps",
       "subject": "single_node_hnsw[M=32,efConstruction=200,efSearch=128]",
       "text": "single_node_hnsw[M=32,efConstruction=200,efSearch=128] fails qps on pgvector: did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator's tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max. Measured in environment 1ombs4scr257a5."
     },
@@ -536,7 +536,7 @@
           "member": "qdrant",
           "outcome": "meets",
           "reason": "sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-          "source": "verify.json:load.completed",
+          "source": "verify.json:load.achieved_qps",
           "value": 200.0
         }
       ],
@@ -558,7 +558,7 @@
       "scope": [
         "qdrant"
       ],
-      "source": "verify.json:load.completed",
+      "source": "verify.json:load.achieved_qps",
       "subject": "single_node_hnsw[M=32,efConstruction=200,efSearch=128]",
       "text": "single_node_hnsw[M=32,efConstruction=200,efSearch=128] meets qps on qdrant in environment 1ombs4scr257a5: sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max."
     },
@@ -1274,7 +1274,7 @@
           "member": "qdrant",
           "outcome": "meets",
           "reason": "sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-          "source": "verify.json:load.completed",
+          "source": "verify.json:load.achieved_qps",
           "value": 200.0
         },
         {
@@ -1282,7 +1282,7 @@
           "member": "pgvector",
           "outcome": "fails",
           "reason": "did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator's tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-          "source": "verify.json:load.completed",
+          "source": "verify.json:load.achieved_qps",
           "value": 119.1
         }
       ],
@@ -1306,7 +1306,7 @@
               "member": "qdrant",
               "outcome": "meets",
               "reason": "sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-              "source": "verify.json:load.completed",
+              "source": "verify.json:load.achieved_qps",
               "value": 200.0
             },
             {
@@ -1314,7 +1314,7 @@
               "member": "pgvector",
               "outcome": "fails",
               "reason": "did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator's tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-              "source": "verify.json:load.completed",
+              "source": "verify.json:load.achieved_qps",
               "value": 119.1
             }
           ],
@@ -1346,7 +1346,7 @@
               "member": "qdrant",
               "outcome": "meets",
               "reason": "sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-              "source": "verify.json:load.completed",
+              "source": "verify.json:load.achieved_qps",
               "value": 200.0
             },
             {
@@ -1354,7 +1354,7 @@
               "member": "pgvector",
               "outcome": "fails",
               "reason": "did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator's tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-              "source": "verify.json:load.completed",
+              "source": "verify.json:load.achieved_qps",
               "value": 119.1
             }
           ],
@@ -1387,7 +1387,7 @@
               "member": "qdrant",
               "outcome": "meets",
               "reason": "sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-              "source": "verify.json:load.completed",
+              "source": "verify.json:load.achieved_qps",
               "value": 200.0
             },
             {
@@ -1395,7 +1395,7 @@
               "member": "pgvector",
               "outcome": "fails",
               "reason": "did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator's tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-              "source": "verify.json:load.completed",
+              "source": "verify.json:load.achieved_qps",
               "value": 119.1
             }
           ],
@@ -1596,7 +1596,7 @@
       "asserts_outcome": null,
       "cites": [],
       "constraint": "latency_p95",
-      "detail": "To decide latency_p95: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it.",
+      "detail": "To decide latency_p95: pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable.",
       "environment": null,
       "extra": {},
       "holds_for": [],
@@ -1608,13 +1608,13 @@
       "scope": [],
       "source": "verify_info.json:engine_facts.index_params",
       "subject": null,
-      "text": "To decide latency_p95: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it."
+      "text": "To decide latency_p95: pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable."
     },
     {
       "asserts_outcome": null,
       "cites": [],
       "constraint": "qps",
-      "detail": "To decide qps: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it.",
+      "detail": "To decide qps: pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable.",
       "environment": null,
       "extra": {},
       "holds_for": [],
@@ -1626,7 +1626,7 @@
       "scope": [],
       "source": "verify_info.json:engine_facts.index_params",
       "subject": null,
-      "text": "To decide qps: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it."
+      "text": "To decide qps: pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable."
     },
     {
       "asserts_outcome": null,
@@ -1927,12 +1927,12 @@
     },
     {
       "kind": "fails",
-      "source": "verify.json:load.completed",
+      "source": "verify.json:load.achieved_qps",
       "text": "single_node_hnsw[M=32,efConstruction=200,efSearch=128] fails qps on pgvector: did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator's tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max. Measured in environment 1ombs4scr257a5."
     },
     {
       "kind": "meets_environment",
-      "source": "verify.json:load.completed",
+      "source": "verify.json:load.achieved_qps",
       "text": "single_node_hnsw[M=32,efConstruction=200,efSearch=128] meets qps on qdrant in environment 1ombs4scr257a5: sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max."
     },
     {
@@ -2033,12 +2033,12 @@
     {
       "kind": "to_resolve",
       "source": "verify_info.json:engine_facts.index_params",
-      "text": "To decide latency_p95: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it."
+      "text": "To decide latency_p95: pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable."
     },
     {
       "kind": "to_resolve",
       "source": "verify_info.json:engine_facts.index_params",
-      "text": "To decide qps: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it."
+      "text": "To decide qps: pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable."
     },
     {
       "kind": "qps_max",
@@ -2057,11 +2057,11 @@
     "verify_platform": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
     "verify_target": "runpod"
   },
-  "generated_at": "2026-09-13T23:17:19Z",
+  "generated_at": "2026-09-20T09:49:07Z",
   "inputs": {
     "MANIFEST.sha256": {
       "kind": "receipt",
-      "sha256": "20b76bfb2268504431b95b69c4cb513dae6442a6c6a7652018130e879995f351"
+      "sha256": "6efbb6e968bbef0bdc508997a6de7b38037b260a4dd4a050ffda62a1c666366a"
     },
     "build_info.json": {
       "kind": "declared",
@@ -2085,7 +2085,7 @@
     },
     "simulate_info.json": {
       "kind": "declared",
-      "sha256": "da041af2697685dfe1b9892c77ba0cbc329125635405d01b8188b34b03f40418"
+      "sha256": "490eb7d3bf906626d25c43a0d37c3ae3d5fc2dbb00659845004199c39e0e7053"
     },
     "verify.json": {
       "kind": "receipt (measurements)",
@@ -2097,6 +2097,13 @@
     }
   },
   "not_run": [],
+  "oneground": {
+    "commit": "43c4a3b42d289dc9512c9222ca4272a72c761720",
+    "dirty": true,
+    "note": "",
+    "source": "checkout",
+    "version": "0.1.0"
+  },
   "options": [
     {
       "config": "hash_sharded[M=32,efSearch=96,shards=3]",
@@ -2125,40 +2132,48 @@
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
@@ -2169,7 +2184,7 @@
             "kind": "estimate (declared prices)",
             "outcome": "meets",
             "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)",
-            "source": "report.json:costs[config].monthly_high",
+            "source": "report.json:costs[hash_sharded[M=32,efSearch=96,shards=3]].monthly_high",
             "threshold": 1200.0,
             "value": 175.2
           }
@@ -2232,40 +2247,48 @@
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
@@ -2276,7 +2299,7 @@
             "kind": "estimate (declared prices)",
             "outcome": "meets",
             "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.85 GB at 70% headroom; prices declared, as_of 2026-09-11)",
-            "source": "report.json:costs[config].monthly_high",
+            "source": "report.json:costs[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].monthly_high",
             "threshold": 1200.0,
             "value": 175.2
           }
@@ -2339,40 +2362,48 @@
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
@@ -2383,7 +2414,7 @@
             "kind": "estimate (declared prices)",
             "outcome": "meets",
             "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.33 GB at 70% headroom; prices declared, as_of 2026-09-11)",
-            "source": "report.json:costs[config].monthly_high",
+            "source": "report.json:costs[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].monthly_high",
             "threshold": 1200.0,
             "value": 175.2
           }
@@ -2446,40 +2477,48 @@
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
@@ -2490,7 +2529,7 @@
             "kind": "estimate (declared prices)",
             "outcome": "meets",
             "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.85 GB at 70% headroom; prices declared, as_of 2026-09-11)",
-            "source": "report.json:costs[config].monthly_high",
+            "source": "report.json:costs[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].monthly_high",
             "threshold": 1200.0,
             "value": 175.2
           }
@@ -2553,40 +2592,48 @@
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
@@ -2597,7 +2644,7 @@
             "kind": "estimate (declared prices)",
             "outcome": "meets",
             "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.33 GB at 70% headroom; prices declared, as_of 2026-09-11)",
-            "source": "report.json:costs[config].monthly_high",
+            "source": "report.json:costs[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].monthly_high",
             "threshold": 1200.0,
             "value": 175.2
           }
@@ -2660,40 +2707,48 @@
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
@@ -2704,7 +2759,7 @@
             "kind": "estimate (declared prices)",
             "outcome": "meets",
             "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)",
-            "source": "report.json:costs[config].monthly_high",
+            "source": "report.json:costs[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]].monthly_high",
             "threshold": 1200.0,
             "value": 175.2
           }
@@ -2767,40 +2822,48 @@
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 40.0,
             "value": null
           },
           {
             "constraint": "qps",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "pgvector",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify_info.json:engine_facts.index_params",
             "threshold": 200.0,
             "value": null
@@ -2811,7 +2874,7 @@
             "kind": "estimate (declared prices)",
             "outcome": "meets",
             "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)",
-            "source": "report.json:costs[config].monthly_high",
+            "source": "report.json:costs[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]].monthly_high",
             "threshold": 1200.0,
             "value": 175.2
           }
@@ -2874,10 +2937,12 @@
           },
           {
             "constraint": "latency_p95",
+            "couldnt_check_kind": "coverage_unresolved",
             "engine": "qdrant",
             "kind": "declared",
             "outcome": "couldnt_check",
             "reason": "the verify run could not attribute latency in k=10_under_load: couldnt_check: environment noise -- the baseline RTT p95 (4.62 ms) is 60% of the query p95 (7.72 ms), over the 20% limit, so this measures the path to the engine more than the engine. Recall is unaffected and is reported.",
+            "remedy": "pgvector has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned pgvector: `oneground adapters coverage` with the engine reachable; qdrant has not been asked what index families it builds; the declaration is not resolved against a running engine. resolve the coverage against a pinned qdrant: `oneground adapters coverage` with the engine reachable",
             "source": "verify.json:searches[k=10_under_load].latency_shape_single_client",
             "threshold": 40.0,
             "value": null
@@ -2888,7 +2953,7 @@
             "kind": "receipt",
             "outcome": "meets",
             "reason": "sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment 1ombs4scr257a5). Achieved 200.0 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-            "source": "verify.json:load.completed",
+            "source": "verify.json:load.achieved_qps",
             "threshold": 200.0,
             "value": 200.0
           },
@@ -2908,7 +2973,7 @@
             "kind": "receipt",
             "outcome": "fails",
             "reason": "did not sustain the offered 200 qps at concurrency 32: 35731 of 60000 queries in 300 s, short by 24269 against a tolerance of 300 (one query per second of duration, the generator's tick) (environment 1ombs4scr257a5). Achieved 119.1 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
-            "source": "verify.json:load.completed",
+            "source": "verify.json:load.achieved_qps",
             "threshold": 200.0,
             "value": 119.1
           },
@@ -2918,7 +2983,7 @@
             "kind": "estimate (declared prices)",
             "outcome": "meets",
             "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)",
-            "source": "report.json:costs[config].monthly_high",
+            "source": "report.json:costs[single_node_hnsw[M=32,efConstruction=200,efSearch=128]].monthly_high",
             "threshold": 1200.0,
             "value": 175.2
           }
@@ -2964,6 +3029,7 @@
     "node_types": 5,
     "note": "Compute only. Storage, network egress, load balancers, backups and the people who run it are not in these numbers, and a real bill is larger. Nothing here is a quote.",
     "path": "oneground/cost/prices.example.yaml",
+    "path_note": "rewritten when this fixture was published: report.json records the absolute path of the checkout that produced it, and a published artifact does not name a developer's filesystem",
     "source": "Public list prices, EU regions, typed from vendor pages on the as_of date. On-demand, no committed-use discount, no support plan, no egress."
   },
   "price_table_rejected": null,

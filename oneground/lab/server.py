@@ -46,7 +46,14 @@ import time
 import urllib.parse
 
 from . import contract, guard
+from . import citations as citationsmod
+from . import runs as runsmod
+from .receipt import draw_receipt
 from .runs import LabRunError, LoadedRun                      # noqa: F401
+from .views.compare import ComparisonView
+from .views.evidence import EvidenceDrawerView
+from .views.headline import RunHeadlineView, RunProgressView
+from .views.run_list import RunListView
 from .views import GroundView, QueryIndexView, QueryTraceView
 
 K_TRUE = 10
@@ -66,9 +73,16 @@ STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/static/lab.css": ("lab.css", "text/css; charset=utf-8"),
     "/static/lab.js": ("lab.js", "text/javascript; charset=utf-8"),
+    "/static/boot.js": ("boot.js", "text/javascript; charset=utf-8"),
+    "/static/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/static/ui.css": ("ui.css", "text/css; charset=utf-8"),
 }
 ENDPOINTS = {
     "/api/check": "check",
+    "/api/runs": "run_list",
+    "/api/headline": "headline",
+    "/api/evidence": "evidence",
+    "/api/compare": "compare",
     "/api/run": "describe_run",
     "/api/ground": "ground",
     "/api/trace": "trace",
@@ -268,10 +282,35 @@ class LabServer:
     state of its own beyond them.
     """
 
-    def __init__(self, run, host="127.0.0.1", port=0, mode=None,
-                 i_know=False, draws=MODE_DRAWS, token=None):
+    def __init__(self, run=None, host="127.0.0.1", port=0, mode=None,
+                 i_know=False, draws=MODE_DRAWS, token=None, runs_dir=None,
+                 demo=False):
+        """One session, over one run (`oneground lab`) or over a directory of
+        them (`oneground ui`).
+
+        The same server, the same token, the same guard: task 041 points it at
+        a directory rather than replacing it, because a second server would be
+        a second implementation of everything the first one refuses.
+
+        Over a directory the render mode is not measured at startup. It is a
+        measurement of drawing one run's ground, and until a run is opened
+        there is nothing to draw -- measuring it against an arbitrary run
+        would report a number about a run the reader did not ask for.
+        """
+        if demo and run is None and runs_dir is None:
+            runs_dir = runsmod.demo_root()
+        if (run is None) == (runs_dir is None):
+            raise LabRefused("a lab session serves one run or one runs "
+                             "directory, not both and not neither")
         self.warning = check_host(host, i_know)
-        broken = {**guard.check_views(), **guard.check_transport()}
+        broken = {**guard.check_views(), **guard.check_transport(),
+                  **guard.check_contract()}
+        unclassified = guard.unclassified_modules()
+        if unclassified:
+            raise LabRefused(
+                "these modules are in the lab package and no rule set holds "
+                f"them: {', '.join(unclassified)}. Classify each as a view, "
+                "as transport or as contract machinery before serving.")
         if broken:
             raise LabRefused(
                 "the lab's own modules break the rendering contract: " +
@@ -279,9 +318,19 @@ class LabServer:
                           for m, found in sorted(broken.items())
                           for line, rule, detail in found))
         self.run = run
+        self.runs_dir = os.path.abspath(runs_dir) if runs_dir else None
         self.token = token or secrets.token_urlsafe(32)
-        self.render = measure_render_mode(run, draws, mode)
-        self.digests = verify_manifests(run.digest_directories())
+        self.render = (measure_render_mode(run, draws, mode)
+                       if run is not None else None)
+        self.digests = (verify_manifests(run.digest_directories())
+                        if run is not None else [])
+        self.demo = bool(demo)
+        if demo:
+            self.index = runsmod.demo_index()
+            self.runs_dir = self.index["directory"]
+        else:
+            self.index = (runsmod.index_runs(self.runs_dir, verify_manifests)
+                          if self.runs_dir else None)
         self.static = self._load_static()
 
         bind = host.strip("[]")
@@ -342,18 +391,40 @@ class LabServer:
         return value
 
     def check(self, params):
-        return {
-            "workdir": self.run.workdir,
-            "also": self.run.also,
-            "files": self.run.present,
-            "digests": self.digests,
-            "render": self.render.as_dict(),
-            "writes": "nothing: the lab has no write path",
-            "token": ("required on every request; see docs/LAB.md for what "
+        """What this session is, in both modes.
+
+        `mode` is "run" for `oneground lab` and "runs" for `oneground ui`.
+        The page reads it to decide what it is looking at; without it the
+        page would have to infer the mode from a missing field, which is the
+        kind of inference that renders an empty table as a result.
+        """
+        common = {
+            "mode": "runs" if self.index is not None else "run",
+            "writes": "nothing: this server has no write path",
+            "runs": ("nothing: no job, no written file, no session is "
+                     "created from this page"),
+            "token": ("required on every request; see docs/UI.md for what "
                       "it protects against and what it does not"),
-            "package": os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))),
         }
+        package = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if self.index is not None:
+            # Shortened, like every other path this page receives: the header
+            # renders it, and a header is in every screenshot.
+            return {**common,
+                    "package": runsmod.shown_dir(package),
+                    "demo": self.index.get("demo"),
+                    "runs_dir": runsmod.shown_dir(self.runs_dir),
+                    "n_runs": len(self.index["runs"]),
+                    "unverified": [r["name"] for r in self.index["runs"]
+                                   if r["manifest"]["all_verified"]
+                                   is not True]}
+        return {**common,
+                "package": package,
+                "workdir": self.run.workdir,
+                "also": self.run.also,
+                "files": self.run.present,
+                "digests": self.digests,
+                "render": self.render.as_dict()}
 
     def describe_run(self, params):
         return {**self.run.describe(), "render": self.render.as_dict()}
@@ -417,6 +488,99 @@ class LabServer:
         self.httpd.server_close()
         if self._thread is not None:
             self._thread.join(timeout=5)
+
+    def run_list(self, params):
+        """Every run under the runs directory, drawn.
+
+        Refused, rather than emptied, when this session serves one run: an
+        empty list would say the directory holds nothing, and a lab session
+        has no directory to hold anything.
+        """
+        if self.index is None:
+            raise ValueError("this session serves one run, not a directory; "
+                             "start `oneground ui <runs-dir>` for a list")
+        return draw_receipt(RunListView(), self.index).as_dict()
+
+    def _named_run(self, params):
+        """The workdir one request is about, refused if it is not listed.
+
+        Refused by NAME against the index rather than by joining a path: a
+        parameter that reached the filesystem would be a way to read a
+        directory this session was never pointed at.
+        """
+        if self.index is None:
+            raise ValueError("this session serves one run, not a directory")
+        want = (params.get("run") or [""])[0]
+        if not want:
+            raise ValueError("name a run: ?run=<name>")
+        for row in self.index["runs"]:
+            if row["name"] == want:
+                return row
+        raise ValueError(f"no run named {want!r} under "
+                         f"{self.index['directory_shown']}")
+
+    def _report_of(self, row):
+        path = os.path.join(row["path"], "report.json")
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def headline(self, params):
+        """What one run concluded -- or, with no report, how far it got."""
+        row = self._named_run(params)
+        report = self._report_of(row)
+        if report is None:
+            return draw_receipt(RunProgressView(run=row["name"]),
+                                self.index).as_dict()
+        return draw_receipt(RunHeadlineView(), report).as_dict()
+
+    def evidence(self, params):
+        """Every claim of one run's report, with what each one cites."""
+        row = self._named_run(params)
+        report = self._report_of(row)
+        if report is None:
+            raise ValueError(f"{row['name']} has not reported, so it has no "
+                             "claims to show evidence for")
+        doc = citationsmod.resolve_citations(row["path"], report)
+        return draw_receipt(EvidenceDrawerView(), doc).as_dict()
+
+    def compare(self, params):
+        """Two runs, and whether they may be read against each other.
+
+        Both named by `?run=` twice, resolved against the index by name. The
+        verdict is `oneground.comparability`, which docs/LIBRARY.md 2.2
+        specifies; this endpoint draws it and does not re-derive it.
+        """
+        if self.index is None:
+            raise ValueError("this session serves one run, not a directory")
+        want = params.get("run") or []
+        if len(want) != 2:
+            raise ValueError("name two runs: ?run=<a>&run=<b>")
+        rows = []
+        for name in want:
+            match = [r for r in self.index["runs"] if r["name"] == name]
+            if not match:
+                raise ValueError(f"no run named {name!r} under "
+                                 f"{self.index['directory_shown']}")
+            rows.append(match[0])
+        doc = runsmod.comparison_document(rows[0]["path"], rows[1]["path"])
+        return draw_receipt(ComparisonView(), doc).as_dict()
+
+    def ui_startup_line(self, seconds, shown_dir):
+        """The one line `oneground ui` prints.
+
+        It names how many runs were found and how many of them failed their
+        digests, because a reader who is told "4 runs" and not told that one
+        of them does not verify has been told the less useful half.
+        """
+        rows = self.index["runs"]
+        bad = [r["name"] for r in rows if r["manifest"]["all_verified"]
+               is not True]
+        note = f", {len(bad)} unverified ({', '.join(bad)})" if bad else ""
+        return (f"oneground ui: {len(rows)} run(s) under {shown_dir}{note} -- "
+                f"{self.url}  (read-only; nothing runs from this page) "
+                f"[{seconds:.1f}s]")
 
     def startup_line(self, seconds, shown_workdir):
         """The one line `oneground lab` prints: the URL, the render mode and

@@ -1,5 +1,13 @@
 # The lab — `oneground lab <workdir>`
 
+> **`docs/UI.md` is the wider document now.** `oneground lab <workdir>` is
+> unchanged and this page still describes it in full. `oneground ui
+> [<runs-dir>]` serves the same views over many runs, adds the report with its
+> evidence drawer and the comparability verdict, and is documented there. The
+> security model below is shared by both, and `docs/UI.md` cites this section
+> rather than restating it.
+
+
 The way into the lab for a corpus of your own. After you have run
 
 ```

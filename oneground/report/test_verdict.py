@@ -1007,3 +1007,66 @@ def test_three_engines_with_one_odd_one_out():
     assert "the verdicts differ" in text.lower(), text
     for frag in ("200.00 (meets)", "190.00 (meets)", "50.00 (fails)"):
         assert frag in text, (frag, text)
+
+
+# ---- 041: a citation names the field its value was read from ---------------
+# Both of these were found by building task 041's evidence drawer, which shows
+# the field a figure was read from and the value at that field. A source that
+# names a neighbouring field renders a contradiction on screen: the drawer was
+# simply the first thing to look.
+
+def _walk(data, source):
+    """Walk "verify.json:load.achieved_qps" into one engine's verify block."""
+    _, _, path = source.partition(":")
+    node = data
+    for seg in path.split("."):
+        if not isinstance(node, dict) or seg not in node:
+            return False, None
+        node = node[seg]
+    return True, node
+
+
+def test_a_qps_citation_names_the_field_its_value_came_from():
+    """The throttled branch cited `load.completed` while carrying
+    `load.achieved_qps`'s value -- 119.1 against a field holding 35731 in the
+    real arXiv run. The decision is still made on completed-against-expected
+    and the reason states that arithmetic in full; but `value` and `threshold`
+    are both rates, so the source has to name the field `value` came from.
+
+    Asserted as a property rather than as a string, so the pair cannot drift
+    apart again in either direction.
+    """
+    c = {"qps": {"target": 200.0, "concurrency": 32},
+         "latency": {"p95_ms": 40.0, "at_qps": 200, "concurrency": 32},
+         "recall_at_k": {"k": 10}}
+    for achieved, target in ((112.63, 200.0),    # throttled, short: FAILS
+                             (200.0, 200.0),     # throttled, sustained: MEETS
+                             (450.0, 0.0)):      # unthrottled: a ceiling
+        data = _verify_with_ceiling(achieved=achieved, target=target)
+        v = vd.qps_target(_row(), data, c, "runpod", _info())
+        assert v is not None, (achieved, target)
+        if v.outcome == CC or v.value is None:
+            continue
+        assert v.source.startswith("verify.json:"), v.source
+        found, at_field = _walk(data, v.source)
+        assert found, f"{v.source} does not resolve: nothing at that path"
+        assert at_field == v.value, (
+            f"{v.source} holds {at_field!r} but the verdict cites "
+            f"{v.value!r}")
+
+
+def test_a_budget_citation_names_the_config_it_priced():
+    """`costs` is keyed by the config label, so a literal "[config]" cites a
+    key that is never present in any run."""
+    row = _row()
+    costs = {row["config"]: {"monthly_high": 120.0, "monthly_low": 90.0,
+                             "rendered": "EUR 90-120", "currency": "EUR",
+                             "basis": "declared prices"}}
+    v = vd.monthly_budget_from_cost(
+        row, {"monthly_budget": {"amount": 100, "currency": "EUR"}}, costs)
+    assert v is not None and v.outcome == FAILS, v
+    assert "[config]" not in v.source, v.source
+    assert row["config"] in v.source, v.source
+    # and it resolves: the label between the brackets is a real key
+    label = v.source.partition("costs[")[2].rpartition("].")[0]
+    assert label in costs, f"{v.source} names a key {label!r} costs lacks"

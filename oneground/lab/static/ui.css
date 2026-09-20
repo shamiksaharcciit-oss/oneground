@@ -1,0 +1,323 @@
+/* The read half, over many runs (task 041).
+ *
+ * LAYOUT DRIFTS; STRUCTURE DOES NOT.
+ *
+ * The guarantees this slice makes live in the drawings, not here: the three
+ * outcome counts arrive as three entries so none can be dropped, two runs
+ * arrive joined only when the verdict permits it so none can be lined up, and
+ * no drawing carries an absolute path so no rule here can leak one. This file
+ * therefore cannot break those by omission — only by deliberately styling one
+ * of the three into invisibility, which is what the rule below exists to make
+ * obvious to whoever next edits this file.
+ *
+ * THE EQUAL-WEIGHT RULE, IN THE ONE PLACE A STYLESHEET COULD BREAK IT
+ * -------------------------------------------------------------------
+ * `.count` is one rule for all three outcomes: one font size, one weight, one
+ * opacity, one padding. The outcome-specific rules that follow may set a hue
+ * and nothing else. A couldn't-check that is smaller, lighter, greyer or
+ * collapsed is the failure this whole page exists to refuse, and it would be
+ * one `font-size` away. Anyone adding a fourth property to `.outcome-*` is
+ * changing that, and should mean to.
+ */
+
+:root {
+  --ink: #16161a;
+  --ink-soft: #55555f;
+  --rule: #d8d8e0;
+  --page: #ffffff;
+  --panel: #f6f6f9;
+  --meets: #1d6f42;
+  --fails: #a11d2e;
+  --couldnt: #6b3fb0;
+  --warn: #8a5a00;
+  --field: #ffffff;
+}
+
+body.mode-runs { background: var(--page); color: var(--ink); }
+body.mode-runs #lab-panels { display: none; }
+
+.ui-main { max-width: 68rem; margin: 0 auto; padding: 1rem 1.25rem 4rem; }
+
+.page-head { border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem; }
+.page-head h1 { font-size: 1.5rem; margin: .25rem 0 .5rem; }
+.ui-main .sub { color: var(--ink-soft); font-size: .9rem; margin: .25rem 0 .75rem; }
+.back { display: inline-block; font-size: .85rem; margin-top: .5rem; }
+
+/* Nothing on this page breaks a word in half. Long values that genuinely
+ * cannot fit — a digest, a config label — break on characters, and they say
+ * so by being in a monospace class; everything else wraps between words. */
+.ui-main { overflow-wrap: break-word; word-break: normal; hyphens: none; }
+
+/* ---------------------------------------------- the three, at equal weight */
+.counts-cell { display: block; }
+.counts { list-style: none; display: flex; flex-wrap: wrap;
+          gap: .4rem; margin: 0; padding: 0; }
+.count {
+  display: flex; align-items: baseline; gap: .35rem;
+  /* one size, one weight, one opacity, one padding — for all three */
+  font-size: 1rem;
+  font-weight: 600;
+  opacity: 1;
+  padding: .3rem .55rem;
+  border: 1px solid var(--rule);
+  border-radius: .3rem;
+  background: var(--panel);
+  white-space: nowrap;
+}
+.count-n { font-variant-numeric: tabular-nums; }
+.count-label { font-weight: 500; font-size: .85rem; }
+/* Hue only. Nothing else belongs in these three rules. */
+.outcome-meets { color: var(--meets); }
+.outcome-fails { color: var(--fails); }
+.outcome-couldnt_check { color: var(--couldnt); }
+/* An em-dash where a number would be. Same box, same size: the shape does not
+ * change, only what it holds — and it does not hold a zero. */
+.count-absent { color: var(--ink-soft); background: #fff; border-style: dashed; }
+.counts-why { margin: .35rem 0 0; font-size: .82rem; color: var(--ink-soft);
+              font-style: italic; }
+
+/* A couldn't-check recorded as a value, in the same register as the boxes. */
+.cc-chip { display: inline-flex; flex-direction: column; gap: .1rem; }
+.cc-mark { color: var(--couldnt); font-weight: 600; font-size: .85rem; }
+.cc-why { color: var(--ink-soft); font-size: .8rem; }
+.absent { color: var(--ink-soft); }
+
+/* ------------------------------------------------------------ the run list */
+table.runs { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+table.runs th, table.runs td {
+  text-align: left; padding: .55rem .5rem; border-bottom: 1px solid var(--rule);
+  vertical-align: top; font-size: .92rem;
+}
+/* Headers never break: "DIGESTS" splitting into DIGES/TS was the column
+ * being narrower than its own name, not a wrapping preference. */
+table.runs th {
+  font-size: .75rem; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--ink-soft); white-space: nowrap; font-weight: 700;
+}
+.row-unverified { background: #fff8f8; }
+.run-link { font-weight: 600; }
+.corpus, .stages { color: var(--ink-soft); }
+.stages { font-size: .85rem; }
+.ok { color: var(--meets); font-weight: 600; }
+.bad { color: var(--fails); font-weight: 700; display: block; }
+.bad-which { color: var(--fails); font-size: .8rem; }
+/* Not a link: no underline, no pointer, no help cursor. It opens nothing,
+ * and looking clickable was a promise the page could not keep. */
+.unknown { color: var(--couldnt); }
+.version { font-size: .85rem; }
+.digests { white-space: normal; }
+
+.unverified-banner {
+  border: 1px solid var(--fails); color: var(--fails);
+  background: #fff6f7; padding: .6rem .75rem; border-radius: .3rem;
+}
+
+/* --------------------------------------------------------- form controls */
+.compare-picker { margin-top: 2rem; padding-top: 1rem;
+                  border-top: 1px solid var(--rule); }
+.compare-picker h2 { font-size: 1.05rem; margin: 0 0 .2rem; }
+.compare-picker select,
+.compare-picker button {
+  /* Explicit on every axis: inheriting the page's colours gave dark text on
+   * a dark control on this platform's default widget styling. */
+  font: inherit;
+  font-size: .9rem;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--rule);
+  border-radius: .3rem;
+  padding: .4rem .55rem;
+  margin: .35rem .5rem .35rem 0;
+  max-width: 100%;
+}
+.compare-picker select { min-width: 14rem; }
+.compare-picker button { background: var(--panel); font-weight: 600;
+                         cursor: pointer; }
+.compare-picker button:hover { background: #ececf3; }
+.compare-picker select:focus-visible,
+.compare-picker button:focus-visible { outline: 2px solid var(--couldnt);
+                                       outline-offset: 1px; }
+
+/* ------------------------------------------------------- one run's finding */
+.finding { background: var(--panel); border: 1px solid var(--rule);
+           border-radius: .4rem; padding: 1rem 1.1rem; }
+.headline { font-size: 1.15rem; line-height: 1.5; margin: 0 0 .5rem; }
+.source { font-size: .85rem; color: var(--ink-soft); margin: 0 0 .5rem; }
+.source code { background: #fff; padding: .1rem .3rem; border-radius: .2rem;
+               word-break: break-all; }
+.from-rule { color: var(--couldnt); font-weight: 600; }
+.next { font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: .88rem; }
+.run-tabs { margin-top: 1rem; }
+
+/* --------------------------------------------------- the evidence drawer
+ * Scannable first, evidence on demand. Every claim is one line — its outcome,
+ * its sentence — and its citations live inside a closed disclosure. The first
+ * build rendered all 37 claims' citations inline at one density and the page
+ * became a wall: equal weight stops a refusal being quieter than a verdict,
+ * and does nothing when nothing on the page is quiet. */
+ol.claims { list-style: none; padding: 0; margin: 1rem 0 0; }
+.claim { margin: 0; }
+.claim-box {
+  border: 1px solid var(--rule); border-left-width: 4px;
+  border-radius: .3rem; margin: .35rem 0; background: #fff;
+}
+.claim-box[open] { background: var(--panel); }
+.claim-summary {
+  display: grid; grid-template-columns: 7.5rem 1fr auto;
+  gap: .75rem; align-items: baseline;
+  padding: .55rem .75rem; cursor: pointer; list-style: none;
+}
+.claim-summary::-webkit-details-marker { display: none; }
+.claim-summary:hover { background: #f2f2f7; }
+.claim-box[open] .claim-summary { border-bottom: 1px solid var(--rule); }
+.claim-mark {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
+  font-weight: 700; white-space: nowrap;
+}
+/* Hue only, as with the counts: a couldn't-check is not a smaller word. */
+.claim-box.outcome-meets { border-left-color: var(--meets); }
+.claim-box.outcome-meets .claim-mark { color: var(--meets); }
+.claim-box.outcome-fails { border-left-color: var(--fails); }
+.claim-box.outcome-fails .claim-mark { color: var(--fails); }
+.claim-box.outcome-couldnt_check { border-left-color: var(--couldnt); }
+.claim-box.outcome-couldnt_check .claim-mark { color: var(--couldnt); }
+.claim-box.no-verdict { border-left-color: var(--rule); }
+.claim-box.no-verdict .claim-mark { color: var(--ink-soft); }
+.claim-count { font-size: .76rem; color: var(--ink-soft); white-space: nowrap; }
+.claim-text { margin: 0; line-height: 1.45; font-size: .92rem; }
+.drawer { list-style: none; padding: .5rem .75rem .65rem; margin: 0; }
+.entry {
+  display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline;
+  font-size: .85rem; padding: .35rem .5rem; border-radius: .25rem;
+  border-left: 3px solid var(--rule); margin: .25rem 0; background: #fbfbfd;
+}
+.entry-source { font-family: ui-monospace, Menlo, Consolas, monospace;
+                word-break: break-all; }
+.entry-value { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.entry-note { color: var(--ink-soft); }
+/* A citation that resolves is visibly a different thing from one that names
+ * a rule. Neither is styled as a dead link, because neither is one. */
+.entry.navigable { border-left-color: var(--meets); }
+.entry.not-navigable { border-left-color: var(--couldnt); background: #fbf8ff; }
+.entry-kind {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+  border: 1px solid var(--couldnt); color: var(--couldnt);
+  border-radius: .2rem; padding: .05rem .3rem; white-space: nowrap;
+}
+.entry.disagrees { border-left-color: var(--fails); background: #fff6f7; }
+.entry-bad { color: var(--fails); font-weight: 700; }
+.entry-remedy { border-left-color: var(--couldnt); }
+
+/* --------------------------------------------------------- two runs */
+.verdict { border: 1px solid var(--rule); border-radius: .4rem;
+           padding: 1rem 1.1rem; background: var(--panel); }
+.verdict-name { font-size: 1.2rem; font-weight: 700; margin: 0 0 .35rem; }
+.verdict-comparable .verdict-name { color: var(--meets); }
+.verdict-not_comparable .verdict-name { color: var(--fails); }
+.verdict-couldnt_check .verdict-name { color: var(--couldnt); }
+.verdict-means { margin: 0 0 .4rem; }
+.verdict-why { margin: 0; color: var(--ink-soft); font-size: .9rem; }
+
+table.ingredients { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+table.ingredients th, table.ingredients td {
+  text-align: left; padding: .4rem .5rem; font-size: .88rem;
+  border-bottom: 1px solid var(--rule); vertical-align: top;
+}
+table.ingredients th { white-space: nowrap; font-size: .75rem;
+                       text-transform: uppercase; color: var(--ink-soft); }
+.state-same td:nth-child(2) { color: var(--meets); }
+.state-differs td:nth-child(2) { color: var(--fails); font-weight: 600; }
+.state-unknown td:nth-child(2) { color: var(--couldnt); font-weight: 600; }
+.ingredient-note td { color: var(--ink-soft); font-size: .82rem;
+                      border-bottom: 1px solid var(--rule); padding-top: 0; }
+.side { font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: .78rem; word-break: break-all; }
+
+/* Two observations, kept apart. The divider is the point: these are not
+ * columns of one table, and the layout must not suggest they are. */
+.two-observations { font-weight: 600; margin-top: 1.25rem; }
+.observations { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+.observation { border: 1px solid var(--rule); border-radius: .4rem;
+               padding: .9rem 1rem; }
+.observation h3 { margin: 0 0 .3rem; font-size: 1rem; word-break: break-all; }
+.observation .headline { font-size: .95rem; }
+
+/* ------------------------------------------------------------------ gaps */
+.gaps { list-style: none; padding: 0; margin: 1rem 0 0; }
+.gaps li { border-left: 3px solid var(--couldnt); background: #fbf8ff;
+           padding: .5rem .75rem; margin: .4rem 0; border-radius: .25rem; }
+.gap-name { display: block; font-size: .72rem; text-transform: uppercase;
+            letter-spacing: .05em; color: var(--couldnt); font-weight: 700; }
+.gap-why { display: block; font-size: .88rem; }
+
+.fatal { color: var(--fails); border: 1px solid var(--fails);
+         background: #fff6f7; padding: .6rem .75rem; margin: 1rem auto;
+         max-width: 66rem; border-radius: .3rem; }
+
+/* The demo says whose corpus this is, in the view, above the table, so a
+ * screenshot carries it. */
+.demo-banner { border: 2px solid var(--warn); border-radius: .4rem;
+               background: #fffaf0; padding: .85rem 1rem; margin: 0 0 1rem; }
+.demo-label { margin: 0 0 .4rem; font-weight: 700; color: var(--warn);
+              font-size: 1.02rem; }
+.demo-note, .demo-gap, .demo-way-out {
+  margin: .3rem 0 0; font-size: .88rem; color: var(--ink-soft); }
+.demo-way-out { color: var(--ink); }
+
+/* ---------------------------------------------------------- narrow screens
+ * Below 40rem the table becomes cards. A card has no header row above it, so
+ * each value carries its own label from `data-label` — "2000" and
+ * "characterize · verify" mean nothing bare. Nothing is hidden at any width:
+ * a count that disappears under a media query is the equal-weight rule broken
+ * by layout. */
+@media (max-width: 40rem) {
+  .ui-main { padding: .75rem .8rem 3rem; }
+
+  table.runs, table.runs tbody, table.runs tr, table.runs td { display: block; }
+  table.runs tr:first-child { display: none; }        /* the header row */
+  table.runs tr {
+    border: 1px solid var(--rule); border-radius: .4rem;
+    margin: .7rem 0; padding: .6rem .7rem; background: #fff;
+  }
+  table.runs td {
+    border-bottom: none; padding: .3rem 0;
+    display: grid; grid-template-columns: 6.5rem 1fr; gap: .5rem;
+    align-items: baseline;
+  }
+  table.runs td::before {
+    content: attr(data-label);
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--ink-soft); font-weight: 700;
+  }
+  table.runs td[data-label="run"] {
+    display: block; border-bottom: 1px solid var(--rule);
+    padding-bottom: .45rem; margin-bottom: .2rem;
+  }
+  table.runs td[data-label="run"]::before { content: none; }
+  .run-link { font-size: 1rem; }
+
+  .counts { gap: .3rem; }
+  .count { font-size: .92rem; padding: .25rem .45rem; }
+  .count-label { font-size: .78rem; }
+
+  .compare-picker select, .compare-picker button {
+    display: block; width: 100%; min-width: 0; margin: .4rem 0;
+  }
+
+  /* A claim becomes two lines: the outcome above its sentence, with the
+   * citation count beside the outcome. The three-column grid would give the
+   * sentence about nine characters. */
+  .claim-summary {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "mark count" "text text";
+    gap: .3rem .5rem;
+  }
+  .claim-mark { grid-area: mark; }
+  .claim-count { grid-area: count; }
+  .claim-text { grid-area: text; }
+}
+
+@media (min-width: 60rem) {
+  .observations { grid-template-columns: 1fr 1fr; }
+}

@@ -11,11 +11,14 @@ requirements file name a run declared. `guard.check_transport` holds it to
 that.
 """
 
+import hashlib
 import json
 import os
 import re
 
 from . import contract
+from ..comparability import compare_workdirs
+from .receipt import COMPARISON, RUN_INDEX
 
 COULDNT_CHECK = contract.COULDNT_CHECK
 
@@ -367,3 +370,344 @@ class LoadedRun:
             "partition_regions": int(self.head["partition"].get(
                 "n_regions") or 0) or None,
         }
+
+
+# ------------------------------------------------- many runs (task 041)
+# `LoadedRun` is the lab's loader: it needs `state/` and refuses a run without
+# it. The UI lists runs that were never simulated with --emit-state, runs that
+# stopped after characterize, and Tier-2 runs that measured nothing at all, so
+# the index below asks much less of a directory than the lab does.
+#
+# It is transport, and the line transport must not cross is computing
+# something a view draws. So this carries recorded values across -- the
+# summary a report wrote, the outcomes it recorded -- and tallies none of
+# them. The run-list view does the counting, because counting recorded
+# outcomes is drawing a measurement, and a number on the page has to have
+# come from a view.
+
+#: Which stages a run has reached, by the receipt each one writes.
+def shown_dir(path, keep=2):
+    """The last `keep` segments of a path, for a page to display.
+
+    A drawing carries this and not the absolute path. The reason is the
+    identifier-scan rule arriving one layer out: a page prints its directory
+    in a header, and a developer's home directory then appears in every
+    screenshot anyone takes of this tool. Shortening in the renderer would
+    have worked until the next renderer; keeping the absolute path out of the
+    drawing means no renderer can leak it.
+
+    The server keeps the real path for its own use -- opening files, naming a
+    run that is not there -- and never sends it.
+    """
+    parts = [p for p in str(path).replace("\\", "/").split("/") if p]
+    tail = "/".join(parts[-keep:]) if parts else str(path)
+    return tail if len(parts) <= keep else ".../" + tail
+
+
+STAGE_RECEIPTS = (("characterize", "characterization.json"),
+                  ("simulate", "simulate.json"),
+                  ("verify", "verify.json"),
+                  ("report", "report.json"))
+
+#: A directory is a workdir if it holds any receipt at all. Anything else in
+#: the runs directory -- a stray file, a notes folder -- is not listed.
+def is_workdir(path):
+    return os.path.isdir(path) and any(
+        os.path.isfile(os.path.join(path, f)) for _, f in STAGE_RECEIPTS)
+
+
+def _read_json(path):
+    """The parsed receipt, or None if it is absent or unreadable.
+
+    Unreadable is not the same as absent and the caller is told which: a run
+    whose report.json is corrupt must be listed as unverified, not as a run
+    that never reported.
+    """
+    if not os.path.isfile(path):
+        return None, "absent"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f), None
+    except (OSError, ValueError) as e:
+        return None, f"unreadable: {e.__class__.__name__}"
+
+
+def _producing_version(workdir):
+    """Task 033's field, or None with the reason it is not there.
+
+    Written by the stages into their `_info.json`; a run produced before 033
+    simply has no such key, which is a fact about the run rather than a
+    failure to read it.
+    """
+    for info in ("report_info.json", "verify_info.json", "simulate_info.json",
+                 "characterization_info.json"):
+        data, _ = _read_json(os.path.join(workdir, info))
+        if isinstance(data, dict) and data.get("oneground"):
+            return {"version": data["oneground"], "from": info, "reason": None}
+    return {"version": None, "from": None,
+            "reason": f"{COULDNT_CHECK}: no `oneground` block in this run's "
+                      "_info.json receipts; it predates task 033"}
+
+
+def _report_facts(data):
+    """What a report records about its own outcome, copied, not computed.
+
+    Two report kinds reach this. Tier 1 carries `claims` and a `summary` it
+    counted itself. Tier 2 -- `run_declared`, for a corpus that was described
+    rather than sampled -- carries neither: it has no options, and a flat
+    `constraints` list in which every outcome is couldnt_check by
+    construction. Both are returned in the same shape so the view draws one
+    thing, and neither is tallied here.
+    """
+    if not isinstance(data, dict):
+        return None
+    tier2 = data.get("oneground_report") is not None or data.get("kind") == \
+        "declared"
+    if tier2:
+        return {
+            "tier": data.get("tier"),
+            "kind": data.get("kind") or "declared",
+            "schema": None,
+            "headline": data.get("recommendation_reason"),
+            "recommended": data.get("recommended"),
+            # every outcome, uncounted: the view tallies
+            "outcomes": [c.get("outcome") for c in data.get("constraints")
+                         or [] if isinstance(c, dict)],
+            "summary": None,
+            "n_claims": 0,
+        }
+    rec = data.get("recommendation")
+    return {
+        "tier": 1,
+        "kind": "measured",
+        "schema": data.get("schema"),
+        # Tier 1 states its conclusion as a claim rather than as a field, so
+        # the headline is that claim's own text. The UI never writes one.
+        "headline": next((c.get("text") for c in data.get("claims") or []
+                          if c.get("kind") == "recommendation"), None),
+        "recommended": rec,
+        "outcomes": None,
+        "summary": data.get("summary"),
+        "n_claims": len(data.get("claims") or []),
+    }
+
+
+def run_row(workdir, verified=None):
+    """One row of the run list: what this run is, and what it is not.
+
+    `verified` is a `verify_manifests` entry for the same directory, passed in
+    rather than computed here so the digests are checked once per listing.
+    """
+    workdir = os.path.abspath(workdir)
+    stages, problems = {}, []
+    receipts = {}
+    for stage, fname in STAGE_RECEIPTS:
+        data, why = _read_json(os.path.join(workdir, fname))
+        stages[stage] = data is not None
+        receipts[fname] = data
+        if why and why != "absent":
+            problems.append(f"{fname} {why}")
+
+    ch = receipts["characterization.json"] or {}
+    rep = _report_facts(receipts["report.json"])
+    entry = verified or {}
+    files = entry.get("files") or []
+
+    return {
+        "name": os.path.basename(workdir),
+        "path": workdir,
+        "stages": stages,
+        # Recorded as the receipt has them. A Tier-2 run declares its corpus
+        # rather than measuring it, so these are the string
+        # "couldnt_check: declared, not measured" rather than numbers, and the
+        # view renders what it is given rather than casting it to an int.
+        "n_base": ch.get("n_base"),
+        "dimension": ch.get("dimension"),
+        "run_name": ch.get("run"),
+        "report": rep,
+        "version": _producing_version(workdir),
+        "manifest": {
+            "present": entry.get("manifest") is not None,
+            "all_verified": entry.get("all_verified"),
+            "failing": [f["name"] for f in files if not f.get("verified")],
+            "n_files": len(files),
+            "note": entry.get("note"),
+        },
+        "problems": problems,
+    }
+
+
+def index_runs(directory, verifier=None):
+    """Every workdir under `directory`, each with its digests checked.
+
+    `verifier` is `server.verify_manifests`, injected so that the one
+    implementation of digest checking is reused rather than written twice --
+    the same reason the UI is a front-end over the CLI rather than a second
+    one.
+
+    A run whose digests fail is listed, with the failing file named. It is
+    never hidden and never shown as sound: a run the reader cannot trust is
+    exactly the run they most need to see.
+    """
+    directory = os.path.abspath(directory)
+    if not os.path.isdir(directory):
+        raise LabRunError(f"{directory} is not a directory")
+    dirs = sorted(os.path.join(directory, n) for n in os.listdir(directory)
+                  if is_workdir(os.path.join(directory, n)))
+    checked = {}
+    if verifier is not None and dirs:
+        for entry in verifier(dirs):
+            checked[os.path.abspath(entry["directory"])] = entry
+    return {
+        "kind": RUN_INDEX,
+        "directory": directory,
+        "directory_shown": shown_dir(directory),
+        "runs": [run_row(d, checked.get(os.path.abspath(d))) for d in dirs],
+    }
+
+
+def comparison_document(left, right):
+    """Two runs and the verdict between them (task 041, step 7).
+
+    The verdict is `oneground.comparability`, which `docs/LIBRARY.md` §2.2
+    specifies and says is implemented nowhere -- and which says that whichever
+    of the three positions depending on it is built first builds it, and the
+    other two cite it. This is that citation, not a second answer.
+
+    Each run's figures are carried under its own key and are never merged
+    here. Whether they may be shown in shared rows is the verdict's business
+    and the view's, not transport's.
+    """
+    v = compare_workdirs(left, right)
+    return {
+        "kind": COMPARISON,
+        "verdict": v["verdict"],
+        "reason": v["reason"],
+        "findings": v["findings"],
+        "runs": [run_row(left), run_row(right)],
+    }
+
+
+# ------------------------------------------------- the demo (task 041, step 2)
+# "A real run, one command from install." The published arxiv-150k fixture
+# bundles its own report and the three receipts that report was judged from,
+# and all of it is in the repository: 256 KB of real values with real digests.
+#
+# SO THE DEMO FETCHES NOTHING, AND THAT IS THE FINDING RATHER THAN A SHORTCUT.
+# The brief says it fetches "what it needs if absent, with the download named
+# and sized before it starts". Nothing the read half needs is absent, so there
+# is no download to name, no size to state and no refusal to offer. Building a
+# fetch that never fires -- or fetching the 460 MB of vectors nothing on these
+# pages reads -- would be worse than saying so.
+#
+# What the fixture does NOT ship is simulator state, so the ground and the
+# trace are not reachable from the demo. That is a gap with its reason, on the
+# page, rather than a link that opens nothing.
+
+#: Spelled here rather than imported from `oneground.receipts`, which defines
+#: the same constant. That package reaches `torch`, and the lab's guard refuses
+#: the server any module that measures -- it caught this import the first time
+#: it was written. A four-word string is not worth the breach, and the guard
+#: was right to say so.
+MANIFEST_NAME = "MANIFEST.sha256"
+
+DEMO_FIXTURE = "arxiv-150k"
+
+#: Said in the view, not as fine print, and carried in the drawing so it
+#: survives a screenshot -- the same rule the lab's projection caption follows.
+DEMO_LABEL = ("this is the public arxiv-150k fixture, not your data: every "
+              "figure here was measured on someone else's corpus")
+
+DEMO_WAY_OUT = (
+    "To look at your own vectors: write a requirements.yaml naming a sample "
+    "of 10-20k vectors and 50+ queries, run `oneground characterize` and "
+    "`oneground simulate` against it, then `oneground ui` on the directory "
+    "those runs were written to. docs/UI.md says what each field is for.")
+
+
+def demo_root(repo=None):
+    """Where the published fixture's report bundle lives."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    base = repo or os.path.dirname(os.path.dirname(here))
+    return os.path.join(base, "fixtures", DEMO_FIXTURE)
+
+
+def _fixture_verifier(fixture):
+    """A verifier for the bundle, reading the FIXTURE's MANIFEST.
+
+    The bundle sits in `report/` and the manifest that covers it sits one
+    level up, so `verify_manifests` -- which looks for a MANIFEST beside the
+    files -- would report couldnt_check for a directory whose digests are in
+    fact recorded and checkable. This reads the real entries for `report/*`
+    rather than letting the demo show an unverified run it could verify.
+    """
+    manifest = os.path.join(fixture, MANIFEST_NAME)
+
+    def verify(directories):
+        out = []
+        for d in directories:
+            entry = {"directory": d, "files": [], "manifest": None}
+            if not os.path.isfile(manifest):
+                entry["note"] = (f"{COULDNT_CHECK}: no {MANIFEST_NAME} for "
+                                 "this fixture")
+                out.append(entry)
+                continue
+            entry["manifest"] = os.path.relpath(manifest, d).replace("\\", "/")
+            prefix = os.path.basename(d.rstrip("/\\")) + "/"
+            with open(manifest, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    digest, _, name = line.partition("  ")
+                    name = name.lstrip("*")
+                    if not name.startswith(prefix):
+                        continue
+                    path = os.path.join(d, name[len(prefix):])
+                    actual = None
+                    if os.path.isfile(path):
+                        h = hashlib.sha256()
+                        with open(path, "rb") as fh:
+                            for block in iter(lambda: fh.read(1 << 20), b""):
+                                h.update(block)
+                        actual = h.hexdigest()
+                    entry["files"].append({"name": name[len(prefix):],
+                                           "sha256": digest,
+                                           "verified": actual == digest})
+            entry["all_verified"] = bool(entry["files"]) and all(
+                f["verified"] for f in entry["files"])
+            out.append(entry)
+        return out
+
+    return verify
+
+
+def demo_index(repo=None):
+    """The published fixture's run, indexed as any other run is.
+
+    Nothing is fabricated: the receipts are the published ones, the digests
+    are checked against the fixture's own MANIFEST, and the report is the real
+    one with its real couldn't-checks.
+    """
+    fixture = demo_root(repo)
+    bundle = os.path.join(fixture, "report")
+    if not os.path.isdir(bundle):
+        raise LabRunError(
+            f"the {DEMO_FIXTURE} fixture is not in this checkout "
+            f"({bundle} is missing), so there is no demo to open")
+    row = run_row(bundle, _fixture_verifier(fixture)([bundle])[0])
+    row["name"] = f"{DEMO_FIXTURE} (published fixture)"
+    return {
+        "kind": RUN_INDEX,
+        "directory": bundle,
+        "directory_shown": shown_dir(bundle),
+        "runs": [row],
+        "demo": {"fixture": DEMO_FIXTURE, "label": DEMO_LABEL,
+                 "way_out": DEMO_WAY_OUT,
+                 "fetched": None,
+                 "fetched_note": ("nothing was downloaded: every receipt this "
+                                  "page reads is in the repository"),
+                 "not_available": ("the ground and the query trace: the "
+                                   "fixture ships no simulator state, so "
+                                   "there is nothing to draw them from")},
+    }

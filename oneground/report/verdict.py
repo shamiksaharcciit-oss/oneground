@@ -603,7 +603,14 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
             "this is a sustain check -- a throttled run cannot exceed what "
             "it was offered, so it is not a measurement of the engine's "
             "ceiling. See qps_max",
-            source="verify.json:load.completed", value=got,
+            # `load.achieved_qps`, not `load.completed`: the decision is made
+            # on completed-against-expected, which the reason states in full,
+            # but `value` and `threshold` are both rates and the source has to
+            # name the field `value` was read from. Naming `completed` here
+            # put 119.1 beside a field holding 35731, which task 041's
+            # evidence drawer renders side by side -- and that is how it was
+            # found.
+            source="verify.json:load.achieved_qps", value=got,
             threshold=target, engine=engine)
 
     # Unthrottled (target_qps 0): achieved really is a ceiling measurement,
@@ -667,7 +674,10 @@ def monthly_budget_from_cost(sim_row, constraints, costs):
         f"{entry['rendered']}/month; upper bound {entry['currency']} "
         f"{high:,.0f} {'<=' if outcome == MEETS else '>'} {amount} {cur} "
         f"({entry['basis']})",
-        source="report.json:costs[config].monthly_high",
+        # The config label, not the literal word "config": `costs` is keyed by
+        # the label, so an unsubstituted placeholder cites a key that is never
+        # present. `corpora/export_teaser_data.py` already interpolated it.
+        source=f"report.json:costs[{sim_row.get('config')}].monthly_high",
         value=high, threshold=float(amount),
         kind="estimate (declared prices)")
 

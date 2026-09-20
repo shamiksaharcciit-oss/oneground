@@ -38,7 +38,13 @@ PROJECTION_COLUMNS = frozenset({"assignment.projection",
                                 "route.projection",
                                 "partition.projection"})
 
-MARK_KINDS = frozenset({"point", "region", "link", "bar"})
+# "row" joins the four geometric kinds for task 041. The state half of the
+# contract draws geometry -- the ground, a trace -- so its vocabulary is
+# geometric. The receipt half draws the tables a command already wrote, and a
+# table row is a mark like any other: marks of one kind, equal-length data
+# columns, channels bound to columns. Representing a table as `figures`
+# instead would flatten away the rows, which are the thing a reader compares.
+MARK_KINDS = frozenset({"point", "region", "link", "bar", "row"})
 
 # A panel's two states (task 021b). Recall, candidates and the true neighbours
 # a route missed are what each shard's index returned, and moving epsilon
@@ -533,10 +539,14 @@ class View:
         raise NotImplementedError
 
 
-def draw(view, header, columns):
-    """Draw `view` over one state. The only way a drawing is made."""
-    state = StateColumns(header, columns, view.reads)
-    d = view.render(state)
+def check_drawing(view, d):
+    """The checks every drawing passes, whatever it was drawn from.
+
+    Shared by `draw` (a view over simulator state) and `receipt.draw_receipt`
+    (a view over one receipt's declared fields), so the two halves of the
+    interface cannot drift on what a drawing is allowed to be. Everything
+    epsilon- or state-specific stays in `draw`.
+    """
     if not isinstance(d, Drawing):
         raise ContractError(f"{view.name}: render returned "
                             f"{type(d).__name__}, not a Drawing")
@@ -560,6 +570,13 @@ def draw(view, header, columns):
         if not str(reason).startswith(COULDNT_CHECK):
             raise ContractError(f"{view.name}: gap {name!r} is not a "
                                 f"{COULDNT_CHECK} reason")
+    return d
+
+
+def draw(view, header, columns):
+    """Draw `view` over one state. The only way a state drawing is made."""
+    state = StateColumns(header, columns, view.reads)
+    d = check_drawing(view, view.render(state))
     d.params = dict(view.params())
     d.reads = sorted(state.read)
     d.source = {k: header.get(k) for k in ("family", "config_label",
