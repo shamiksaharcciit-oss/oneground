@@ -143,6 +143,18 @@ the whole product exists to refuse. **Today the honest value is
 `couldnt_check`, on the code**, because no artifact records the oneground
 version that measured a row.
 
+> **This verdict is written here and implemented nowhere.** The only
+> `comparable()` in the tree is `oneground/calibrate/history.py`, and it
+> compares `("check", "dataset", "engine", "engine_version", "config")` —
+> engine identity, not the provenance this section defines. It is the right
+> shape and the wrong subject.
+>
+> Two later positions now depend on it: the interface position gates its
+> side-by-side view on this verdict, and the VectorDBBench bridge gates its
+> table rule on it. Neither can assume it exists. Whichever of the three is
+> built first builds this, and the other two cite it rather than
+> re-deriving a second answer to the same question.
+
 What a card **may assert**, from what a run already records:
 
 - the two rows were measured under the **same pinned libraries** — the run
