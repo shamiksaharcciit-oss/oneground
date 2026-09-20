@@ -1,5 +1,16 @@
 # Report: 042-family-conformance
 
+> **Addendum, task 042b.** Finding 2 is **fixed**: `semantic_sharded` now
+> refuses `centroids > len(vectors)` with `indexes.IndexTooSmall`, raised
+> before the `context` shortcut so the same configuration cannot be refused
+> from one caller and accepted from another. That family now passes all eight
+> decidable checks, and the suite's totals below become **23 passes, 1 fail,
+> 3 couldn't-check**. Finding 1 (`hash_sharded`) is left open on purpose, for
+> its own decision. The measurements below are as first taken and are not
+> rewritten. Section 4.1 of `docs/FAMILIES.md` now carries the three
+> suite-was-wrong findings as a warning to whoever extends it, rather than
+> leaving them only here.
+
 ## Repo state expected vs found
 
 Expected, and found:
@@ -198,16 +209,17 @@ The suite runs in about 8 seconds per family on the laptop. `examples` and the
 
 ## Observed, not done
 
-- **Neither finding was fixed.** The brief says report, not repair, and both
-  are one `ParameterError` each in the family's `build`. `hash_sharded` needs
-  `shards > len(vectors)` refused; `semantic_sharded` needs
-  `centroids > len(vectors)` refused before faiss sees it. The message to copy
-  is `indexes.build`'s. Both want a brief; neither is more than five lines.
+- **Neither finding was fixed in this task.** The brief says report, not
+  repair. Finding 2 was then fixed as **042b** on the developer's instruction,
+  because it stops a sweep. Finding 1 remains, and is one `ParameterError` in
+  `hash_sharded.build` refusing `shards > len(vectors)`, with
+  `indexes.build`'s message to copy.
 - **`footprint.fanout` can disagree with `footprint.shards`** in
   `hash_sharded` even below the refusal threshold — it reports the requested
-  count, not the built one. Fixing the refusal does not fix this; the fan-out
-  should be `min(requested, built)` the way the example computes it. A
-  separate defect that the finding exposed.
+  count, not the built one. **Fixing the refusal does not fix this**, which is
+  why finding 1 is two decisions rather than one: the fan-out should be
+  `min(requested, built)` the way the example computes it, and that is true at
+  every shard count, not only impossible ones.
 - **`CONTRIBUTING.md` §2 lists four protocol methods, not six.** `configs`
   and `state` are missing, so a contributor reading the entry point learns a
   protocol two methods short of the real one. One line; the brief named
@@ -246,15 +258,15 @@ Scratch (`tasks/scratch/`, gitignored):
 - `042-verify-the-two-findings.py` — both findings without the suite
 - `042-random-vs-hash.py`, `042-random-vs-hash.log`
 
-Branch `task-042` at `6698d43`, pushed. Not merged: the merge is the
-developer's call while two shipped families carry an open finding.
+Branch `task-042`, pushed, and merged to `main` after 042b landed on it.
 
 ## Blocked on developer
 
 Nothing.
 
-One decision: **whether the two findings are fixed before `task-042` merges,
-or after.** The suite is green in the sense that matters — it reports them —
-and merging with them open is honest, because the report and two tests name
-them. Merging with them fixed means editing two shipped families, which this
-brief did not authorise. I have not merged.
+One decision remains, and it is **two** decisions rather than one:
+`hash_sharded` should refuse `shards > len(vectors)`, **and** `fanout` should
+report the shards that were built rather than the ones that were asked for.
+The second is true at every shard count, so a refusal alone would leave a
+configuration that builds 3 shards and prices queries at 4 if one came back
+empty. Neither is authorised by this brief.
