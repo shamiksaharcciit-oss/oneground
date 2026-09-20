@@ -50,6 +50,12 @@ UNGUARDED = {
         "serves drawings of a run that already exists; writes no file, starts "
         "no measurement, and runs its own guard over the modules it serves "
         "from before it binds a port (docs/LAB.md)"),
+    "oneground ui": (
+        "the same server as `oneground lab`, pointed at a directory of runs "
+        "rather than one: it serves drawings of runs that already exist, "
+        "writes no file, starts no measurement, creates no session, and runs "
+        "its own guard over every module it serves from -- views, transport "
+        "and contract machinery -- before it binds a port (docs/UI.md)"),
     "oneground adapters": (
         "asks each reachable engine which index families it builds and "
         "records the answer. It measures nothing on this machine and writes "
@@ -182,6 +188,63 @@ def _cmd_report(args, rest, env_stamp=None):
         raise SystemExit(f"oneground report: unexpected arguments: "
                          f"{' '.join(rest)}")
     report.run(args.requirements, env_stamp=env_stamp)
+    return 0
+
+
+def _cmd_ui(args, rest):
+    """`oneground ui [<runs-dir>]`: serve every run under a directory.
+
+    The same server, the same token, the same guard as `oneground lab`,
+    pointed at a directory rather than at one run. Nothing runs from it, no
+    file is written by it and no session is created by it: this is the read
+    half.
+
+    The render mode is not measured at startup, because it is a measurement of
+    drawing one run's ground and no run has been opened yet.
+    """
+    import signal
+    import time
+    import webbrowser
+
+    started = time.perf_counter()
+    if rest:
+        raise SystemExit(f"oneground ui: unexpected arguments: "
+                         f"{' '.join(rest)}")
+    from .lab import server as labserver
+    from .lab.runs import LabRunError
+
+    try:
+        labserver.check_host(args.host, args.i_know)
+        lab = labserver.LabServer(runs_dir=args.runs_dir, host=args.host,
+                                  port=args.port, i_know=args.i_know)
+    except (LabRunError, labserver.LabRefused) as e:
+        print(f"oneground ui: refused. {e}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        print(f"oneground ui: could not listen on {args.host}:{args.port}: "
+              f"{e}", file=sys.stderr)
+        return 2
+    if lab.warning:
+        print(lab.warning, file=sys.stderr)
+    lab.start()
+    print(lab.ui_startup_line(time.perf_counter() - started, args.runs_dir),
+          flush=True)
+    if args.open:
+        webbrowser.open(lab.url)
+
+    def interrupted(signum, frame):
+        raise KeyboardInterrupt
+    for name in ("SIGTERM", "SIGBREAK"):
+        if hasattr(signal, name):
+            try:
+                signal.signal(getattr(signal, name), interrupted)
+            except (OSError, ValueError):
+                pass
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\noneground ui: stopped. Nothing was written.", flush=True)
     return 0
 
 
@@ -433,6 +496,25 @@ def build_parser():
     lab.add_argument("--also", action="append", default=[],
                      help="another run's directory, same configuration at "
                           "other epsilons, read-only; repeatable")
+
+    ui = sub.add_parser("ui",
+                        help="look at every run under a directory: the same "
+                             "local, read-only server (docs/UI.md)")
+    ui.add_argument("runs_dir", nargs="?", default="runs",
+                    help="a directory of run directories (default: ./runs)")
+    ui.add_argument("--port", type=int, default=0,
+                    help="default: an ephemeral port")
+    ui.add_argument("--host", default="127.0.0.1",
+                    help="default 127.0.0.1; anything but loopback also "
+                         "needs --i-know")
+    ui.add_argument("--i-know", action="store_true", dest="i_know",
+                    help="serve on a non-loopback --host, after a warning "
+                         "naming what that exposes")
+    ui_browser = ui.add_mutually_exclusive_group()
+    ui_browser.add_argument("--open", action="store_true",
+                            help="open the URL in a browser")
+    ui_browser.add_argument("--no-browser", action="store_true",
+                            help="the default: open nothing")
     p_ = sub.add_parser("propose",
                         help="measure a parameter change you wrote yourself "
                              "against a prediction you wrote first")
@@ -500,6 +582,8 @@ def main(argv=None):
         return _cmd_report(args, rest)
     if args.command == "lab":
         return _cmd_lab(args, rest)
+    if args.command == "ui":
+        return _cmd_ui(args, rest)
     if args.command == "propose":
         return _cmd_propose(args, rest)
     build_parser().print_help()

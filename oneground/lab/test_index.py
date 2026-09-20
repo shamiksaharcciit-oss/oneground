@@ -179,3 +179,101 @@ def test_every_local_run_verifies_against_its_manifest():
     for row in _local()["runs"]:
         assert row["manifest"]["all_verified"] is True, (
             row["name"], row["manifest"]["failing"])
+
+
+# ---------------------------------------------------- the run list view
+from oneground.lab.receipt import draw_receipt                   # noqa: E402
+from oneground.lab.views.run_list import RunListView, _counts    # noqa: E402
+
+
+def _draw(d):
+    return draw_receipt(RunListView(), _index(d))
+
+
+def _rows(drawing):
+    m = drawing.marks[0].data
+    return {n: {k: v[i] for k, v in m.items()}
+            for i, n in enumerate(m["name"])}
+
+
+def test_the_view_reads_every_path_it_declares():
+    """An accept-and-ignore declaration is the defect 026 exists to refuse,
+    and a view's `reads` is the drawing's stated provenance: a path declared
+    and never read overstates what the drawing was built from."""
+    v = RunListView()
+    d = draw_receipt(v, _index(LOCAL) if os.path.isdir(LOCAL) else
+                     {"kind": "run_index", "directory": ".", "runs": []})
+    if not os.path.isdir(LOCAL):
+        pytest.skip("no local runs/041-ui")
+    assert set(v.reads) - set(d.reads) == set()
+
+
+def test_all_three_counts_always_including_zeros():
+    """`1 meets - 6 fails` is a different statement from
+    `1 meets - 6 fails - 0 couldn't check`, and the second is the true one."""
+    rows = _rows(_draw(LOCAL)) if os.path.isdir(LOCAL) else pytest.skip("no local runs")
+    smoke = rows["arxiv-smoke"]
+    assert smoke["couldnt_check"] == 0, "the zero is a count, not an absence"
+    assert smoke["counted"] is True
+    for name in ("arxiv-150k-via-characterize", "arxiv-smoke",
+                 "support-tickets-2026q3"):
+        r = rows[name]
+        assert None not in (r["meets"], r["fails"], r["couldnt_check"]), name
+
+
+def test_tier_two_counts_every_constraint_as_couldnt_check():
+    rows = _rows(_draw(LOCAL)) if os.path.isdir(LOCAL) else pytest.skip("no local runs")
+    t2 = rows["support-tickets-2026q3"]
+    assert (t2["meets"], t2["fails"], t2["couldnt_check"]) == (0, 0, 6)
+    assert t2["tier"] == 2
+    assert "guess wearing a verdict's clothes" in t2["headline"]
+
+
+def test_a_run_with_no_report_is_not_three_zeros():
+    """Three zeros would say every constraint was checked and none held. No
+    report is a different statement, and the column has to keep them apart."""
+    rows = _rows(_draw(LOCAL)) if os.path.isdir(LOCAL) else pytest.skip("no local runs")
+    r = rows["acme-existing"]
+    assert (r["meets"], r["fails"], r["couldnt_check"]) == (None, None, None)
+    assert r["counted"] is False
+    assert r["tier"] is None
+
+
+def test_a_partial_summary_is_refused_rather_than_zero_filled_synthetic():
+    assert _counts({"summary": {"meets": 1, "fails": 2}}) is None
+    assert _counts({"summary": {"meets": 1, "fails": 2, "couldnt_check": 0}}) \
+        == {"meets": 1, "fails": 2, "couldnt_check": 0}
+
+
+def test_a_declared_corpus_size_reaches_the_row_uncast():
+    rows = _rows(_draw(LOCAL)) if os.path.isdir(LOCAL) else pytest.skip("no local runs")
+    assert isinstance(rows["support-tickets-2026q3"]["n_base"], str)
+
+
+def test_an_empty_directory_is_a_gap_not_an_empty_table_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        d = _draw(tmp)
+        assert d.marks[0].data["name"] == []
+        assert "runs" in d.gaps and d.gaps["runs"].startswith("couldnt_check")
+
+
+def test_an_unverified_run_is_named_on_the_drawing_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        wd = _workdir(tmp, "tampered",
+                      {"characterization.json": {"run": "t", "n_base": 1}})
+        with open(os.path.join(wd, "characterization.json"), "w") as f:
+            json.dump({"run": "t", "n_base": 2}, f)
+        d = _draw(tmp)
+        assert d.figures["unverified"] == ["tampered"]
+        row = _rows(d)["tampered"]
+        assert row["verified"] is False
+        assert row["failing"] == ["characterization.json"]
+
+
+def test_a_missing_manifest_reaches_the_row_as_its_reason_synthetic():
+    with tempfile.TemporaryDirectory() as tmp:
+        _workdir(tmp, "bare", {"characterization.json": {"run": "b"}},
+                 manifest=False)
+        row = _rows(_draw(tmp))["bare"]
+        assert row["verified"] is None
+        assert "couldnt_check" in (row["manifest_note"] or "")

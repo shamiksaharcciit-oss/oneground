@@ -46,7 +46,10 @@ import time
 import urllib.parse
 
 from . import contract, guard
+from . import runs as runsmod
+from .receipt import draw_receipt
 from .runs import LabRunError, LoadedRun                      # noqa: F401
+from .views.run_list import RunListView
 from .views import GroundView, QueryIndexView, QueryTraceView
 
 K_TRUE = 10
@@ -69,6 +72,7 @@ STATIC = {
 }
 ENDPOINTS = {
     "/api/check": "check",
+    "/api/runs": "run_list",
     "/api/run": "describe_run",
     "/api/ground": "ground",
     "/api/trace": "trace",
@@ -268,10 +272,32 @@ class LabServer:
     state of its own beyond them.
     """
 
-    def __init__(self, run, host="127.0.0.1", port=0, mode=None,
-                 i_know=False, draws=MODE_DRAWS, token=None):
+    def __init__(self, run=None, host="127.0.0.1", port=0, mode=None,
+                 i_know=False, draws=MODE_DRAWS, token=None, runs_dir=None):
+        """One session, over one run (`oneground lab`) or over a directory of
+        them (`oneground ui`).
+
+        The same server, the same token, the same guard: task 041 points it at
+        a directory rather than replacing it, because a second server would be
+        a second implementation of everything the first one refuses.
+
+        Over a directory the render mode is not measured at startup. It is a
+        measurement of drawing one run's ground, and until a run is opened
+        there is nothing to draw -- measuring it against an arbitrary run
+        would report a number about a run the reader did not ask for.
+        """
+        if (run is None) == (runs_dir is None):
+            raise LabRefused("a lab session serves one run or one runs "
+                             "directory, not both and not neither")
         self.warning = check_host(host, i_know)
-        broken = {**guard.check_views(), **guard.check_transport()}
+        broken = {**guard.check_views(), **guard.check_transport(),
+                  **guard.check_contract()}
+        unclassified = guard.unclassified_modules()
+        if unclassified:
+            raise LabRefused(
+                "these modules are in the lab package and no rule set holds "
+                f"them: {', '.join(unclassified)}. Classify each as a view, "
+                "as transport or as contract machinery before serving.")
         if broken:
             raise LabRefused(
                 "the lab's own modules break the rendering contract: " +
@@ -279,9 +305,14 @@ class LabServer:
                           for m, found in sorted(broken.items())
                           for line, rule, detail in found))
         self.run = run
+        self.runs_dir = os.path.abspath(runs_dir) if runs_dir else None
         self.token = token or secrets.token_urlsafe(32)
-        self.render = measure_render_mode(run, draws, mode)
-        self.digests = verify_manifests(run.digest_directories())
+        self.render = (measure_render_mode(run, draws, mode)
+                       if run is not None else None)
+        self.digests = (verify_manifests(run.digest_directories())
+                        if run is not None else [])
+        self.index = (runsmod.index_runs(self.runs_dir, verify_manifests)
+                      if self.runs_dir else None)
         self.static = self._load_static()
 
         bind = host.strip("[]")
@@ -417,6 +448,33 @@ class LabServer:
         self.httpd.server_close()
         if self._thread is not None:
             self._thread.join(timeout=5)
+
+    def run_list(self, params):
+        """Every run under the runs directory, drawn.
+
+        Refused, rather than emptied, when this session serves one run: an
+        empty list would say the directory holds nothing, and a lab session
+        has no directory to hold anything.
+        """
+        if self.index is None:
+            raise ValueError("this session serves one run, not a directory; "
+                             "start `oneground ui <runs-dir>` for a list")
+        return draw_receipt(RunListView(), self.index).as_dict()
+
+    def ui_startup_line(self, seconds, shown_dir):
+        """The one line `oneground ui` prints.
+
+        It names how many runs were found and how many of them failed their
+        digests, because a reader who is told "4 runs" and not told that one
+        of them does not verify has been told the less useful half.
+        """
+        rows = self.index["runs"]
+        bad = [r["name"] for r in rows if r["manifest"]["all_verified"]
+               is not True]
+        note = f", {len(bad)} unverified ({', '.join(bad)})" if bad else ""
+        return (f"oneground ui: {len(rows)} run(s) under {shown_dir}{note} -- "
+                f"{self.url}  (read-only; nothing runs from this page) "
+                f"[{seconds:.1f}s]")
 
     def startup_line(self, seconds, shown_workdir):
         """The one line `oneground lab` prints: the URL, the render mode and
