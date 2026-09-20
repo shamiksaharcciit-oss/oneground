@@ -1,5 +1,21 @@
 # Models — the simulator's contribution unit
 
+> **Two different things are called a model in this field, and this page is
+> only one of them.** Here a *model* is an **architecture family** — a way of
+> arranging vectors across shards and deciding which shards a query reaches.
+> It is not the **embedding model** that turned text into those vectors. The
+> two are independent: any family runs over any embedding, and the embedding
+> is chosen before any family sees it.
+>
+> For the embedding model, and for what can and cannot be compared when it
+> changes, see **[EMBEDDINGS.md](EMBEDDINGS.md)**. For writing a family, see
+> [FAMILIES.md](FAMILIES.md).
+>
+> The collision is in the field's vocabulary, not only in this repository, and
+> renaming either one here would make this project's documents disagree with
+> everything a reader has already read. So both keep their names and every
+> page that says "model" says which it means in its first sentence.
+
 A **model** simulates a retrieval architecture on a corpus of embeddings
 against exact k-NN ground truth, so an architecture can be scored before any
 real engine is stood up.
