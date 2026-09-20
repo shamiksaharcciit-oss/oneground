@@ -85,19 +85,47 @@
   // `counts` is a list of {outcome, n} the server always sends in full. This
   // renders every entry it is given and has no branch that skips one, so a
   // zero cannot be dropped here even by mistake.
-  function outcomeCounts(counts) {
+  const OUTCOMES = ['meets', 'fails', 'couldnt_check'];
+
+  // ONE SHAPE, FOUR CASES. A column that reads "0 · 6 · 2" on three rows and
+  // a sentence on the fourth is honest and unscannable: an eye cannot compare
+  // two registers. So every case is three boxes in the same three positions,
+  // and an absent count is an em-dash rather than a zero — a zero would say
+  // the constraint was checked and did not hold. The word that distinguishes
+  // the absent cases goes underneath, labelling the dashes rather than
+  // replacing them.
+  function outcomeCounts(counts, absentBecause) {
+    const box = el('div', 'counts-cell');
     const ul = el('ul', 'counts');
-    if (!counts) {
-      ul.appendChild(el('li', 'counts-gap', 'no outcome counts recorded'));
-      return ul;
-    }
-    counts.forEach((c) => {
-      const li = el('li', 'count outcome-' + c.outcome);
-      li.appendChild(el('span', 'count-n', c.n));
-      li.appendChild(el('span', 'count-label', label(c.outcome)));
+    OUTCOMES.forEach((name) => {
+      const found = (counts || []).find((c) => c.outcome === name);
+      const li = el('li', 'count outcome-' + name
+        + (found ? '' : ' count-absent'));
+      li.appendChild(el('span', 'count-n', found ? found.n : '—'));
+      li.appendChild(el('span', 'count-label', label(name)));
       ul.appendChild(li);
     });
-    return ul;
+    box.appendChild(ul);
+    if (!counts) {
+      box.appendChild(el('p', 'counts-why',
+        absentBecause || 'no outcome counts recorded'));
+    }
+    return box;
+  }
+
+  // A value a receipt recorded as a couldn't-check sentence, rendered in the
+  // register the outcome boxes use rather than as raw text. The fact was
+  // right; the voice was wrong.
+  function recordedValue(v) {
+    if (typeof v === 'string' && v.indexOf('couldnt_check') === 0) {
+      const why = v.slice(v.indexOf(':') + 1).trim();
+      const s = el('span', 'cc-chip');
+      s.appendChild(el('span', 'cc-mark', "couldn't check"));
+      if (why) s.appendChild(el('span', 'cc-why', why));
+      return s;
+    }
+    if (v === null || v === undefined) return el('span', 'absent', '—');
+    return el('span', null, String(v));
   }
 
   function label(outcome) {
@@ -105,12 +133,23 @@
     return outcome;
   }
 
+  // The contract requires every gap reason to begin with the machine token
+  // `couldnt_check:` so that `check_drawing` can verify it. That token is a
+  // check, not a sentence, and a panel already headed "couldn't check" should
+  // not then say it again in lower case with an underscore. Stripped here,
+  // where the heading supplies it.
+  function reasonText(s) {
+    if (typeof s !== 'string') return s;
+    return s.replace(/^\s*couldnt_check\s*:\s*/i, '');
+  }
+
   function gapsList(gaps) {
     const ul = el('ul', 'gaps');
     Object.keys(gaps || {}).forEach((name) => {
       const li = el('li');
-      li.appendChild(el('span', 'gap-name', name));
-      li.appendChild(el('span', 'gap-why', gaps[name]));
+      li.appendChild(el('span', 'gap-name', "couldn't check · "
+        + name.replace(/_/g, ' ')));
+      li.appendChild(el('span', 'gap-why', reasonText(gaps[name])));
       ul.appendChild(li);
     });
     return ul;
@@ -125,8 +164,11 @@
     main.textContent = '';
     const h = el('header', 'page-head');
     h.appendChild(el('h1', null, 'Runs'));
-    h.appendChild(el('p', 'sub', d.figures.directory + ' · '
-      + d.figures.n_runs + ' run(s) · each verified against its own MANIFEST'));
+    // The directory is named once, in the header, and not repeated here.
+    // It was printed twice, and at 500px that was four lines of a phone
+    // screen spent on a path before any content.
+    h.appendChild(el('p', 'sub', d.figures.n_runs
+      + ' run(s) · each verified against its own MANIFEST'));
     main.appendChild(h);
 
     // Someone else's corpus, said in the view rather than as fine print, and
@@ -157,44 +199,54 @@
       .forEach((c) => head.appendChild(el('th', null, c)));
     table.appendChild(head);
 
+    // Every cell carries the name of its column. At table width the header
+    // row names them; below 40rem the rows become cards and the header is
+    // gone, so a card has to name its own values — "2000" and
+    // "characterize · verify" mean nothing bare.
+    function cell(labelText, cls) {
+      const td = el('td', cls);
+      td.setAttribute('data-label', labelText);
+      return td;
+    }
+
     rowsOf(d.marks[0]).forEach((r) => {
       const tr = el('tr', r.verified === true ? null : 'row-unverified');
-      const name = el('td');
+      const name = cell('run');
       const a = el('a', 'run-link', r.name);
       a.href = '#/run/' + encodeURIComponent(r.name);
       name.appendChild(a);
       tr.appendChild(name);
 
-      tr.appendChild(el('td', 'corpus',
-        r.n_base === null || r.n_base === undefined ? '—' : r.n_base));
-      tr.appendChild(el('td', 'stages', (r.stages || []).join(' · ') || '—'));
+      const corpus = cell('corpus', 'corpus');
+      corpus.appendChild(recordedValue(r.n_base));
+      tr.appendChild(corpus);
 
-      const out = el('td', 'outcome-cell');
-      if (r.counted) {
-        out.appendChild(outcomeCounts([
-          { outcome: 'meets', n: r.meets },
-          { outcome: 'fails', n: r.fails },
-          { outcome: 'couldnt_check', n: r.couldnt_check }]));
-      } else {
-        // Not three zeros: three zeros would say every constraint was
-        // checked and none held.
-        out.appendChild(el('span', 'not-reported', 'has not reported'));
-      }
+      const stages = cell('stages', 'stages');
+      stages.textContent = (r.stages || []).join(' · ') || '—';
+      tr.appendChild(stages);
+
+      const out = cell('outcome', 'outcome-cell');
+      out.appendChild(r.counted
+        ? outcomeCounts([{ outcome: 'meets', n: r.meets },
+                         { outcome: 'fails', n: r.fails },
+                         { outcome: 'couldnt_check', n: r.couldnt_check }])
+        : outcomeCounts(null, 'this run has not reported'));
       tr.appendChild(out);
 
-      const ver = el('td', 'version');
+      const ver = cell('version', 'version');
       if (r.version) { ver.textContent = r.version; } else {
+        // Not a link and not styled as one: it opens nothing.
         const s = el('span', 'unknown', 'not recorded');
         s.title = r.version_reason || '';
         ver.appendChild(s);
       }
       tr.appendChild(ver);
 
-      const dig = el('td', 'digests');
+      const dig = cell('digests', 'digests');
       if (r.verified === true) dig.appendChild(el('span', 'ok', 'verified'));
       else if (r.verified === false) {
-        dig.appendChild(el('span', 'bad',
-          'FAILS: ' + (r.failing || []).join(', ')));
+        dig.appendChild(el('span', 'bad', 'fails'));
+        dig.appendChild(el('span', 'bad-which', (r.failing || []).join(', ')));
       } else {
         const s = el('span', 'unknown', "couldn't check");
         s.title = r.manifest_note || '';
@@ -265,7 +317,8 @@
           ' — a rule, not a row'));
       }
       finding.appendChild(src);
-      finding.appendChild(outcomeCounts(d.figures.counts));
+      finding.appendChild(outcomeCounts(
+        d.figures.counts, 'this report records no outcome counts'));
     }
     finding.appendChild(gapsList(d.gaps));
     main.appendChild(finding);
@@ -278,20 +331,36 @@
   }
 
   // --- page: the report, with the evidence drawer -------------------------
+  // THE REPORT PAGE LEADS WITH THE FINDING AND OPENS ITS EVIDENCE ON DEMAND.
+  //
+  // The first build rendered every citation of all 37 claims inline at one
+  // density, and the page became a wall. That defeated the rule it was built
+  // to serve: equal weight stops a refusal being *quieter* than a verdict, and
+  // it does nothing when nothing on the page is quiet. A couldn't-check was
+  // invisible among 37 equally loud rows.
+  //
+  // So: the conclusion first, the same sentence the run page leads with; then
+  // one line per claim, its outcome and its sentence and nothing else; and the
+  // evidence behind a claim only when a reader asks for that claim. Evidence
+  // on demand is what makes the click informative, which is the whole
+  // argument for having a drawer rather than a table.
   async function showReport(name) {
     const mine = routeSeq;
     const main = $('ui-main');
     main.textContent = '';
     const h = el('header', 'page-head');
-    const back = el('a', 'back', '← ' + name);
+    const back = el('a', 'back', '\u2190 ' + name);
     back.href = '#/run/' + encodeURIComponent(name);
     h.appendChild(back);
     h.appendChild(el('h1', null, 'The report'));
     main.appendChild(h);
 
-    let d;
+    let d, head;
     try {
-      d = await api('/api/evidence', { run: name });
+      [head, d] = await Promise.all([
+        api('/api/headline', { run: name }),
+        api('/api/evidence', { run: name }),
+      ]);
     } catch (e) {
       if (mine === routeSeq) {
         main.appendChild(el('p', 'not-reported', e.message));
@@ -300,13 +369,26 @@
     }
     if (mine !== routeSeq) return;
 
-    const kinds = d.figures.entry_kinds || {};
-    const sum = el('p', 'sub',
-      d.figures.n_claims + ' claim(s), ' + d.figures.n_entries
-      + ' citation(s) · '
-      + Object.keys(kinds).filter((k) => kinds[k])
-          .map((k) => kinds[k] + ' ' + k).join(' · '));
-    main.appendChild(sum);
+    // 1. What the run concluded, so a reader arriving here does not have to
+    //    reconstruct it from the rows below.
+    if (head.figures && head.figures.headline) {
+      const lead = el('section', 'finding');
+      lead.appendChild(el('p', 'headline', head.figures.headline));
+      lead.appendChild(outcomeCounts(
+        head.figures.counts, 'this report records no outcome counts'));
+      main.appendChild(lead);
+    }
+
+    // 2. What is below, counted. Claims are not constraints -- one constraint
+    //    can be claimed once per option -- so this says "claims" and the
+    //    panel above says constraints, and neither is presented as the other.
+    const by = d.figures.by_outcome || {};
+    main.appendChild(el('p', 'sub',
+      d.figures.n_claims + ' claims carrying ' + d.figures.n_entries
+      + ' citations \u00b7 ' + (by.meets || 0) + ' meets, '
+      + (by.fails || 0) + ' fails, ' + (by.couldnt_check || 0)
+      + " couldn't check, " + (by.no_verdict || 0)
+      + ' stating no verdict'));
 
     if (d.figures.disagreeing && d.figures.disagreeing.length) {
       main.appendChild(el('p', 'unverified-banner',
@@ -314,50 +396,56 @@
         + Array.from(new Set(d.figures.disagreeing)).join(', ')));
     }
 
+    // 3. One line per claim. The evidence is inside a closed disclosure, so
+    //    the page is scannable and a click is worth making.
     const claims = rowsOf(d.marks[0]);
     const entries = rowsOf(d.marks[1]);
     const list = el('ol', 'claims');
     claims.forEach((c) => {
-      const li = el('li', 'claim kind-' + c.kind);
-      const text = el('p', 'claim-text', c.text);
-      li.appendChild(text);
+      const li = el('li', 'claim');
+      const box = document.createElement('details');
+      box.className = 'claim-box'
+        + (c.outcome_shown ? ' outcome-' + c.outcome_shown : ' no-verdict');
+      const sum = document.createElement('summary');
+      sum.className = 'claim-summary';
+      sum.appendChild(el('span', 'claim-mark',
+        c.outcome_shown ? label(c.outcome_shown) : 'note'));
+      sum.appendChild(el('span', 'claim-text', c.text));
+      sum.appendChild(el('span', 'claim-count',
+        c.n_entries + (c.n_entries === 1 ? ' citation' : ' citations')));
+      box.appendChild(sum);
 
-      const mine = entries.filter((e) => e.claim === c.index);
       const drawer = el('ul', 'drawer');
-      mine.forEach((e) => {
-        const d1 = el('li', 'entry entry-' + e.kind
+      entries.filter((e) => e.claim === c.index).forEach((e) => {
+        const row = el('li', 'entry entry-' + e.kind
           + (e.navigable ? ' navigable' : ' not-navigable')
           + (e.agrees === false ? ' disagrees' : ''));
-        const src = el('span', 'entry-source', e.source || '(none)');
-        d1.appendChild(src);
+        row.appendChild(el('span', 'entry-source', e.source || '(none)'));
         if (e.navigable) {
-          const v = el('span', 'entry-value');
-          v.textContent = 'cited ' + JSON.stringify(e.cited_value)
-            + ' · field holds ' + shortJSON(e.field_value);
-          d1.appendChild(v);
+          row.appendChild(el('span', 'entry-value',
+            'cited ' + shortJSON(e.cited_value)
+            + ' \u00b7 field holds ' + shortJSON(e.field_value)));
           if (e.within) {
-            d1.appendChild(el('span', 'entry-note',
+            row.appendChild(el('span', 'entry-note',
               'the source names the block; the figure is its ' + e.within));
           }
           if (e.agrees === false) {
-            d1.appendChild(el('span', 'entry-bad',
-              'these do not agree'));
+            row.appendChild(el('span', 'entry-bad', 'these do not agree'));
           }
         } else {
-          // Never a link that does nothing: the kind is named and the
-          // sentence says what kind of thing it is.
-          d1.appendChild(el('span', 'entry-kind', e.kind));
-          d1.appendChild(el('span', 'entry-note', e.note || ''));
+          row.appendChild(el('span', 'entry-kind', e.kind.replace(/_/g, ' ')));
+          row.appendChild(el('span', 'entry-note', reasonText(e.note) || ''));
         }
-        drawer.appendChild(d1);
+        drawer.appendChild(row);
       });
       if (c.remedy && c.remedy.remedy) {
         const r = el('li', 'entry entry-remedy');
         r.appendChild(el('span', 'entry-kind', 'what would settle it'));
-        r.appendChild(el('span', 'entry-note', c.remedy.remedy));
+        r.appendChild(el('span', 'entry-note', reasonText(c.remedy.remedy)));
         drawer.appendChild(r);
       }
-      li.appendChild(drawer);
+      box.appendChild(drawer);
+      li.appendChild(box);
       list.appendChild(li);
     });
     main.appendChild(list);
@@ -497,6 +585,8 @@
     counts: Array.from(document.querySelectorAll('.counts .count'))
       .map((n) => n.className),
     notNavigable: document.querySelectorAll('.entry.not-navigable').length,
+    claimBoxes: document.querySelectorAll('details.claim-box').length,
+    openBoxes: document.querySelectorAll('details.claim-box[open]').length,
     navigable: document.querySelectorAll('.entry.navigable').length,
     joinedTables: document.querySelectorAll('table.joined').length,
     demoBanner: document.querySelectorAll('.demo-banner').length,

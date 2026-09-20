@@ -59,6 +59,39 @@ is never handed a row to line up. Breaking the rule would mean joining two
 marks on purpose. A divider drawn in CSS would have been one refactor away
 from being lost.
 
+### Instance: a dash is not a zero, and a note is not a verdict
+
+Two renderings of the same move — **the page does not supply what the receipt
+does not record.**
+
+**A dash where nothing was counted.** The outcome column is three boxes in
+three fixed positions for every run. Where a run recorded no counts, each box
+holds an em-dash and the reason goes underneath. A zero is reserved for
+*checked, and did not hold*; printing three zeros for a run that never
+reported would state fifteen measurements nobody made. The dash keeps the
+column scannable — one shape, four cases — without borrowing a number to do
+it.
+
+**A note where no verdict was asserted.** Every claim on the report page
+carries a mark: `meets`, `fails`, `couldn't check`, or `note`. The mark is
+read from the claim's own recorded kind, and `note` is what a `scope`,
+`qps_max` or engine-comparison claim gets, because those state no verdict.
+Colouring them as one would invent a verdict the report never issued.
+
+Both are the product's own three-outcome distinction applied to a cell, and
+both are enforced where the data is built rather than where it is drawn.
+
+### Instance: two tallies that count different things stay apart
+
+A run's panel counts **constraints**: `0 meets · 6 fails · 2 couldn't check`.
+The report page's line counts **claims**: `2 meets, 12 fails, 2 couldn't
+check, 21 stating no verdict`. They differ because one constraint can be
+claimed once per option, and both are labelled with the noun they count.
+
+Adding them, reconciling them, or showing one where the other belongs would
+produce a number nobody measured — which is the failure mode this interface
+exists to refuse, arriving as a helpful summary.
+
 ---
 
 ## Three more rules, beneath that one

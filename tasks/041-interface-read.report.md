@@ -1,7 +1,9 @@
 # Report: 041-interface-read
 
-*In progress. The findings below were produced while building and are
-recorded as they were found, rather than held to the end.*
+*The findings below were produced while building and are recorded as they were
+found, rather than held to the end. Eight findings; five are about the
+artifacts and the report code rather than about the interface, which is what
+happens when a page is asked to show where every number came from.*
 
 ## Repo state expected vs found
 
@@ -240,23 +242,43 @@ runs but two byte-identical copies of the same one:
 | `machine` | **unknown** | yes |
 
 Same libraries, same requirements digest, same sample digest, same platform,
-same interpreter — and the verdict is `couldnt_check`. Two copies of one run
-cannot be declared comparable, because neither records the version that
-produced it and `environment_id` is `local:<os>-<arch>`, a class rather than
-an identity.
+same interpreter — and the verdict is `couldnt_check`.
 
-Stated plainly, because it is the useful form: **until a run records the
-version that produced it, no two runs in this product can be compared — not
-two runs of different corpora, not two runs of the same corpus, not two
-copies of one run.** Every side-by-side view, every card in the library, and
-every row of the VectorDBBench bridge inherits that ceiling.
+### A correction to this finding, and it survives it
 
-**This is the strongest argument for 043 that exists.** Task 033 added the
-`oneground` field to declared artifacts; nothing on this machine predates the
-need for it and everything on this machine predates the field. The gap is not
+As first written, this finding said *no artifact records the oneground
+version*. That was wrong, and the error was in the reader rather than in the
+artifacts: task 033's block **is** written by current code, into `report.json`
+itself, and `facts_of` looked only at the `_info.json` receipts. The
+regenerated arXiv report carries
+`{"version": "0.1.0", "commit": "43c4a3b…", "dirty": true}`.
+
+The reader now reads it, and the finding holds for a sharper reason:
+
+- **four of the five local runs record no version at all** — their reports
+  predate the field, and nothing can add a version to an old artifact
+  honestly;
+- **the one that records it records `dirty: true`**, meaning uncommitted
+  changes were in the interpreter. A commit with a dirty tree does not
+  identify the code that ran, so it is `unknown` with that reason rather than
+  a match. This is §2.2's own worry made concrete: task 028c found today's
+  build answering `recall_at_1` 0.874 where a recorded row said 0.875, and a
+  dirty tree is exactly how two runs at one commit come to be two different
+  programs.
+
+So the ceiling is real and it has two floors, not one. Stated plainly:
+**until a run records the version that produced it *from a clean tree*, no
+two runs in this product can be compared — not two runs of different corpora,
+not two runs of the same corpus, not two copies of one run.** Every
+side-by-side view, every card in the library and every row of the
+VectorDBBench bridge inherits that ceiling.
+
+**This is the strongest argument for 043 that exists**, and the correction
+strengthens it rather than weakening it. A task that only backfilled the
+field would still leave `dirty` and `machine` unanswered. The gap is not
 theoretical, not a corner case, and not fixable at the rendering layer: a
-missing version can never be read as a match, so the verdict is correct and
-the artifacts are what must change.
+missing or unusable version can never be read as a match, so the verdict is
+correct and the artifacts are what must change.
 
 ## Finding 6 — a gated commit is run in the foreground
 
@@ -278,6 +300,71 @@ one started before the first reports will describe contents it does not
 contain, and a commit message that misdescribes its own diff is a receipt
 that lies — the same class of defect as a citation naming the wrong field,
 which is the thing this task exists to have found.
+
+---
+
+## Finding 7 — the report writes a machine token into its own prose
+
+Sixteen of the arXiv report's 37 claim sentences contain the literal string
+`couldnt_check` inside the sentence a reader is meant to read:
+
+> `hash_sharded[…]: latency_p95 was not compared across engines because fewer
+> than two engines produced a value -- qdrant (couldnt_check), pgvector
+> (couldnt_check).`
+
+and `oneground/report/__init__.py:715` writes *"so it is couldnt_check rather
+than …"* directly into a claim.
+
+This is the caption rule of task 035 and defect 5 of this task's own interface
+review, one layer further in: a value that exists so a machine can compare it
+has been printed where a sentence belongs. The interface strips the token
+wherever *it* composes a line — a gap heading, a drawer note, a remedy —
+because there the heading already says "couldn't check".
+
+**It is not stripped from a claim, and that refusal is the rule rather than a
+limitation.** The page renders a claim verbatim; a renderer that edited the
+report's sentences would make the screen and the receipt disagree, and a
+reader comparing the two would be right to trust neither. An ugly token on
+screen is a smaller fault than a page that quietly improves its source.
+
+The fix is in `oneground/report`: `__init__.py:715`, and wherever the
+per-engine tuples `(couldnt_check)` are composed. It is report-code work and
+this task did not do it.
+
+---
+
+## Finding 8 — one fact, stated fifteen times, outweighs every verdict
+
+Measured on the arXiv report, and found because a page made the shape
+visible:
+
+| | claims | characters |
+|---|---|---|
+| all 16 claims that state a verdict | 16 | **3,659** |
+| one `no_engine_comparison` sentence, repeated | **15** | **3,959** |
+
+Fifteen of the 21 claims that state no verdict are the same sentence —
+*"&lt;config&gt;: &lt;constraint&gt; was not compared across engines because
+fewer than two engines produced a value — qdrant (couldnt_check), pgvector
+(couldnt_check)"* — differing only in the configuration label and the
+constraint name. They are individually true and collectively one fact: **two
+engines were measured and only one produced a value.** Repeating it per
+configuration says nothing a reader did not know after the first.
+
+The consequence is not cosmetic. On a page that lists claims, one fact
+occupies more room than every verdict in the report put together, so the
+thing a reader came for is outnumbered by a restatement.
+
+**The claim invariant already supports the shape this wants.** A `Claim`
+carries `quantifier`, `holds_for` and `holds_rule`, and task 019's step 5b
+derives `holds_for` from the rows rather than believing it. A claim that is
+true once per configuration and identical in substance is a claim *universally
+quantified over those configurations*, with one sentence and fifteen members
+in `holds_for` — which is what the field is for.
+
+This task did not change it. It is report-code work, it belongs beside
+Findings 4 and 7, and the page is the reason it is visible rather than the
+place it should be fixed.
 
 ---
 
@@ -351,6 +438,71 @@ contract grew a tooth on first use.
 `report/report.html` `e462a6b4` → `56dde95e`, MANIFEST updated. 2044 leaves
 before, 2107 after, **0 numeric values changed**.
 
+**The command and the pages.** `oneground ui [<runs-dir>]`, defaulting to
+`./runs`, is the same server as `oneground lab` with the same token and the
+same guard. One page serves both: `boot.js` asks `/api/check` which mode it is
+in and loads `lab.js` or `ui.js`, rather than letting one fail and falling
+back. `oneground lab <workdir>` is unchanged, and its page is untouched.
+
+Four views, each under the extended contract: the run list, a run's finding,
+the report with its evidence drawer, and two runs under the comparability
+verdict — plus `RunProgressView` for a run that never reported. Endpoints
+`/api/runs`, `/api/headline`, `/api/evidence` and `/api/compare`, each
+resolving a run **by name against the index** rather than by joining a path,
+so `?run=../../etc` is answered with *no run named …* and a parameter cannot
+reach a directory the session never indexed.
+
+**The evidence drawer.** Every claim gets an entry; every entry either
+resolves to a file and field or names which of eight kinds it is, and only
+`field` and `within` are navigable. Against the real arXiv report: 37 claims,
+55 citations. The drawer carries the cited value and the value at the named
+field and shows both, which is how it found the two citation defects that
+`verdict.py` now refuses.
+
+**`--demo`**, opening the published fixture's own run, downloading nothing,
+and saying so — recorded above as a correction to the brief.
+
+**The comparability verdict** at `oneground/comparability.py`, built here
+because §2.2 says whichever position reaches it first builds it.
+
+**Step 9, proved twice.** As a test, over a copied directory, digesting every
+file before and after a session that visits every page of every run. And
+against the developer's own browsing session on `runs/041-ui`: **63 files
+before, 63 after, 0 added, 0 removed, 0 changed**, the whole file list
+hashing to `b6a8f96052265a82…` on both sides, across four server restarts and
+every endpoint fetched. All five MANIFESTs re-verified.
+
+**Step 10, in a real browser, twice over.** My own pass at 1200 px and 500 px
+found two defects that every endpoint had passed: `URLSearchParams({run: [a,
+b]})` yields `run=a,b`, one parameter holding a comma, so the comparison page
+never rendered; and two routes in flight at once each cleared the page and
+appended to it, so the finding page drew its three counts twice. Neither was
+visible over HTTP.
+
+The developer's pass then found nine more, none of which a machine checking
+`__uiState()` would have caught — an absolute path in the header (twice, and
+worse at 500 px), an outcome column mixing two registers, a non-link styled
+as a link, a header breaking mid-word, a couldn't-check rendered as raw
+machine text, and form controls in dark-on-dark. The repair to the first was
+structural: no drawing carries an absolute path any more, so no renderer can
+leak one. The card layout at 500 px gained the label column it needed to
+stop being a fallback.
+
+**The report page was then rebuilt**, on the developer's reading, and the
+defect is worth recording because it was the slice's own rule failing at the
+last step. The first build rendered every citation of all 37 claims inline at
+one density. Equal weight exists to stop a refusal being *quieter* than a
+verdict; it does nothing when nothing on the page is quiet, and the two
+couldn't-checks were invisible in a wall. The page now leads with the run's
+own conclusion, lists one line per claim with its outcome mark, and opens
+evidence only for the claim a reader asks about.
+
+**`docs/UI.md`**, organised around *layout drifts, structure does not*, with
+equal weight in the data, the no-alignment mark, the dash-is-not-a-zero rule
+and the two-tallies rule written as instances of it rather than as a list to
+memorise. `docs/LAB.md` keeps its name and gains a pointer; its security
+section is cited rather than restated.
+
 ## Observed, not done
 
 - **`site/teaser/` needs three changes**, routed to core. Sharpest first:
@@ -374,4 +526,9 @@ before, 2107 after, **0 numeric values changed**.
 
 ## Blocked on developer
 
-None.
+None. Four findings are report-code work this task deliberately did not do
+— **4** (a citation that cannot be reconstructed from what it names), **7**
+(a machine token in the report's own prose) and **8** (one fact stated fifteen
+times) in `oneground/report`, and **2** (the teaser's unverified provenance)
+in `corpora/export_teaser_data.py` and `site/teaser/`, which is core's.
+**Finding 5** is task 043's argument and was raised before this merge.

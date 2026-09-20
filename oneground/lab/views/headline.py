@@ -206,7 +206,8 @@ class RunProgressView(ReceiptView):
 
     name = "run_progress"
     receipt = "run_index"
-    reads = ("directory", "runs[].name", "runs[].stages", "runs[].problems")
+    reads = ("directory_shown", "runs[].name", "runs[].stages",
+             "runs[].problems")
 
     #: The stages in order, with the command that runs each. Naming the next
     #: command is not a suggestion: it is the stage after the last one that
@@ -234,9 +235,9 @@ class RunProgressView(ReceiptView):
         if found is None:
             return Drawing(
                 view=self.name, marks=[],
-                figures={"directory": f["directory"]},
+                figures={"directory": f["directory_shown"]},
                 gaps={"run": gap(f"no run named {wanted!r} under "
-                                 f"{f['directory']}")})
+                                 f"{f['directory_shown']}")})
 
         names = [s for s, _ in self.ORDER]
         ran = [s for s in names if found["stages"].get(s)]

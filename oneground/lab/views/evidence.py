@@ -58,6 +58,27 @@ def _is_couldnt_check(kind, outcome):
     return outcome == COULDNT_CHECK or kind in COULDNT_CHECK_KINDS
 
 
+def outcome_of(kind, outcome):
+    """Which of the three a claim asserts, or None for a claim that asserts
+    none of them.
+
+    Selected from what the report recorded, never decided here: a report names
+    the outcome in `asserts_outcome` when it has one and otherwise in the
+    claim's `kind`, and both are the report's own words. The `None` is load
+    bearing -- `scope`, `qps_max` and the engine-comparison kinds are notes
+    rather than verdicts, and giving them a verdict marker would invent one.
+    """
+    if outcome in ("meets", "fails", COULDNT_CHECK):
+        return outcome
+    if _is_couldnt_check(kind, outcome):
+        return COULDNT_CHECK
+    if kind.startswith("fails"):
+        return "fails"
+    if kind.startswith("meets"):
+        return "meets"
+    return None
+
+
 def _agrees(kind, cited, at_field):
     """Whether the cited figure and the field agree. None when not comparable.
 
@@ -102,7 +123,7 @@ class EvidenceDrawerView(ReceiptView):
 
     def render(self, f):
         idx, kinds, texts, constraints, outcomes = [], [], [], [], []
-        remedies, n_entries, entry_rows = [], [], []
+        shown, remedies, n_entries, entry_rows = [], [], [], []
         no_entry = []
 
         for claim in f.each("claims"):
@@ -112,6 +133,7 @@ class EvidenceDrawerView(ReceiptView):
             texts.append(claim["text"])
             constraints.append(claim["constraint"])
             outcomes.append(claim["outcome"])
+            shown.append(outcome_of(claim["kind"], claim["outcome"]))
             remedies.append(claim["remedy"])
 
             mine = []
@@ -144,7 +166,8 @@ class EvidenceDrawerView(ReceiptView):
             Mark(kind="row",
                  data={"index": idx, "kind": kinds, "text": texts,
                        "constraint": constraints, "outcome": outcomes,
-                       "remedy": remedies, "n_entries": n_entries},
+                       "outcome_shown": shown, "remedy": remedies,
+                       "n_entries": n_entries},
                  encoding={"label": "text"}),
             Mark(kind="row",
                  data={"claim": [e["claim"] for e in entry_rows],
@@ -168,6 +191,9 @@ class EvidenceDrawerView(ReceiptView):
                        if e["agrees"] is False]
         couldnt = [i for i, k, o in zip(idx, kinds, outcomes)
                    if _is_couldnt_check(k, o)]
+        tally = {o: sum(1 for s in shown if s == o)
+                 for o in ("meets", "fails", COULDNT_CHECK)}
+        tally["no_verdict"] = sum(1 for s in shown if s is None)
         figures = {
             "run": f["run"],
             "tier": f["tier"],
@@ -179,6 +205,7 @@ class EvidenceDrawerView(ReceiptView):
             # Named, not counted away: an entry whose cited figure and whose
             # field disagree is the thing this drawer exists to make visible.
             "disagreeing": disagreeing,
+            "by_outcome": tally,
             "couldnt_check_claims": couldnt,
             "couldnt_check_without_remedy": [
                 i for i, k, o, r in zip(idx, kinds, outcomes, remedies)

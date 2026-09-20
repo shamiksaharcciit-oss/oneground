@@ -405,18 +405,21 @@ class LabServer:
                      "created from this page"),
             "token": ("required on every request; see docs/UI.md for what "
                       "it protects against and what it does not"),
-            "package": os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))),
         }
+        package = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if self.index is not None:
+            # Shortened, like every other path this page receives: the header
+            # renders it, and a header is in every screenshot.
             return {**common,
+                    "package": runsmod.shown_dir(package),
                     "demo": self.index.get("demo"),
-                    "runs_dir": self.runs_dir,
+                    "runs_dir": runsmod.shown_dir(self.runs_dir),
                     "n_runs": len(self.index["runs"]),
                     "unverified": [r["name"] for r in self.index["runs"]
                                    if r["manifest"]["all_verified"]
                                    is not True]}
         return {**common,
+                "package": package,
                 "workdir": self.run.workdir,
                 "also": self.run.also,
                 "files": self.run.present,
@@ -514,7 +517,7 @@ class LabServer:
             if row["name"] == want:
                 return row
         raise ValueError(f"no run named {want!r} under "
-                         f"{self.index['directory']}")
+                         f"{self.index['directory_shown']}")
 
     def _report_of(self, row):
         path = os.path.join(row["path"], "report.json")
@@ -559,7 +562,7 @@ class LabServer:
             match = [r for r in self.index["runs"] if r["name"] == name]
             if not match:
                 raise ValueError(f"no run named {name!r} under "
-                                 f"{self.index['directory']}")
+                                 f"{self.index['directory_shown']}")
             rows.append(match[0])
         doc = runsmod.comparison_document(rows[0]["path"], rows[1]["path"])
         return draw_receipt(ComparisonView(), doc).as_dict()

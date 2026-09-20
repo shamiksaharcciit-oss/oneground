@@ -386,6 +386,24 @@ class LoadedRun:
 # come from a view.
 
 #: Which stages a run has reached, by the receipt each one writes.
+def shown_dir(path, keep=2):
+    """The last `keep` segments of a path, for a page to display.
+
+    A drawing carries this and not the absolute path. The reason is the
+    identifier-scan rule arriving one layer out: a page prints its directory
+    in a header, and a developer's home directory then appears in every
+    screenshot anyone takes of this tool. Shortening in the renderer would
+    have worked until the next renderer; keeping the absolute path out of the
+    drawing means no renderer can leak it.
+
+    The server keeps the real path for its own use -- opening files, naming a
+    run that is not there -- and never sends it.
+    """
+    parts = [p for p in str(path).replace("\\", "/").split("/") if p]
+    tail = "/".join(parts[-keep:]) if parts else str(path)
+    return tail if len(parts) <= keep else ".../" + tail
+
+
 STAGE_RECEIPTS = (("characterize", "characterization.json"),
                   ("simulate", "simulate.json"),
                   ("verify", "verify.json"),
@@ -543,6 +561,7 @@ def index_runs(directory, verifier=None):
     return {
         "kind": RUN_INDEX,
         "directory": directory,
+        "directory_shown": shown_dir(directory),
         "runs": [run_row(d, checked.get(os.path.abspath(d))) for d in dirs],
     }
 
@@ -681,6 +700,7 @@ def demo_index(repo=None):
     return {
         "kind": RUN_INDEX,
         "directory": bundle,
+        "directory_shown": shown_dir(bundle),
         "runs": [row],
         "demo": {"fixture": DEMO_FIXTURE, "label": DEMO_LABEL,
                  "way_out": DEMO_WAY_OUT,

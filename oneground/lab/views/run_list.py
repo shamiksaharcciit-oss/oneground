@@ -57,7 +57,7 @@ class RunListView(ReceiptView):
     name = "run_list"
     receipt = RUN_INDEX
     reads = (
-        "directory",
+        "directory_shown",
         # Present only for `oneground ui --demo`. Declared here rather than
         # rendered from the server so the label travels inside the drawing
         # and survives a screenshot, as the lab's projection caption does.
@@ -146,7 +146,7 @@ class RunListView(ReceiptView):
                             "manifest_note": why, "problems": trouble},
                       encoding={"label": "name"})]
 
-        figures = {"directory": f["directory"], "n_runs": len(names),
+        figures = {"directory": f["directory_shown"], "n_runs": len(names),
                    "outcome_order": list(OUTCOMES)}
         if f.has("demo.label"):
             figures["demo"] = {
@@ -162,7 +162,7 @@ class RunListView(ReceiptView):
             # page must not present the set as sound.
             figures["unverified"] = unverified
         if not names:
-            gaps["runs"] = gap(f"no workdir under {f['directory']}; a run "
+            gaps["runs"] = gap(f"no workdir under {f['directory_shown']}; a run "
                                "directory holds one directory per run")
         return Drawing(view=self.name, marks=marks, figures=figures,
                        gaps=gaps,

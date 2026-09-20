@@ -95,7 +95,13 @@ def facts_of(workdir):
     infos = {n: _read(os.path.join(workdir, n)) for n in INFO_FILES}
     report = _read(os.path.join(workdir, "report.json")) or {}
 
+    # Task 033's block. It is written into `report.json` as well as into the
+    # `_info.json` receipts, and reading only the latter reported `code:
+    # unknown` for runs whose report carries the commit -- a defect in this
+    # reader that task 041 first published as a finding about the artifacts.
     code, code_from = _first(infos, "oneground")
+    if not code and isinstance(report.get("oneground"), dict):
+        code, code_from = report["oneground"], "report.json"
     libs, libs_from = _first(infos, "library_versions")
     plat, plat_from = _first(infos, "platform")
     py, py_from = _first(infos, "python_version")
@@ -108,10 +114,24 @@ def facts_of(workdir):
     # A pod records an identity; `local:<os>-<arch>` records a class.
     pod = env if (env and not str(env).startswith("local:")) else None
 
+    # A commit identifies the code only if the tree was clean when it ran.
+    # `dirty: true` means uncommitted changes were in the interpreter, so two
+    # runs at the same commit were not necessarily the same code -- which is
+    # exactly the case task 028c caught by re-measuring. Dirty is therefore
+    # unknown, with its reason, and never a match.
+    code_id, dirty = None, None
+    if isinstance(code, dict):
+        dirty = bool(code.get("dirty"))
+        if code.get("commit") and not dirty:
+            code_id = f"{code.get('version')}@{code['commit']}"
+    elif code:
+        code_id = str(code)
+
     return {
         "workdir": workdir,
         "run": report.get("run") or os.path.basename(workdir),
-        "code": code, "code_from": code_from,
+        "code": code_id, "code_from": code_from, "code_dirty": dirty,
+        "code_block": code,
         "libraries": libs, "libraries_from": libs_from,
         "platform": plat, "platform_from": plat_from,
         "python_version": py, "python_from": py_from,
@@ -137,9 +157,11 @@ def _compare(a, b):
 #: "unknown" on its own tells a reader nothing they can act on.
 INGREDIENTS = (
     ("code", True,
-     "no artifact in one of these runs records the oneground version that "
-     "measured it; the field task 033 added is absent, and nothing can add a "
-     "version to an old artifact honestly"),
+     "the oneground version that measured one of these runs is not usable as "
+     "an identity: either no artifact records it (the field task 033 added is "
+     "absent, and nothing can add a version to an old artifact honestly), or "
+     "it was recorded with `dirty: true`, meaning uncommitted changes were in "
+     "the interpreter and the commit does not identify the code that ran"),
     ("libraries", True,
      "one of these runs records no library versions"),
     ("settings", True,
