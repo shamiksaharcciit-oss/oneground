@@ -170,15 +170,35 @@ hand-maintained comments in `requirements.example.yaml` (36 comment lines
 of 139) and `requirements.declared.example.yaml` (20 of 64).
 
 So this slice creates that table, on `Param.note`'s precedent, and the
-"one string" test is a test about it. Three consequences follow, and the
-third is the one to watch: the example files become generated from the
-table or are deleted rather than left to drift; the form and the writer
-share one origin, which is what makes the test meaningful; and **the
-explanation and the refusal for the same field remain two different
-strings in two places**, so a field can still be described one way and
-refused in another. §4.4 keeps refusals verbatim from the CLI; nothing
-yet keeps the explanation honest against them, and this paper does not
-solve that.
+"one string" test is a test about it. Three consequences follow.
+
+The form and the writer share one origin, which is what makes the test
+mean anything rather than assert a tautology.
+
+**The two example files are part of the same work.** Between them
+`requirements.example.yaml` and `requirements.declared.example.yaml` carry
+**56 hand-written comment lines** today — 36 of 139 and 20 of 64. Once the
+table exists they are generated from it or they are deleted. Leaving them
+is leaving two bodies of explanation for the same fields, maintained
+separately, drifting — which is precisely what the table exists to
+prevent, so shipping the table and keeping them by hand would be building
+the fix and declining it.
+
+And the third is the one to watch: **the explanation and the refusal for
+the same field remain two different strings in two places**, so a field
+can still be described one way and refused in another — and the "one
+string" test would pass throughout, because it compares the form to the
+file and never to the refusal. A test that is green while the thing it is
+named for is broken is the same class of defect as a guard that passes
+while checking nothing.
+
+The shape that would close it, **not decided here**: an intake field
+table on `Param.note`'s precedent that declares each field **once**, with
+both the form's explanation and the refusal message rendered from that one
+declaration — so the two cannot diverge, because there is one string.
+Slice 2's brief settles whether that is the shape and what it costs; this
+paper only names it, and does not claim the shared-string test covers the
+gap in the meantime.
 
 The form's validation is the CLI's validation, not a second
 implementation — an unknown parameter is named with the declared list, a
