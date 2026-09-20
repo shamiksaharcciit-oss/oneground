@@ -1,0 +1,99 @@
+# Task 036 step 6 at full size: is the crispness ordering of the three corpora
+# stable across embedding models?
+#
+#     oneground pod plan sessions/036-models.yaml      # resolves and prices
+#     oneground pod up   sessions/036-models.yaml      # the only billable one
+#
+# `up` is the developer's. It prompts at a TTY and there is no flag that
+# skips it.
+#
+# WHY A POD, WITH THE NUMBER RATHER THAN THE IMPRESSION
+#
+# The work is 332.2 million tokens: three corpora x three models, measured
+# exactly with each model's own tokenizer on each corpus's real text
+# (tasks/scratch/036-price-the-full-run.py, and the per-cell breakdown is in
+# 036-price.json). Not estimated from record counts -- embedding is
+# token-bound, and the three corpora differ by 4x in record length, so a
+# record-count projection would be wrong by that much.
+#
+#     this laptop, measured 273 tok/s      338 hours     not a laptop job
+#     RTX PRO 4500, task 031's 80,752      1.14 hours    the figure priced here
+#     RTX PRO 4500, task 030's 99,774      0.92 hours
+#
+# Both pod rates are this project's own measurements on this card: task 031
+# embedded at 196-203 chunks/s with a 412-token median, task 030 embedded
+# 152,000 x 512 tokens in about 13 minutes. The conservative one is what the
+# cap is built on.
+#
+# WHAT IT ANSWERS THAT THE LAPTOP RUN DOES NOT
+#
+# The laptop measured the ordering on a seeded 3,000-record subsample at 32
+# centroids, after showing that subsample reproduces the published ordering at
+# every size from 1,000 to 20,000. That makes the reduction a measurement
+# rather than a convenience, and it still leaves one thing unanswered:
+# stability at one sample size is not stability in general. This run is the
+# same script, same seed, N=0 (every record), 256 centroids -- the published
+# fixtures' own setting -- so its numbers sit beside the published values
+# instead of forming a second scale nothing can be read against.
+#
+# It runs the probe FIRST and refuses if this card is under 40% of the priced
+# rate, because a cap built for one card is wrong for another and four minutes
+# is cheaper than finding out at max_hours.
+
+gpu:
+  - RTX PRO 4500
+  - RTX PRO 6000
+  - RTX 6000 Ada
+  - RTX 4090
+
+volume: vecbench                 # datacenter derived from the name
+volume_mount_path: /workspace
+
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+
+# The three corpora come off the volume and are not counted here. What this
+# run materialises is vectors: at full size the largest single cell is
+# ~150,000 x 768 float32 (~460 MB), one at a time, and only the measures are
+# kept. The receipts are JSON.
+disk_gb: 40
+
+env:
+  HF_HOME: /workspace/hf
+  TOKENIZERS_PARALLELISM: "true"
+  ONEGROUND_ASSETS: /workspace
+
+setup: corpora/POD_SETUP.md
+run: bash corpora/run_036_models.sh
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-session.log
+done_marker: DONE
+
+outputs:
+  # The log first, so a run stopped at the cap still comes home with every
+  # cell it completed -- the experiment writes its results file after each
+  # one, so a partial run is partial evidence rather than none (task 030b).
+  - {remote: /workspace/oneground-session.log,
+     local: tasks/scratch/036-session-log/}
+  - {remote: /workspace/036-models.tgz, local: ./, extract: true}
+
+# Nine embedding cells, three of them long. The quiet stretches are inside a
+# cell, and the longest at the priced rate is the filings corpus under
+# bge-base at ~72M tokens, roughly fifteen minutes.
+stall_minutes: 25
+
+caps:
+  # Built from measured parts, conservative rate throughout:
+  #   ~10 min  image, deps, and three model downloads into HF_HOME
+  #   ~5 min   reading the three corpora off the volume and chunking filings
+  #   ~70 min  332.2M tokens at 80,752 tok/s
+  #   ~25 min  nine k-means (256 centroids) plus LID and crispness
+  #   ~5 min   truncation counts, tar, fetch
+  #   = ~2 h. Three hours is the headroom for a slower card that still
+  #   cleared the probe's 40% floor.
+  #
+  # Three hours at $0.72/hr -- the rate the other sessions were billed at,
+  # not the $0.34 floor -- is $2.16.
+  max_hours: 3.0
+  max_concurrent: 1
+  max_usd: 4.00
