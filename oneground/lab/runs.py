@@ -16,6 +16,7 @@ import os
 import re
 
 from . import contract
+from .receipt import RUN_INDEX
 
 COULDNT_CHECK = contract.COULDNT_CHECK
 
@@ -367,3 +368,178 @@ class LoadedRun:
             "partition_regions": int(self.head["partition"].get(
                 "n_regions") or 0) or None,
         }
+
+
+# ------------------------------------------------- many runs (task 041)
+# `LoadedRun` is the lab's loader: it needs `state/` and refuses a run without
+# it. The UI lists runs that were never simulated with --emit-state, runs that
+# stopped after characterize, and Tier-2 runs that measured nothing at all, so
+# the index below asks much less of a directory than the lab does.
+#
+# It is transport, and the line transport must not cross is computing
+# something a view draws. So this carries recorded values across -- the
+# summary a report wrote, the outcomes it recorded -- and tallies none of
+# them. The run-list view does the counting, because counting recorded
+# outcomes is drawing a measurement, and a number on the page has to have
+# come from a view.
+
+#: Which stages a run has reached, by the receipt each one writes.
+STAGE_RECEIPTS = (("characterize", "characterization.json"),
+                  ("simulate", "simulate.json"),
+                  ("verify", "verify.json"),
+                  ("report", "report.json"))
+
+#: A directory is a workdir if it holds any receipt at all. Anything else in
+#: the runs directory -- a stray file, a notes folder -- is not listed.
+def is_workdir(path):
+    return os.path.isdir(path) and any(
+        os.path.isfile(os.path.join(path, f)) for _, f in STAGE_RECEIPTS)
+
+
+def _read_json(path):
+    """The parsed receipt, or None if it is absent or unreadable.
+
+    Unreadable is not the same as absent and the caller is told which: a run
+    whose report.json is corrupt must be listed as unverified, not as a run
+    that never reported.
+    """
+    if not os.path.isfile(path):
+        return None, "absent"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f), None
+    except (OSError, ValueError) as e:
+        return None, f"unreadable: {e.__class__.__name__}"
+
+
+def _producing_version(workdir):
+    """Task 033's field, or None with the reason it is not there.
+
+    Written by the stages into their `_info.json`; a run produced before 033
+    simply has no such key, which is a fact about the run rather than a
+    failure to read it.
+    """
+    for info in ("report_info.json", "verify_info.json", "simulate_info.json",
+                 "characterization_info.json"):
+        data, _ = _read_json(os.path.join(workdir, info))
+        if isinstance(data, dict) and data.get("oneground"):
+            return {"version": data["oneground"], "from": info, "reason": None}
+    return {"version": None, "from": None,
+            "reason": f"{COULDNT_CHECK}: no `oneground` block in this run's "
+                      "_info.json receipts; it predates task 033"}
+
+
+def _report_facts(data):
+    """What a report records about its own outcome, copied, not computed.
+
+    Two report kinds reach this. Tier 1 carries `claims` and a `summary` it
+    counted itself. Tier 2 -- `run_declared`, for a corpus that was described
+    rather than sampled -- carries neither: it has no options, and a flat
+    `constraints` list in which every outcome is couldnt_check by
+    construction. Both are returned in the same shape so the view draws one
+    thing, and neither is tallied here.
+    """
+    if not isinstance(data, dict):
+        return None
+    tier2 = data.get("oneground_report") is not None or data.get("kind") == \
+        "declared"
+    if tier2:
+        return {
+            "tier": data.get("tier"),
+            "kind": data.get("kind") or "declared",
+            "schema": None,
+            "headline": data.get("recommendation_reason"),
+            "recommended": data.get("recommended"),
+            # every outcome, uncounted: the view tallies
+            "outcomes": [c.get("outcome") for c in data.get("constraints")
+                         or [] if isinstance(c, dict)],
+            "summary": None,
+            "n_claims": 0,
+        }
+    rec = data.get("recommendation")
+    return {
+        "tier": 1,
+        "kind": "measured",
+        "schema": data.get("schema"),
+        # Tier 1 states its conclusion as a claim rather than as a field, so
+        # the headline is that claim's own text. The UI never writes one.
+        "headline": next((c.get("text") for c in data.get("claims") or []
+                          if c.get("kind") == "recommendation"), None),
+        "recommended": rec,
+        "outcomes": None,
+        "summary": data.get("summary"),
+        "n_claims": len(data.get("claims") or []),
+    }
+
+
+def run_row(workdir, verified=None):
+    """One row of the run list: what this run is, and what it is not.
+
+    `verified` is a `verify_manifests` entry for the same directory, passed in
+    rather than computed here so the digests are checked once per listing.
+    """
+    workdir = os.path.abspath(workdir)
+    stages, problems = {}, []
+    receipts = {}
+    for stage, fname in STAGE_RECEIPTS:
+        data, why = _read_json(os.path.join(workdir, fname))
+        stages[stage] = data is not None
+        receipts[fname] = data
+        if why and why != "absent":
+            problems.append(f"{fname} {why}")
+
+    ch = receipts["characterization.json"] or {}
+    rep = _report_facts(receipts["report.json"])
+    entry = verified or {}
+    files = entry.get("files") or []
+
+    return {
+        "name": os.path.basename(workdir),
+        "path": workdir,
+        "stages": stages,
+        # Recorded as the receipt has them. A Tier-2 run declares its corpus
+        # rather than measuring it, so these are the string
+        # "couldnt_check: declared, not measured" rather than numbers, and the
+        # view renders what it is given rather than casting it to an int.
+        "n_base": ch.get("n_base"),
+        "dimension": ch.get("dimension"),
+        "run_name": ch.get("run"),
+        "report": rep,
+        "version": _producing_version(workdir),
+        "manifest": {
+            "present": entry.get("manifest") is not None,
+            "all_verified": entry.get("all_verified"),
+            "failing": [f["name"] for f in files if not f.get("verified")],
+            "n_files": len(files),
+            "note": entry.get("note"),
+        },
+        "problems": problems,
+    }
+
+
+def index_runs(directory, verifier=None):
+    """Every workdir under `directory`, each with its digests checked.
+
+    `verifier` is `server.verify_manifests`, injected so that the one
+    implementation of digest checking is reused rather than written twice --
+    the same reason the UI is a front-end over the CLI rather than a second
+    one.
+
+    A run whose digests fail is listed, with the failing file named. It is
+    never hidden and never shown as sound: a run the reader cannot trust is
+    exactly the run they most need to see.
+    """
+    directory = os.path.abspath(directory)
+    if not os.path.isdir(directory):
+        raise LabRunError(f"{directory} is not a directory")
+    dirs = sorted(os.path.join(directory, n) for n in os.listdir(directory)
+                  if is_workdir(os.path.join(directory, n)))
+    checked = {}
+    if verifier is not None and dirs:
+        for entry in verifier(dirs):
+            checked[os.path.abspath(entry["directory"])] = entry
+    return {
+        "kind": RUN_INDEX,
+        "directory": directory,
+        "runs": [run_row(d, checked.get(os.path.abspath(d))) for d in dirs],
+    }

@@ -56,6 +56,21 @@ NOT_EPSILON = "not_epsilon"
 RECEIPTS = ("characterization.json", "simulate.json", "verify.json",
             "report.json")
 
+#: The one document a view may read that is not a file on disk: transport's
+#: index over many runs, which the run list draws.
+#:
+#: It is named rather than smuggled in, because "drawn from a file whose
+#: digest was checked" is the property the other four have and this one does
+#: not. What it has instead is narrower and stated here: every value in it is
+#: copied from a named receipt of a named run without being recomputed, and
+#: each row carries that run's digest verification beside the values, so a row
+#: built from files that failed their manifest says so on the row itself.
+#: `runs.index_runs` builds it; nothing else may.
+RUN_INDEX = "run_index"
+
+#: What `draw_receipt` will accept as a view's `receipt`.
+DRAWABLE = RECEIPTS + (RUN_INDEX,)
+
 #: Fields by which a member of a list is named, in order. `rows[LABEL]` finds
 #: the row whose `config` is LABEL; `engines[qdrant]` finds the engine.
 MEMBER_KEYS = ("config", "engine", "label", "name", "key")
@@ -255,10 +270,10 @@ def draw_receipt(view, data, receipt=None):
     view cannot be handed a path and reach for something else.
     """
     name = receipt or view.receipt
-    if name not in RECEIPTS:
+    if name not in DRAWABLE:
         raise UnknownReceipt(
             f"{view.name}: {name!r} is not one of a run's receipts "
-            f"{RECEIPTS}")
+            f"{RECEIPTS} nor {RUN_INDEX!r}")
     fields = ReceiptFields(name, data, view.reads)
     d = check_drawing(view, view.render(fields))
     d.params = dict(view.params())
@@ -276,6 +291,7 @@ def gap(reason):
     return f"{COULDNT_CHECK}: {reason}"
 
 
-__all__ = ["AbsentField", "Drawing", "MEMBER_KEYS", "NOT_EPSILON", "RECEIPTS",
-           "ReceiptFields", "ReceiptView", "UnknownReceipt", "UndeclaredField",
-           "draw_receipt", "gap", "split_path"]
+__all__ = ["AbsentField", "DRAWABLE", "Drawing", "MEMBER_KEYS", "NOT_EPSILON",
+           "RECEIPTS", "RUN_INDEX", "ReceiptFields", "ReceiptView",
+           "UnknownReceipt", "UndeclaredField", "draw_receipt", "gap",
+           "split_path"]
