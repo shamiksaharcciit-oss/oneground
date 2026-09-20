@@ -263,21 +263,49 @@ def test_hash_sharded_accepts_more_shards_than_vectors_task_042():
         "one build" % (fp.shards, fp.fanout))
 
 
-def test_semantic_sharded_crashes_on_too_many_centroids_task_042():
-    """A FINDING, not an accepted baseline (task 042).
+def test_semantic_sharded_refuses_too_many_centroids_task_042b():
+    """The 042 finding, fixed in 042b. Was: faiss raised and the sweep stopped.
 
-    More centroids than vectors reaches faiss, which raises `RuntimeError`.
-    A sweep meeting it stops instead of dropping one row. When this is fixed
-    to raise `ParameterError`, this test fails and is deleted.
+    A `ParameterError` is what `simulate` catches to drop one row and report
+    it. Anything else ends the run -- on arxiv-150k that is up to five hours
+    of measured rows lost to one unbuildable configuration.
     """
     x = np.ascontiguousarray(C.synthetic_corpus(n=200, dim=16, n_q=5)[0])
     cfg = Config.make("semantic_sharded",
                       {"centroids": 201, "epsilon": 0.2, "probe": 2,
                        "M": 16, "efSearch": 64})
-    with pytest.raises(Exception) as caught:
+    with pytest.raises(ParameterError) as caught:
         models.get("semantic_sharded").build(x, cfg, seed=1)
-    assert not isinstance(caught.value, ParameterError), (
-        "a ParameterError here would mean the finding is fixed")
+    message = str(caught.value)
+    # The refusal names what the user wrote and what to do, not the C++ frame.
+    assert "centroids=201" in message, message
+    assert "200 vector(s)" in message, message
+    assert "Lower centroids" in message, message
+
+
+def test_the_centroid_refusal_is_raised_before_supplied_centroids_task_042b():
+    """`context` is a speed concession and may not route around a refusal.
+
+    The fixture builder passes centroids `characterize()` already computed. If
+    the refusal sat after that shortcut, the same incoherent configuration
+    would be refused from one caller and accepted from another.
+    """
+    x = np.ascontiguousarray(C.synthetic_corpus(n=200, dim=16, n_q=5)[0])
+    cfg = Config.make("semantic_sharded",
+                      {"centroids": 201, "epsilon": 0.2, "probe": 2,
+                       "M": 16, "efSearch": 64})
+    supplied = np.ascontiguousarray(
+        C.synthetic_corpus(n=201, dim=16, n_q=5)[0])
+    with pytest.raises(ParameterError):
+        models.get("semantic_sharded").build(
+            x, cfg, seed=1, context={"centroids": supplied})
+
+
+def test_semantic_sharded_now_passes_every_check_synthetic():
+    """042b closes the only check this family failed."""
+    results = C.run_conformance("semantic_sharded", verbose=False)
+    failed = [r.check for r in results if r.outcome == C.FAILS]
+    assert not failed, failed
 
 
 def test_single_node_hnsw_passes_every_check_synthetic():

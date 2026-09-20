@@ -219,7 +219,7 @@ few seconds and checks the protocol's contract, not any published number.
 Outcomes are **passes**, **fails**, and **couldn't-check**, and the third is
 never rounded up to either of the others.
 
-Eight checks, and what a failure means:
+Nine checks, and what a failure means:
 
 | check | a failure means |
 |---|---|
@@ -230,16 +230,63 @@ Eight checks, and what a failure means:
 | **determinism (this machine)** | two builds from identical inputs, with `deterministic=True`, produced different state. Nothing you produce can be compared to anything |
 | **footprint is measured** | your reported size does not change with the index algorithm, which is what a formula over vector count and dimension produces. It did not come from the artifact |
 | **state is emitted and renders** | your state contradicts what you measured, or omits a column the lab reads — your runs fail at draw time rather than at build time |
+| **determinism (across environments)** | always couldn't-check: one machine cannot answer it. See `docs/STATE.md` |
 | **refusals, not crashes** | an impossible configuration raised something other than `ParameterError`, so it aborts a sweep instead of being dropped from one |
 
 **A check that fails is a finding about the family, never a reason to weaken
-the check.** Two of the three shipped families fail one of these today, and
-those failures are recorded in `tasks/042-family-conformance.report.md` rather
-than smoothed away.
+the check.** One of the three shipped families fails one of these today, and
+it is recorded in `tasks/042-family-conformance.report.md` rather than
+smoothed away.
 
 A `couldn't-check` result always says what would settle it. The
 cross-environment half of the determinism contract is the standing example:
 one machine cannot answer it, and `docs/STATE.md` says what does.
+
+### 4.1 If you extend the suite, read this first
+
+**The suite was wrong three times before it was right.** Not about the
+families — about itself. Every one of the three produced a confident,
+specific, false result on a shipped family, and they are recorded here because
+the next person to add a check will make the same kind of mistake in a new
+place.
+
+**1. It reported a knob that does nothing, and the knob works.** It said
+`candidates` was declared and never read, in all three families. `candidates`
+is read only when `rerank` is `exact`, and the suite's grid never set that. A
+check that asks *"was this key read?"* without first asking *"could it have
+been?"* reports its own coverage gap as the family's defect.
+
+> The rule: before asserting a key is unread, satisfy its `belongs_to`. If you
+> cannot, the outcome is **couldn't-check**, not **fails**.
+
+**2. It reported `M` and `efSearch` unreachable in every family, because it
+reimplemented a rule that already existed.** It tested belonging with
+`config.params.get("index") in ("hnsw",)`. But `index` **elides at its
+default** — that is deliberate, so that adding the key rewrote no published
+label — so `params` has no `index` key at all in an HNSW configuration and the
+test was false everywhere. The validator's own `_belonging_problem` resolves
+the default and gets it right.
+
+> The rule: **call the function the tool already uses.** A second
+> implementation of a rule is a second place for it to be wrong, and this one
+> disagreed with the first in the most common case there is.
+
+**3. A check passed for the wrong reason, which is worse than one that
+fails.** *Refusals, not crashes* fed `nlist=1501` to `single_node_hnsw` and
+saw a `ParameterError`, so it passed. The refusal was about **belonging** —
+`nlist` is an IVF setting and the configuration was HNSW — and said nothing
+whatever about size. The family had not been tested and the suite reported
+green.
+
+> The rule: **a passing check must be able to fail.** Before trusting one,
+> break the thing it tests and watch it go red. That is what the mutants in
+> `oneground/models/test_family_conformance.py` are: seven families that each
+> violate one requirement, asserting the suite names *that* check and not
+> another. Add a mutant with every check.
+
+The shape all three share: **the suite was measuring itself and reporting the
+family.** A green result and a red result are both claims, and a check you
+have not watched fail is not evidence of either.
 
 ---
 
@@ -248,7 +295,8 @@ one machine cannot answer it, and `docs/STATE.md` says what does.
 [`examples/random_sharded/model.py`](../examples/random_sharded/model.py) is a
 complete family, written to be read. It implements all six methods in the
 order this document introduces them, with the reasoning beside each, and it
-passes all eight checks.
+passes all eight decidable checks (the ninth is the cross-environment one no
+single machine can answer).
 
 It partitions **at random** and routes **at random**, which makes it a bad
 architecture on purpose. That is what makes it useful: because its partition

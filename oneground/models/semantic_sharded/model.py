@@ -165,6 +165,24 @@ class SemanticSharded:
         n_cent = int(config.get("centroids", _d("centroids")))
         eps = float(config.get("epsilon", _d("epsilon")))
 
+        # Task 042b. More regions than vectors reached `kmeans` and came back
+        # as a faiss `RuntimeError`, which **stops a sweep**; a `ParameterError`
+        # drops one row and the run reports it (task 034). The defect is the
+        # one `indexes.build` already refuses one level down -- more cells than
+        # points -- so it raises the same error, with the same shape of
+        # message, naming the configuration a user wrote rather than the C++
+        # call that failed.
+        #
+        # Refused before the `context` shortcut on purpose: a partition with
+        # more regions than vectors is incoherent whether or not the caller
+        # brought its own centroids.
+        if n_cent > len(vectors):
+            raise indexes.IndexTooSmall(
+                "centroids=%d asks for %d k-means regions over %d vector(s); "
+                "faiss cannot train more cells than it has points. Lower "
+                "centroids to at most %d, or characterize a larger sample."
+                % (n_cent, n_cent, len(vectors), len(vectors)))
+
         with deterministic_faiss(det):
             cents = (context or {}).get("centroids")
             if cents is None or len(cents) != n_cent:
