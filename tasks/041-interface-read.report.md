@@ -180,6 +180,107 @@ Two consequences worth separating:
 
 ---
 
+## Finding 4 — a citation that cannot be reconstructed from what it names
+
+The two `to_resolve` claims in the arXiv report cite
+`verify_info.json:engine_facts.index_params`. The drawer renders both
+`unresolved`, and that is the true answer rather than a limitation of the
+drawer.
+
+`engine_facts` lives under `engines[]`, one level below where the source
+points, and these claims carry no `member`. But the missing member is the
+symptom, not the defect. The claims' own text spans **both** engines —
+*"pgvector has not been asked what index families it builds … qdrant has not
+been asked …"* — so there is no single engine whose value the sentence rests
+on.
+
+**This is not the family the two fixed defects belong to.** Those cited a
+field that held a different value; the field was right there and the source
+named its neighbour. This one names a per-engine field from a claim about
+every engine, and so cannot be reconstructed from what it names at all.
+
+That is why the obvious repair is the wrong one. Rewriting the source as
+`verify_info.json:engines[].engine_facts.index_params` would make the entry
+resolve while still not saying which engine's value the sentence rests on — a
+link that looks right and answers nothing, which is worse than one that says
+it cannot answer.
+
+**The real fix is where the claim is written, not where it is rendered:**
+either two claims, one per engine, each with `member` set, or one claim citing
+both values. Both are report-code changes in `oneground/report`, and neither
+belongs to this task. The drawer's `unresolved` entry, with its reason, is the
+correct rendering until that happens.
+
+---
+
+## Finding 5 — no two runs in this product can be compared, including two copies of one
+
+**This is what step 7 produced, and it leads everything else that step
+produced.**
+
+`docs/LIBRARY.md` §2.2 specifies the comparability verdict, says it is
+*"written here and implemented nowhere"*, and predicts its own answer:
+*"today the honest value is `couldnt_check`, on the code, because no artifact
+records the oneground version that measured a row."* Task 041 was the first of
+the three positions depending on it to reach it, so 041 built it. The
+prediction is now a measurement.
+
+**Ten of ten pairs of the five local runs are unable to reach `comparable`,
+and `code` is unknown in every one.** The sharpest case is not two different
+runs but two byte-identical copies of the same one:
+
+| ingredient | state | required |
+|---|---|---|
+| `code` | **unknown** | yes |
+| `libraries` | same | yes |
+| `settings` | same | yes |
+| `sample` | same | yes |
+| `platform` | same | no |
+| `python_version` | same | no |
+| `machine` | **unknown** | yes |
+
+Same libraries, same requirements digest, same sample digest, same platform,
+same interpreter — and the verdict is `couldnt_check`. Two copies of one run
+cannot be declared comparable, because neither records the version that
+produced it and `environment_id` is `local:<os>-<arch>`, a class rather than
+an identity.
+
+Stated plainly, because it is the useful form: **until a run records the
+version that produced it, no two runs in this product can be compared — not
+two runs of different corpora, not two runs of the same corpus, not two
+copies of one run.** Every side-by-side view, every card in the library, and
+every row of the VectorDBBench bridge inherits that ceiling.
+
+**This is the strongest argument for 043 that exists.** Task 033 added the
+`oneground` field to declared artifacts; nothing on this machine predates the
+need for it and everything on this machine predates the field. The gap is not
+theoretical, not a corner case, and not fixable at the rendering layer: a
+missing version can never be read as a match, so the verdict is correct and
+the artifacts are what must change.
+
+## Finding 6 — a gated commit is run in the foreground
+
+Not a defect in the product, and recorded because the next person will be
+tempted the same way.
+
+Two suite-and-commit commands were backgrounded while each gated its commit
+on the suite passing. The first had not reported when the second started, so
+its files were still staged; the second's `git add -A` swept them up, and its
+commit message — which described only the comparability work — would have
+landed on a commit containing three steps' worth of changes.
+
+**The gate held.** Nothing half-committed, because the commit could not run
+until pytest passed, and stopping both left the tree exactly as it was. What
+failed was not the gate but the sequencing around it.
+
+The rule, for next time: **a gated commit runs in the foreground.** A second
+one started before the first reports will describe contents it does not
+contain, and a commit message that misdescribes its own diff is a receipt
+that lies — the same class of defect as a citation naming the wrong field,
+which is the thing this task exists to have found.
+
+---
+
 ## What was built
 
 **The contract, generalised** (`oneground/lab/receipt.py`). The rule every

@@ -16,7 +16,8 @@ import os
 import re
 
 from . import contract
-from .receipt import RUN_INDEX
+from ..comparability import compare_workdirs
+from .receipt import COMPARISON, RUN_INDEX
 
 COULDNT_CHECK = contract.COULDNT_CHECK
 
@@ -542,4 +543,26 @@ def index_runs(directory, verifier=None):
         "kind": RUN_INDEX,
         "directory": directory,
         "runs": [run_row(d, checked.get(os.path.abspath(d))) for d in dirs],
+    }
+
+
+def comparison_document(left, right):
+    """Two runs and the verdict between them (task 041, step 7).
+
+    The verdict is `oneground.comparability`, which `docs/LIBRARY.md` §2.2
+    specifies and says is implemented nowhere -- and which says that whichever
+    of the three positions depending on it is built first builds it, and the
+    other two cite it. This is that citation, not a second answer.
+
+    Each run's figures are carried under its own key and are never merged
+    here. Whether they may be shown in shared rows is the verdict's business
+    and the view's, not transport's.
+    """
+    v = compare_workdirs(left, right)
+    return {
+        "kind": COMPARISON,
+        "verdict": v["verdict"],
+        "reason": v["reason"],
+        "findings": v["findings"],
+        "runs": [run_row(left), run_row(right)],
     }

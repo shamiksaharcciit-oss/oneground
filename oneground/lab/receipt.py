@@ -79,7 +79,12 @@ RUN_INDEX = "run_index"
 #: without computing either.
 CITATIONS = "citations"
 
-TRANSPORT_DOCS = (RUN_INDEX, CITATIONS)
+#: Two runs and the comparability verdict between them
+#: (`runs.comparison_document`). Carries each run's figures kept apart, never
+#: joined into shared rows, unless the verdict is `comparable`.
+COMPARISON = "comparison"
+
+TRANSPORT_DOCS = (RUN_INDEX, CITATIONS, COMPARISON)
 
 #: What `draw_receipt` will accept as a view's `receipt`.
 DRAWABLE = RECEIPTS + TRANSPORT_DOCS
@@ -255,6 +260,23 @@ class ReceiptFields:
             yield ReceiptFields(self.receipt, item, leaves,
                                 _prefix=prefix, _read=self.read)
 
+    def has_each(self, name):
+        """Whether this receipt carries the list `each(name)` would walk.
+
+        `has` asks about a declared scalar path; a list is declared by its
+        leaves (`claims[].text`), so asking for it by the bare name would be
+        an undeclared read. This asks the question `each` answers by walking,
+        without walking -- which is what a view needs in order to choose
+        between two shapes of receipt before reading either.
+        """
+        local = f"{name}[]."
+        if not any(r.startswith(local) for r in self._reads):
+            raise UndeclaredField(
+                f"{self.receipt}: this view declares no fields under "
+                f"{name}[]; declare {name}[].<field> to ask about it")
+        found, _ = self._walk(f"{name}[]")
+        return found
+
     def count(self, name):
         """How many members the list at `name` has, without reading one."""
         found, node = self._walk(f"{name}[]")
@@ -309,7 +331,8 @@ def gap(reason):
     return f"{COULDNT_CHECK}: {reason}"
 
 
-__all__ = ["AbsentField", "DRAWABLE", "Drawing", "MEMBER_KEYS", "NOT_EPSILON",
-           "RECEIPTS", "RUN_INDEX", "ReceiptFields", "ReceiptView",
+__all__ = ["AbsentField", "COMPARISON", "DRAWABLE", "Drawing", "MEMBER_KEYS",
+           "NOT_EPSILON", "RECEIPTS", "RUN_INDEX", "ReceiptFields",
+           "ReceiptView",
            "UnknownReceipt", "UndeclaredField", "draw_receipt", "gap",
            "split_path"]

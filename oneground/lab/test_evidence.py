@@ -18,10 +18,10 @@ from oneground.lab.views.evidence import (KINDS, NAVIGABLE, EvidenceDrawerView,
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TIER1 = os.path.join(REPO, "runs", "arxiv-150k-via-characterize")
 TIER2 = os.path.join(REPO, "runs", "041-ui", "support-tickets-2026q3")
-#: The report as it was published before this task fixed its citations. Kept
-#: as the regression case: the drawer must flag what it was built to find.
-DEFECTIVE = os.path.join(REPO, "runs", "041-ui",
-                         "arxiv-150k-via-characterize", "report.json")
+#: The report as it was published before this task fixed its citations, kept
+#: beside the runs rather than inside one: the browsing corpus should hold the
+#: corrected report, and this is a regression fixture, not a run.
+DEFECTIVE = os.path.join(REPO, "runs", "041-pre-fix-report.json")
 
 
 def _draw(workdir, report_path=None):

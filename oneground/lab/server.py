@@ -46,9 +46,13 @@ import time
 import urllib.parse
 
 from . import contract, guard
+from . import citations as citationsmod
 from . import runs as runsmod
 from .receipt import draw_receipt
 from .runs import LabRunError, LoadedRun                      # noqa: F401
+from .views.compare import ComparisonView
+from .views.evidence import EvidenceDrawerView
+from .views.headline import RunHeadlineView, RunProgressView
 from .views.run_list import RunListView
 from .views import GroundView, QueryIndexView, QueryTraceView
 
@@ -73,6 +77,9 @@ STATIC = {
 ENDPOINTS = {
     "/api/check": "check",
     "/api/runs": "run_list",
+    "/api/headline": "headline",
+    "/api/evidence": "evidence",
+    "/api/compare": "compare",
     "/api/run": "describe_run",
     "/api/ground": "ground",
     "/api/trace": "trace",
@@ -460,6 +467,72 @@ class LabServer:
             raise ValueError("this session serves one run, not a directory; "
                              "start `oneground ui <runs-dir>` for a list")
         return draw_receipt(RunListView(), self.index).as_dict()
+
+    def _named_run(self, params):
+        """The workdir one request is about, refused if it is not listed.
+
+        Refused by NAME against the index rather than by joining a path: a
+        parameter that reached the filesystem would be a way to read a
+        directory this session was never pointed at.
+        """
+        if self.index is None:
+            raise ValueError("this session serves one run, not a directory")
+        want = (params.get("run") or [""])[0]
+        if not want:
+            raise ValueError("name a run: ?run=<name>")
+        for row in self.index["runs"]:
+            if row["name"] == want:
+                return row
+        raise ValueError(f"no run named {want!r} under "
+                         f"{self.index['directory']}")
+
+    def _report_of(self, row):
+        path = os.path.join(row["path"], "report.json")
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def headline(self, params):
+        """What one run concluded -- or, with no report, how far it got."""
+        row = self._named_run(params)
+        report = self._report_of(row)
+        if report is None:
+            return draw_receipt(RunProgressView(run=row["name"]),
+                                self.index).as_dict()
+        return draw_receipt(RunHeadlineView(), report).as_dict()
+
+    def evidence(self, params):
+        """Every claim of one run's report, with what each one cites."""
+        row = self._named_run(params)
+        report = self._report_of(row)
+        if report is None:
+            raise ValueError(f"{row['name']} has not reported, so it has no "
+                             "claims to show evidence for")
+        doc = citationsmod.resolve_citations(row["path"], report)
+        return draw_receipt(EvidenceDrawerView(), doc).as_dict()
+
+    def compare(self, params):
+        """Two runs, and whether they may be read against each other.
+
+        Both named by `?run=` twice, resolved against the index by name. The
+        verdict is `oneground.comparability`, which docs/LIBRARY.md 2.2
+        specifies; this endpoint draws it and does not re-derive it.
+        """
+        if self.index is None:
+            raise ValueError("this session serves one run, not a directory")
+        want = params.get("run") or []
+        if len(want) != 2:
+            raise ValueError("name two runs: ?run=<a>&run=<b>")
+        rows = []
+        for name in want:
+            match = [r for r in self.index["runs"] if r["name"] == name]
+            if not match:
+                raise ValueError(f"no run named {name!r} under "
+                                 f"{self.index['directory']}")
+            rows.append(match[0])
+        doc = runsmod.comparison_document(rows[0]["path"], rows[1]["path"])
+        return draw_receipt(ComparisonView(), doc).as_dict()
 
     def ui_startup_line(self, seconds, shown_dir):
         """The one line `oneground ui` prints.
