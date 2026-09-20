@@ -360,8 +360,26 @@ Two slices, each shippable alone:
 
 There is no third slice. It was **Spend** — the pod session with its
 confirmation — and §4.3's reversal removes it: the UI never creates a pod,
-so there is nothing to sequence last. What remains of that work is session
-preparation and the card, which are reads, and they belong in slice 1 with
-everything else the UI only looks at.
+so there is nothing to sequence last.
+
+**The card is slice 2, not slice 1** — the developer's correction, and an
+earlier draft of this section had it wrong. It said what remained of the
+removed slice was session preparation and the card, which are reads, and
+put them in slice 1 with everything else the UI only looks at. §4.2's own
+mechanism forbids that, twice over:
+
+- `oneground.pod` is in `MEASURING`, so a view cannot import it. The same
+  guard that decides the supervisor decides this.
+- `cmd_plan` writes nothing — it resolves the session, prints the card and
+  returns. **There is no receipt to render**, and a view that produced the
+  card would be computing it, which the rendering contract forbids
+  whatever the guard said.
+
+So showing the card needs the supervisor: a second process runs
+`pod plan`, its output becomes an artifact, and a view renders that
+artifact. All of which arrives with slice 2. The sequencing did not decide
+this and could not have; the guard did — the same shape as the supervisor,
+and the second time in this paper that a question which read as a
+preference turned out to be already answered by the architecture.
 
 *The exam, before the code.*
