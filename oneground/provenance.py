@@ -187,3 +187,51 @@ def conflicting_checkout(cwd=None):
         return None
     return {"imported": PACKAGE_DIR, "working_directory": candidate,
             "checkout": root}
+
+# --------------------------------------------------------- the invocation
+# Task 046 step 3. `docs/INTERFACE.md` §2 requires that every UI action be
+# exactly a CLI invocation and that the receipt name which -- so that a test
+# can replay the command from a terminal and compare the outputs. The same
+# section records that no receipt writer captured it, and says the fix is a
+# field "beside the version that produced the artifact", in the shape task
+# 033 established.
+#
+# Beside, not inside. Putting it in the `oneground` block would change a
+# block four writers share and three tests assert the shape of, to carry a
+# fact that is not about the version.
+_INVOCATION = None
+
+
+def record_invocation(args):
+    """Called once by `cli.main`, with the arguments after the program name.
+
+    **argv[0] is not recorded, and that is not tidiness.** It is an
+    interpreter path on one machine and a console script on another, it names
+    a person's install rather than the code -- the distinction
+    `producing_version` exists to keep -- and it is not the thing a replay
+    runs. What is recorded is what follows `oneground`, which is runnable as
+    written.
+    """
+    global _INVOCATION
+    _INVOCATION = [str(a) for a in args]
+
+
+def invocation():
+    """What was run, for the replay rule, or null with a reason.
+
+        {"command": ["characterize", "requirements.yaml"], "note": ""}
+        {"command": None, "note": "not run from the command line: ..."}
+
+    A receipt written by a library caller has no invocation, and saying so is
+    the honest answer rather than inventing one from `sys.argv` -- which in
+    that case names pytest, or a notebook, and would put a command in the
+    receipt that reproduces nothing. Same null-and-a-reason rule as the
+    commit above, for the same reason: a field that is absent for a knowable
+    reason is worth more than a field that is plausible and wrong.
+    """
+    if _INVOCATION is None:
+        return {"command": None,
+                "note": ("not run from the command line, so there is no "
+                         "invocation to replay; this artifact was written by "
+                         "a caller that imported the package")}
+    return {"command": list(_INVOCATION), "note": ""}

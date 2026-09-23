@@ -50,6 +50,7 @@ from .. import intake
 from ..receipts import (MANIFEST_NAME, library_versions,
                         producing_version, public_paths_in, round_floats,
                         sha256_file, write_json_stable, write_manifest)
+from ..provenance import invocation
 from . import claims as cl
 from . import verdict as vd
 from .html import render_html
@@ -448,6 +449,10 @@ def run_declared(req, requirements_path, workdir, t0, log_fn=log,
         # says which interpreter and pins, and said nothing about the
         # code that read the rows.
         "oneground": producing_version(),
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "declared": declared,
         "analogy": analogy_block,
         "capacity": cap,
@@ -1002,6 +1007,10 @@ def build_manifest(recommended, workdir, req, verify_data, verify_info,
         # says which interpreter and pins, and said nothing about the
         # code that read the rows.
         "oneground": producing_version(),
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "recommended": {
             "family": recommended.family,
             "config": recommended.config,
@@ -1243,6 +1252,10 @@ def run(requirements_path, log_fn=log, env_stamp=None):
         # says which interpreter and pins, and said nothing about the
         # code that read the rows.
         "oneground": producing_version(),
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "constraints": constraints,
         "environment": {"verify_target": env,
                         "environment_id": env_id,

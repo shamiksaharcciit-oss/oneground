@@ -71,6 +71,7 @@ from ..models.base import ParameterError, resolve_deterministic
 from ..receipts import (library_versions, producing_version, round_floats,
                         sha256_file,
                         write_json_stable, write_manifest)
+from ..provenance import invocation
 from ..sample import loaders
 from ..truth import exact_knn
 
@@ -605,6 +606,10 @@ def run(requirements_path, log_fn=log, emit_state=False):
         "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
         "oneground": producing_version(),
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "torch_cuda": torch_info["torch_cuda"],
@@ -683,6 +688,10 @@ def run(requirements_path, log_fn=log, emit_state=False):
             "projection": projection_info,
             "library_versions": versions,
             "oneground": producing_version(),
+            # Which command wrote this, for the replay rule (task 046,
+            # docs/INTERFACE.md section 2). Beside the version rather than
+            # inside it: it is not a fact about the version.
+            "invocation": invocation(),
             "note": ("each state is written after its configuration's row is "
                      "measured and before its index is released; "
                      "simulate.json is identical with or without "

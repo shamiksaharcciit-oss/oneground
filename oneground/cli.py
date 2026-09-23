@@ -25,6 +25,7 @@ machine with neither faiss nor a qdrant client.
 import argparse
 import sys
 
+from . import provenance
 from . import __display_version__, __version__
 from . import environment as envmod
 
@@ -583,6 +584,12 @@ def build_parser():
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+
+    # Recorded before anything runs, so every receipt written under this
+    # command names it (task 046, docs/INTERFACE.md section 2). Here rather
+    # than in each writer because there is one command per process and a
+    # writer that had to be told would be a writer that could be forgotten.
+    provenance.record_invocation(argv)
 
     # `fixture` and `pod` own the rest of the command line; parsing them here
     # would mean maintaining two copies of their flags.

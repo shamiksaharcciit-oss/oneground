@@ -51,6 +51,7 @@ from ..receipts import (append_manifest, library_versions,
                         producing_version, round_floats,
                         sha256_array, sha256_file, write_json_stable,
                         write_manifest)
+from ..provenance import invocation
 from ..sample import sample_for_spec, split_queries
 from ..sample.fields import drift_cutoff, field_map
 from ..sample.stackexchange import local_source_digest
@@ -246,6 +247,10 @@ def build(spec_path, source=None, out="fixtures", skip_projection=False):
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
         "oneground": producing_version(),     # task 033
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "device": emb.get("device", "cpu"),

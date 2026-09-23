@@ -50,6 +50,7 @@ from ..adapters import (AdapterError, engines as registered_engines,
 from ..receipts import (library_versions, producing_version, round_floats,
                         sha256_file,
                         write_json_stable, write_manifest)
+from ..provenance import invocation
 from ..sample import loaders
 from . import load as loadgen
 from . import runpod as runpod_target
@@ -1330,6 +1331,10 @@ def _write(req, workdir, result, requirements_path, engine_names,
             for b in result.get("engines", [])],
         "library_versions": versions,
         "oneground": producing_version(),
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "requirements_file": {"path": os.path.abspath(requirements_path),

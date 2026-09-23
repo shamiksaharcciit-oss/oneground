@@ -45,6 +45,7 @@ from ..receipts import (MANIFEST_NAME, library_versions, producing_version,
                         sha256_file,
                         write_json_stable, write_manifest)
 
+from ..provenance import invocation
 CHUNK = 50_000
 
 ARTIFACTS = ["vectors.npy", "queries.npy", "ground_truth.npy",
@@ -147,6 +148,10 @@ def build(spec_path, source_path, out="fixtures", subset=None, log_fn=log):
         "python": platform.python_version(),
         "libraries": versions,
         "oneground": producing_version(),     # task 033
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "torch": torch_info,
         "source_sha256": src_digest,
         "n_base": int(n),

@@ -49,6 +49,7 @@ from ..models import get as get_model
 from ..proposals import card as card_mod
 from ..receipts import (library_versions, producing_version, round_floats,
                         sha256_file, write_json_stable, write_manifest)
+from ..provenance import invocation
 from ..report.verdict import CALIBRATION_TOLERANCE
 from .policy import PolicyError, canonical_json, load_policy
 from .prediction import PREDICTION_NAME, PredictionError, write_prediction
@@ -591,6 +592,10 @@ def build_card(plan, prediction, pred_sha, changed_row, judgement,
                 # This run's, against the baseline's above: the two a
                 # comparability verdict is about (task 033).
                 "oneground": producing_version(),
+                # Which command wrote this, for the replay rule (task 046,
+                # docs/INTERFACE.md section 2). Beside the version rather than
+                # inside it: it is not a fact about the version.
+                "invocation": invocation(),
             },
         },
         "sample": plan.sample,
@@ -687,6 +692,10 @@ def _info(plan, pred_sha, failure, elapsed, timing=None):
         "shard_depth_source": plan.shard_depth_source,
         "library_versions": versions,
         "oneground": producing_version(),
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "torch_cuda": torch_info["torch_cuda"],

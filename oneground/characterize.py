@@ -47,6 +47,7 @@ from .measures.skew import reading as skew_reading, skew_top10_share
 from .receipts import (MANIFEST_NAME, library_versions, producing_version,
                       round_floats,
                        sha256_file, write_json_stable, write_manifest)
+from .provenance import invocation
 from .sample import loaders
 
 COULDNT_CHECK = "couldnt_check"
@@ -456,6 +457,10 @@ def run(requirements_path, with_projection=False, log_fn=log,
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
         "oneground": producing_version(),
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "device": req.text.get("device", "cpu") if source_kind == "text" else None,
@@ -555,6 +560,10 @@ def run_declared(req, requirements_path, workdir, t0, log_fn=log,
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "library_versions": versions,
         "oneground": producing_version(),
+        # Which command wrote this, for the replay rule (task 046,
+        # docs/INTERFACE.md section 2). Beside the version rather than
+        # inside it: it is not a fact about the version.
+        "invocation": invocation(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "device": None,
