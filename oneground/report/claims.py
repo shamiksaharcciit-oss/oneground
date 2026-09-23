@@ -128,11 +128,100 @@ class Cite:
     outcome: Optional[str] = None
     constraint: Optional[str] = None
     reason: str = ""                 # the verdict's own words; carries no claim
+    # Task 043. A DERIVED cite has no `source`, because no artifact holds a
+    # difference or a ratio: what it has instead is an operation and its
+    # operands, and `check()` re-executes the operation rather than believing
+    # the value. `op` is one of DERIVED_OPS; `of` is the cites it is over, in
+    # an order that matters -- `a - b` is not `b - a`.
+    op: Optional[str] = None
+    of: Tuple["Cite", ...] = ()
+
+    @property
+    def derived(self):
+        return self.op is not None
 
     def as_dict(self):
-        return {"member": self.member, "value": self.value,
-                "source": self.source, "outcome": self.outcome,
-                "constraint": self.constraint, "reason": self.reason}
+        out = {"member": self.member, "value": self.value,
+               "source": self.source, "outcome": self.outcome,
+               "constraint": self.constraint, "reason": self.reason}
+        if self.op is not None:
+            out["op"] = self.op
+            out["of"] = [c.as_dict() for c in self.of]
+        return out
+
+    @classmethod
+    def from_dict(cls, d):
+        """Rebuild a cite, operands and all.
+
+        Nested cites are rebuilt recursively rather than left as dicts: a
+        round trip through JSON must give back something `check()` can
+        recompute, and a list of dicts is not that.
+        """
+        d = dict(d or {})
+        op = d.pop("op", None)
+        of = tuple(cls.from_dict(x) for x in (d.pop("of", None) or ()))
+        return cls(op=op, of=of, **d)
+
+
+# --------------------------------------------------------------------------
+# derived cites (task 043)
+# --------------------------------------------------------------------------
+# A `Cite` carries a value and a `source` path into a run's artifacts, and
+# `check()` step 5 goes and reads that path. **A difference has no such path**:
+# no artifact holds `a - b`. So before this, a derived number was not a cite,
+# lived in `Claim.extra`, and nothing checked it. Task 039b measured what that
+# costs -- four mutants of a proposal card's `delta`, inflated tenfold,
+# sign-reversed, and a RATIO silently substituted for a difference while the
+# prose still read "rises by", all returned *no problems*.
+#
+# A derived cite records the operation and its operands, and `check()`
+# **recomputes** it. That is step 5b's move applied to arithmetic: 5b stopped
+# believing `holds_for` and derived it from the rows, because *a claim that
+# supplies its own truth condition is not being checked*.
+#
+# The operands are ordinary cites, already checked against their sources, so a
+# derived cite is checked **all the way down to the artifacts**. That property
+# is the reason it is worth building.
+
+DIFFERENCE = "difference"
+RATIO = "ratio"
+
+#: Each operation over exactly two operands, in order. Two operands and not
+#: more: every gap this project reports is between two things, and an n-ary
+#: operation would need an associativity rule nobody has asked for.
+DERIVED_OPS = {
+    DIFFERENCE: lambda a, b: a - b,
+    RATIO: lambda a, b: (a / b) if b else None,
+}
+
+#: How close a recomputation must be to the stated value. Looser than
+#: machine epsilon because a claim may carry a rounded number, and far tighter
+#: than any difference a reader would notice.
+DERIVED_TOLERANCE = 1e-6
+
+
+def derive(op, left, right, member=None, constraint=None):
+    """A cite computed from two others, carrying the operation that made it.
+
+    `member` defaults to the left operand's, because a gap between two things
+    is reported about the first of them unless a caller says otherwise.
+    """
+    if op not in DERIVED_OPS:
+        raise ClaimViolation(
+            "unknown derived operation %r; declared: %s. An operation is "
+            "added deliberately -- an unrecognised one cannot be recomputed, "
+            "so the cite would be unchecked in exactly the way this exists to "
+            "prevent." % (op, ", ".join(sorted(DERIVED_OPS))))
+    value = _apply(op, left.value, right.value)
+    return Cite(member=member if member is not None else left.member,
+                value=value, constraint=constraint, op=op, of=(left, right))
+
+
+def _apply(op, a, b):
+    try:
+        return DERIVED_OPS[op](float(a), float(b))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
 
 
 @dataclass
@@ -146,6 +235,10 @@ class Claim:
 
     kind: str                         # the decision-log kind, for the reader
     predicate: str                    # what is asserted: "meets", "fails", ...
+    # Which run this claim's rows come from, when a RowIndex holds several
+    # (task 043). `None` means the single-run case, which is every existing
+    # caller and behaves exactly as before.
+    run: Optional[str] = None
     quantifier: str = NONE
     subject: Optional[str] = None     # the configuration, where there is one
     constraint: Optional[str] = None
@@ -195,7 +288,7 @@ class Claim:
             constraint=d.get("constraint"),
             scope=tuple(d.get("scope") or ()),
             holds_for=tuple(d.get("holds_for") or ()),
-            cites=tuple(Cite(**c) for c in (d.get("cites") or [])),
+            cites=tuple(Cite.from_dict(c) for c in (d.get("cites") or [])),
             text=d.get("text", ""), source=d.get("source", ""),
             environment=d.get("environment"),
             asserts_outcome=d.get("asserts_outcome"),
@@ -339,10 +432,55 @@ def check(claim, rows=None, tolerance=1e-9):
             bad.append("prose uses universal word(s) %s but the claim is %s"
                        % (list(words), q))
 
+    # 4b. a derived cite is RECOMPUTED, not believed (task 043).
+    #
+    #     The same move as 5b below, applied to arithmetic. A cite with a
+    #     `source` is checked against the artifact at that path; a derived
+    #     cite has no path, so what it is checked against is its own operation
+    #     re-executed over its own operands. Its operands are ordinary cites
+    #     and are checked at step 5, so the whole chain reaches the artifacts.
+    for c in claim.cites:
+        if not c.derived:
+            continue
+        if c.op not in DERIVED_OPS:
+            bad.append("cite for %s declares unknown operation %r"
+                       % (c.member, c.op))
+            continue
+        if len(c.of) != 2:
+            bad.append("derived cite for %s is over %d operand(s); every "
+                       "declared operation takes exactly two, in order"
+                       % (c.member, len(c.of)))
+            continue
+        recomputed = _apply(c.op, c.of[0].value, c.of[1].value)
+        if recomputed is None:
+            bad.append(
+                "derived cite for %s could not be recomputed from its "
+                "operands (%s of %r and %r)"
+                % (c.member, c.op, c.of[0].value, c.of[1].value))
+        elif c.value is None:
+            bad.append("derived cite for %s states no value" % c.member)
+        else:
+            try:
+                off = abs(float(c.value) - float(recomputed))
+            except (TypeError, ValueError):
+                off = None
+            if off is None or off > DERIVED_TOLERANCE:
+                bad.append(
+                    "derived cite for %s states %s but %s of %r and %r is %s"
+                    % (c.member, _fmt(c.value), c.op, c.of[0].value,
+                       c.of[1].value, _fmt(recomputed)))
+
     # 5. every cited value equals the value at its stated source field.
     if rows is not None:
         here = rows.for_claim(claim) if isinstance(rows, RowIndex) else rows
         for c in claim.cites:
+            # A derived cite has no `source` and no row: its value is a
+            # difference, and the row for its member holds the measured
+            # quantity that difference was taken OVER. Checking it here would
+            # compare a delta against a recall. It is checked at 4b instead,
+            # by recomputation, and its operands are checked here as usual.
+            if c.derived:
+                continue
             facts = (here.get(c.member) or {})
             key = c.constraint if c.constraint is not None else claim.constraint
             got = facts.get(key) if key is not None else None
@@ -485,8 +623,39 @@ class RowIndex(dict):
     `None` holds run-level facts, for claims about no particular option.
     """
 
+    # Task 043. Rows from more than one run, each knowing which run it came
+    # from and carrying that run's two provenance lists.
+    #
+    # A between-corpora gap spans two runs and could not be expressed at all
+    # before this: `rows_from_options` builds from ONE report's options, so
+    # the two sides of the comparison could never both be present. Every
+    # existing caller passes one run and is untouched -- `provenance` is empty
+    # and `for_claim` behaves exactly as it did.
+    provenance: Dict[Any, Any] = {}
+
+    def add_run(self, run, rows, provenance=None):
+        """Merge another run's rows in, keyed so subjects cannot collide.
+
+        Two runs may measure the same configuration label, and they are not
+        the same row. The key is `(run, subject)` so that a claim naming a
+        subject without naming a run still reaches the single-run rows it
+        always did, and a cross-run claim addresses `(run, subject)`.
+        """
+        if not isinstance(self.provenance, dict) or not self.provenance:
+            self.provenance = {}
+        for subject, members in (rows or {}).items():
+            self[(run, subject)] = members
+        self.provenance[run] = provenance
+        return self
+
+    def runs(self):
+        return sorted(r for r in (self.provenance or {}) if r is not None)
+
     def for_claim(self, claim):
         subject = getattr(claim, "subject", None)
+        run = getattr(claim, "run", None)
+        if run is not None and (run, subject) in self:
+            return self[(run, subject)]
         if subject in self:
             return self[subject]
         return self.get(None, {})
@@ -1144,3 +1313,4 @@ def how_to_resolve(name, verdict, verify_info):
                 "because a confident number from list prices would be "
                 "fiction.")
     return "To decide %s: %s." % (name, reason)
+

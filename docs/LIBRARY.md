@@ -143,11 +143,37 @@ the whole product exists to refuse. **Today the honest value is
 `couldnt_check`, on the code**, because no artifact records the oneground
 version that measured a row.
 
-> **This verdict is written here and implemented nowhere.** The only
-> `comparable()` in the tree is `oneground/calibrate/history.py`, and it
-> compares `("check", "dataset", "engine", "engine_version", "config")` —
-> engine identity, not the provenance this section defines. It is the right
-> shape and the wrong subject.
+> **This verdict is implemented** in
+> [`oneground/comparability.py`](../oneground/comparability.py), by task 041
+> at run level and extended by task 043 to rows. Task 043 also gave it the
+> thing it could not previously know — see below.
+>
+> `oneground/calibrate/history.py` also has a `comparable()`, and it stays:
+> it compares `("check", "dataset", "engine", "engine_version", "config")` —
+> engine identity, not the provenance this section defines. Right shape,
+> different subject, and the two are not merged.
+
+**What 043 added, and what it costs to know.** Until then the `machine`
+ingredient was `unknown` for every pair of local runs, because
+`environment_id` is `local:<os>-<arch>` — a class, not an identity — and only
+a pod id named a machine. A required ingredient that is unknown makes the
+whole verdict `couldnt_check`, so **the feature answered couldn't-check to
+every question a user without a rented machine could ask.**
+
+A local run now records an **installation digest**: a truncated one-way hash
+of a salt generated once, held on the machine, and never published. Two runs
+from one installation are evidence of the same place. It supports *"the same
+installation"* and not *"the same machine"*, because the salt is per
+installation and two installations on one machine produce two digests — and
+overstating it would be the platform class's defect one step quieter.
+
+**A row carries two provenance lists** — *what was measured* (corpus digest,
+ground truth, query subset) and *what did the measuring* (code, libraries,
+settings, machine) — because neither subsumes the other in either direction.
+`query_subset` is declared and always `None`: [BRIDGE.md](BRIDGE.md) §3.3
+records that no receipt expresses it, so a comparison over it is
+couldn't-check and visibly so, rather than the list quietly having two members
+where the design says three.
 >
 > Two later positions now depend on it: the interface position gates its
 > side-by-side view on this verdict, and the VectorDBBench bridge gates its

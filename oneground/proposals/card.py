@@ -262,18 +262,35 @@ def _literals(*values):
 
 def _metric_claim(card, r, from_label, to_label, tolerance):
     predicted = _predicted(card, r["metric"], "expects")
+    after = cl.Cite(member=to_label, value=r.get("after"),
+                    outcome=r["outcome"],
+                    source="%s:measured.changed.%s" % (CARD_NAME, r["metric"]))
+    before = cl.Cite(member=from_label, value=r.get("before"),
+                     source="simulate.json:rows[%s].%s" % (from_label,
+                                                           r["metric"]),
+                     constraint=r["metric"])
+    # Task 043 step 7. `delta` is the one number in this project that states a
+    # difference and is judged against a difference threshold, and until now
+    # it lived in `extra` where nothing checked it -- inflate it tenfold,
+    # reverse its sign, or silently put a ratio there and `check()` was silent
+    # (task 039b's four mutants). As a derived cite it is recomputed from the
+    # two operands above, which are themselves checked against their sources,
+    # so the arithmetic is checked down to the artifacts.
+    #
+    # `verdict.py` computes the delta with the direction already applied --
+    # `(b - a)` for `rises`, `(a - b)` for `falls` -- so the operands are
+    # ordered to match rather than the value being re-signed here. The order
+    # is the claim: `a - b` is not `b - a`.
+    rises = predicted.get("direction") != "falls"
+    delta_cite = cl.derive(cl.DIFFERENCE,
+                           after if rises else before,
+                           before if rises else after,
+                           member=to_label, constraint=r["metric"])
     return cl.Claim(
         kind="proposal_metric", predicate=r["outcome"], subject=to_label,
         constraint=r["metric"], scope=(to_label,),
         holds_for=(to_label,), asserts_outcome=r["outcome"],
-        cites=(cl.Cite(member=to_label, value=r.get("after"),
-                       outcome=r["outcome"],
-                       source="%s:measured.changed.%s" % (CARD_NAME,
-                                                          r["metric"])),
-               cl.Cite(member=from_label, value=r.get("before"),
-                       source="simulate.json:rows[%s].%s" % (from_label,
-                                                             r["metric"]),
-                       constraint=r["metric"])),
+        cites=(after, before, delta_cite),
         detail=r.get("detail", ""),
         extra={"direction": predicted.get("direction"),
                "delta": _n(r.get("delta", 0)),

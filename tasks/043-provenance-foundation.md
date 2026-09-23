@@ -72,7 +72,73 @@ are built on it.
 
 ## Do
 
-### 1. Machine identity in the receipt — **first, and the ruling is made**
+### 1. Machine identity in the receipt — **first, and there are three gaps, not two**
+
+**The premise of this brief's first draft was wrong, and it was caught by the
+stop-and-show rather than by review.** The draft said the verdict is silent
+because *two fields are missing from the receipts*. Running the
+demonstration against a real pair of `characterize` runs showed all three
+provenance fields reading `None` — `environment_id`, `pod` and `installation`
+alike — because **`run_environment` is written by `report` and by nothing
+else**. It appears three times in `oneground/report/__init__.py` and in no
+other writer.
+
+So the verdict is silent **for different reasons in different workdirs**:
+
+| workdir | why the machine ingredient is unknown |
+|---|---|
+| report-bearing | `run_environment` is there; it carries a class and no identity — **two absent fields** |
+| characterize-only | **the whole block is absent**, so there is nothing to read a field out of |
+
+A fix built on the two-field premise would have worked for the first and
+**silently not worked for the second** — and the second is the command a user
+without a pod actually runs. That is the failure mode this task exists to
+remove, reproduced inside the task.
+
+**Four gaps, and the fourth was found the same way as the third** — by the
+demonstration failing a second time, after the writer was fixed:
+
+1. `environment_id` is a class, not an identity. → the installation digest.
+2. The digest does not exist. → generate, store locally, never publish.
+3. **`characterize` records no `run_environment` at all.** → it writes the
+   block into `build_info.json`, in Tier 1 and Tier 2 alike.
+4. **`facts_of` reads `run_environment` from `report.json` only**, while every
+   neighbouring fact goes through `_first(infos, ...)`. → read it the same
+   way, with the report as fallback.
+
+Gap 4 is a finding in its own right and is written up as one below, because
+**a fixed writer and an unfixed reader produce an identical symptom** and the
+second is the harder to see.
+
+The demonstration is then re-run **on a characterize-only pair**, because a
+report-bearing pair would show the flip on the path that already half-worked.
+
+### Finding — the reader is where this function has now failed twice
+
+`comparability.facts_of` reads every provenance fact through
+`_first(infos, ...)`, which consults each `_info.json` receipt in turn and
+falls back to the report. **`run_environment` alone was special-cased to
+`report.json`.** So after `characterize` began writing the block, a
+characterize-only workdir still reported every provenance field as `None`, and
+the symptom was **identical** to the writer never having been fixed.
+
+Three lines above it sits this comment:
+
+> *Task 033's block. It is written into `report.json` as well as into the
+> `_info.json` receipts, and reading only the latter reported `code: unknown`
+> for runs whose report carries the commit — a defect in this reader that task
+> 041 first published as a finding about the artifacts.*
+
+The same mistake, in the same function, three lines apart, caught twice —
+and the first time it was published as a finding about the artifacts before
+anyone noticed it was the reader.
+
+**What would have caught it, and does not exist:** a test that the reader
+finds **every fact in each of the files that may carry it**, rather than in
+the one file it happens to be handed. Build it as part of this step. It is a
+property of the reader, not of any artifact, so it is cheap and it is the only
+thing that generalises — the next fact added to a receipt will be read by
+whichever branch its author copied.
 
 `comparability.INGREDIENTS` already names the defect exactly:
 

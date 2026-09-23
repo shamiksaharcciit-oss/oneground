@@ -135,6 +135,73 @@ def producing_version():
     return out
 
 
+#: The repository root, for turning an absolute path into the repo-relative
+#: form every other source string in an artifact already uses.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+
+PUBLIC_PATH_NOTE = ("recorded relative to the repository root, or as a "
+                    "basename when outside it: a receipt does not name the "
+                    "filesystem it was produced on")
+
+
+def public_path(raw, repo_root=None):
+    """A path fit to be written into a receipt. Task 043 step 5.
+
+    Repo-relative inside the repository, basename outside: still says WHICH
+    file, says nothing about where it lives on anybody's machine.
+
+    WHY THIS IS APPLIED WHERE THE FIELD IS WRITTEN
+    ----------------------------------------------
+    `report.json` recorded `price_table.path` as the absolute path of the
+    checkout that produced it. Task 041's rule: *a receipt field holding a
+    machine-local path cannot be published by running the command that
+    produces it.*
+
+    It then forced a sanitization at **three separate boundaries in one
+    task** -- the teaser exporter, which owned the function; the fixture
+    rebuild, which borrowed it and replaced only its note; and a tracked lab
+    test fixture, sanitised by hand so it would not fail the identifier scan.
+    Each borrowed a function whose own `path_note` named a different caller.
+
+    Sanitising at publish time is what produced three boundaries, and it
+    would produce a fourth, because every new consumer of the receipt is a
+    new place to remember. **A receipt that never contains the absolute path
+    has nothing to sanitise anywhere.** So the transform lives here, beside
+    the other receipt helpers, and runs where the field is written.
+
+    The note names the transform, not a caller: the teaser exporter's version
+    said "rewritten by the teaser export", which was false for every other
+    caller and true only of the first.
+    """
+    if not raw:
+        return raw
+    root = repo_root or REPO_ROOT
+    native = str(raw).replace("\\", os.sep).replace("/", os.sep)
+    try:
+        inside = os.path.commonpath([os.path.abspath(native), root]) == root
+    except ValueError:                      # different drives on Windows
+        inside = False
+    return (os.path.relpath(native, root).replace(os.sep, "/")
+            if inside else os.path.basename(native))
+
+
+def public_paths_in(table, keys=("path",), repo_root=None):
+    """`table` with each named key made fit to record, and a note saying so."""
+    if not table:
+        return table
+    out = dict(table)
+    changed = False
+    for key in keys:
+        if out.get(key):
+            was = out[key]
+            out[key] = public_path(was, repo_root)
+            changed = changed or out[key] != was
+    if changed:
+        out["path_note"] = PUBLIC_PATH_NOTE
+    return out
+
+
 def sha256_file(path, buf=1 << 20):
     h = hashlib.sha256()
     with open(path, "rb") as f:
