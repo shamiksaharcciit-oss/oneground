@@ -120,10 +120,30 @@ with its cost rather than changed, because `pod` is a module this slice has
 now wanted to reach into and this is the sixth contract item, not a UI
 slice's to take.
 
-**And it sharpens the shape.** The fifth was a *finding* travelling in an
-exit code. This is a *refusal* travelling under the wrong number. Two
-different ways for the same seam to leak, in two different modules, both
-invisible until something downstream had to read an exit code and mean it.
+### The fifth and sixth are a category, and it is the one that makes the ruling easy
+
+Two ways for one seam to leak, and naming them together is more useful than
+either alone:
+
+| | what travels | where it should have been | what a reader is told |
+|---|---|---|---|
+| **5** `simulate` exits 1 on dropped configs | a **finding** | `simulate_info.json:dropped`, which already has it | the run did not finish |
+| **6** `pod plan` exits 1 on the cost cap | a **refusal** | exit 2, which already means refusal | the run crashed |
+
+Both are the process carrying something the artifact carries better, and in
+both the exit code is *less* informative than what is already written down
+beside it.
+
+**The sixth is the instance that should decide this**, because of which
+refusal it is. `cmd_plan` prints `REFUSED: the cost cap is exceeded. \`up\`
+would not proceed.` — **the one refusal in the product whose entire job is to
+stop somebody spending money** — and `classify` reads exit 1 with no receipt
+and records **failed**. So the page shows a crash where the tool was
+protecting the user's wallet, and the sentence that says so is in a log
+nobody opens after a job has failed.
+
+One character fixes it. The cost of not fixing it is that the most important
+refusal in the tool is the one most likely to be mistaken for a bug.
 
 ## What the six have in common, which is the thing to rule on
 

@@ -63,6 +63,16 @@ empty. **A state-bearing section that admits to being one** is the cheapest
 version of this to keep honest, because the admission is itself a rule and
 rules do not go stale.
 
+> *A small second instance, found while writing the document that describes
+> the work that falsified it.* `docs/UI.md` carried a section headed **"What
+> this slice does not do"** — true of slice 1, and false the moment slice 2
+> shipped the write half it listed. It was noticed only because the same
+> commit was adding the write half directly beneath it. It now reads *"What
+> slice 1 did not do, and what slice 2 did"*, which names the state instead
+> of asserting it. **A heading with "this" in it is a state-bearing section
+> wearing a determiner**: *this slice*, *the current*, *today's* — each one
+> means whoever reads it later has to know when it was written.
+
 ### 1.1 Correct the checklist in the same pass as the argument
 
 **The rule.** When you correct a document, correct its checklist in the same
@@ -654,16 +664,35 @@ further copies saying the same thing in different words went on being wrong.
 A search that fails through carelessness is advice. A search that fails
 through precision is evidence.
 
-### Three tools, each correct, each answering an adjacent question
+### Tools that are correct and answer an adjacent question
 
-It happened three times in one slice, to three different kinds of tool, and
-the repetition is the result rather than the anecdote.
+It has now happened **six times in one slice**, to six different kinds of
+tool, and the repetition is the result rather than the anecdote. Three are in
+the table below; the other two are warning 1's write-path scan and warning
+7's patch on a re-export, which are the same shape reached from elsewhere.
+
+*The count is stated because it was got wrong once already: this was recorded
+as the fifth instance and is the sixth, and a page that collects instances
+should be able to count them.*
 
 | the tool | what it checked, correctly | what it could not see |
 |---|---|---|
 | a `var()` check over the stylesheet | every `var(--x)` names a declared token | three unreadable controls: two coloured by *another* stylesheet, one matching **no rule at all** — there was no `var()` to look at |
 | a grep for a stale claim | every copy containing that phrase | three further copies saying the same thing in different words |
 | a test searching a module for `atexit` | the string's presence | that the only occurrence was the docstring **saying there is none** |
+| a test enforcing the exit-code rule | every literal non-zero return in `oneground/cli.py` | four of the ten stages, whose handlers are in `oneground/pod/cli.py` — it covered six and read as though it covered ten |
+
+**The last one is worth singling out**, because the tool was new, mine, and
+written days after this very entry went on the page — by the person who had
+just written it. It made **a coverage claim nobody stated**: nothing in it
+said *all stages*, and nothing said *six of ten* either, so a reader took the
+coverage from the name. Knowing the list is not the same as not making them
+(warning 4's line), and it applies to the author of the list.
+
+The repair was the one this section prescribes, plus a second assertion that
+makes the gap impossible rather than unlikely: `set(HANDLERS) ==
+set(jobs.STAGES)`, so a stage added later cannot silently go unchecked. **An
+unstated coverage claim becomes a stated one, and then a checked one.**
 
 **Not one of these was a bad check.** Each was right every time it ran, and
 each would pass a review. They failed in the same place: **the question they

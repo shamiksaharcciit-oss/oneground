@@ -319,6 +319,13 @@ The last row is the one to read twice. **The pod card is not reproduced by
 the interface — it is the command line's card, printed by the command line,
 shown verbatim.** There was never a version of this that computed a price.
 
+> **An interface that cannot import the thing it describes cannot drift from
+> it.** The guard that refuses `oneground.pod` to every served module is
+> usually read as a restriction on what the UI may do. It is also the only
+> reason the card on this page and the card at a terminal are the same card
+> next year: there is no second implementation to fall behind, because there
+> was never anywhere to put one.
+
 ### The form
 
 Three doors, one artifact: fill it in, upload one you have, download a
