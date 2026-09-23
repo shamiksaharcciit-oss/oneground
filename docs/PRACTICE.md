@@ -334,8 +334,16 @@ The shape warnings 3, 5 and 6 share: **a green result is a claim about the
 world, and the three ways to make one without evidence are to pass for the
 wrong reason, to check a copy of the rule, and to not run at all.**
 
-**10. A guard whose falsity is invisible at the call site.** The lab server's
-Host and token checks lived in a helper that ended:
+**10. A guard whose falsity is invisible at the call site.**
+
+> **Lifting a `return` into a helper changes what it returns *from*, and
+> drops control silently if control is what it was returning.**
+
+That line first, because it is the one to carry away: extracting a duplicated
+block into a function is a repair this project makes constantly, and this is
+the way it goes wrong. The rest of this warning is how it went wrong once.
+
+The lab server's Host and token checks lived in a helper that ended:
 
 ```python
 return self.send(req, 403, {"error": "refused: ... token is required"})
@@ -365,13 +373,17 @@ every test asserting a status code passes.
 > means — `if not self._addressed(req): return`. Then the failure mode is a
 > guard that returns the wrong bool, which is a thing a test can state.
 >
-> And the tell, because this arrived by a repair we make constantly: **it was
-> introduced by extracting a duplicated block into a helper.** In `answer`
-> the line had been `return self.send(...)`, which returned from the function
-> that mattered. Moved into a helper, the same expression returns from the
-> helper and means nothing. **When you lift a `return` into a function, you
-> have changed what it returns from** — and if what it returned was control
-> rather than a value, the lift silently drops it.
+> And this is the tell at the top, in the particular. In `answer` the line
+> had been `return self.send(...)`, which returned from the function that
+> mattered. Moved into a helper, the same expression returns from *the
+> helper* and means nothing to the caller. The expression did not change; what
+> it returned from did.
+>
+> So: after extracting a block, **read every `return` you moved and ask what
+> it now returns from.** A `return` that carried a value still carries it. A
+> `return` that carried *control* — stop here, do not do the rest — no longer
+> carries anything, and the call site that should have reinstated it is the
+> line you just wrote without thinking.
 
 **11. An intermittent failure is evidence, and a fix that does not make it
 stop is a different fix.** Warning 10 above was found only because one test

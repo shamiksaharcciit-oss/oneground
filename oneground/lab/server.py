@@ -733,10 +733,44 @@ class LabServer:
                         "absent": "this job has no log"}
             path = os.path.join(self.runs_dir, job.log)
             if not os.path.isfile(path):
-                return {"id": job.id, "text": None,
+                return {"id": job.id, "text": None, "offset": 0,
+                        "live": job.state in ("queued", "running"),
                         "absent": "the log has not been written yet"}
-            with open(path, encoding="utf-8", errors="replace") as f:
-                return {"id": job.id, "text": f.read(), "absent": None}
+            # Streamed by offset rather than re-read whole. A `simulate`
+            # writes for minutes, and re-sending the file every two seconds
+            # would make a long run cost more to watch than to do -- and
+            # would flicker, because the page would replace text a reader
+            # was in the middle of.
+            #
+            # Bytes, not characters: the offset has to survive a multi-byte
+            # character split across two reads, and a character offset does
+            # not. `errors="replace"` then makes a half-character visible
+            # rather than an exception.
+            try:
+                since = max(0, int((params.get("since") or ["0"])[0]))
+            except ValueError:
+                since = 0
+            size = os.path.getsize(path)
+            if since > size:
+                # The log was replaced -- a job restarted, or a stale offset
+                # from a previous one. Saying so beats returning nothing,
+                # which the page would draw as "no output".
+                return {"id": job.id, "text": None, "offset": 0,
+                        "live": job.state in ("queued", "running"),
+                        "absent": "this log is shorter than it was; it has "
+                                  "been replaced since you last read it"}
+            with open(path, "rb") as f:
+                f.seek(since)
+                chunk = f.read()
+            return {"id": job.id,
+                    "text": chunk.decode("utf-8", errors="replace"),
+                    "offset": since + len(chunk),
+                    # Whether there is more coming, from the record rather
+                    # than guessed from the bytes: a log that stops growing
+                    # has either finished or stalled, and only the state
+                    # knows which.
+                    "live": job.state in ("queued", "running"),
+                    "absent": None}
         raise ValueError(f"no job {wanted!r} in this directory")
 
     def supervisor_address(self, params):

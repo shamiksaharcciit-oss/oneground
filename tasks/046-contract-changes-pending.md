@@ -4,9 +4,15 @@
 finding about the seam and not five findings about a UI slice. To be ruled on
 as a shape when 046 closes.*
 
-*The fifth arrived after this note was written, and it arrived the way the
-note predicts: from building the test for a rule, rather than from reading
-the code the rule is about.*
+*The fifth arrived after this note was written, and **it arrived from
+building the test for a rule rather than from reading the code the rule is
+about.** That is the argument for writing the test at all, and it is worth
+separating from the usual one. A test is normally written to stop a known
+defect recurring. This one was written to make a rule enforceable, found a
+violation of it on its first run, and the violation was in code that had been
+read carefully three times that week — by me, while writing the rule the code
+breaks. Reading tells you what the code says. Writing the check tells you
+what it does.*
 
 **A consequence worth recording before the instances**, because it is the
 first place this slice's two halves meet without being wired together: the

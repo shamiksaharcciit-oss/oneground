@@ -133,17 +133,79 @@
     return row;
   }
 
+  // Which logs are open, and how far each has been read. Kept out here
+  // rather than on the element so a refresh that redraws a row does not
+  // lose a reader's place -- the job list is rebuilt every few seconds and
+  // the log is the one thing on the page somebody is in the middle of.
+  const open = new Map();          // job id -> {offset, text, live}
+
   async function showLog(job, row) {
-    const existing = row.querySelector('.job-log');
-    if (existing) { existing.remove(); return; }
-    const pre = el('pre', 'job-log', 'reading…');
-    row.appendChild(pre);
+    if (open.has(job.id)) {
+      open.delete(job.id);
+      const existing = row.querySelector('.job-log');
+      if (existing) existing.remove();
+      return;
+    }
+    open.set(job.id, { offset: 0, text: '', live: true });
+    row.appendChild(el('pre', 'job-log', 'reading…'));
+    await followLog(job.id, row);
+  }
+
+  // Streamed by offset: a `simulate` writes for minutes, and re-reading the
+  // whole file every few seconds would cost more to watch than to run, and
+  // would replace text a reader was in the middle of.
+  async function followLog(id, row) {
+    const state = open.get(id);
+    if (!state) return;
+    const pre = row.querySelector('.job-log');
+    if (!pre) return;
     try {
-      const out = await get('/api/jobs/log', { id: job.id });
-      pre.textContent = out.text === null ? out.absent : out.text;
-      if (out.text === null) pre.classList.add('absent');
+      const out = await get('/api/jobs/log',
+                            { id: id, since: String(state.offset) });
+      if (!open.has(id)) return;              // closed while we were asking
+      if (out.text === null) {
+        // Absent is a fact with a reason, not an empty log. A job that has
+        // not started yet and a log that was replaced are different things
+        // and the endpoint says which.
+        pre.textContent = out.absent;
+        pre.classList.add('absent');
+        state.offset = 0;
+        state.text = '';
+      } else {
+        pre.classList.remove('absent');
+        state.text += out.text;
+        state.offset = out.offset;
+        // Only touch the DOM when there is something new: an unchanged
+        // reassignment still resets a selection in some browsers, and the
+        // reader is the person this is for.
+        if (out.text) {
+          pre.textContent = state.text || '(no output yet)';
+          // Follow the tail only if the reader is already at it. Scrolling
+          // someone back down because a line arrived is the fastest way to
+          // make a live log unreadable.
+          const atEnd = pre.scrollHeight - pre.scrollTop - pre.clientHeight
+            < 24;
+          if (atEnd) pre.scrollTop = pre.scrollHeight;
+        } else if (!state.text) {
+          pre.textContent = '(no output yet)';
+        }
+      }
+      state.live = !!out.live;
     } catch (e) {
       pre.textContent = e.message;
+    }
+  }
+
+  // Called from the refresh: every open log catches up, and a log whose job
+  // has finished is read once more and then left alone.
+  async function followOpenLogs() {
+    for (const id of Array.from(open.keys())) {
+      const row = document.querySelector('.job[data-job="' + id + '"]');
+      if (!row) continue;                     // its row is gone; leave it
+      if (!row.querySelector('.job-log')) {
+        row.appendChild(el('pre', 'job-log', ''));
+      }
+      await followLog(id, row);
     }
   }
 
@@ -399,6 +461,18 @@
     out.jobs.slice().reverse().forEach((job) => {
       list.appendChild(jobRow(job));
     });
+    // The rows were just rebuilt, so any open log lost its element. Restore
+    // it from what has already been read rather than re-fetching from zero:
+    // the reader's place is in `open`, not in the DOM.
+    for (const [id, state] of open) {
+      const row = list.querySelector('.job[data-job="' + id + '"]');
+      if (!row) continue;
+      const pre = el('pre', 'job-log', state.text || '(no output yet)');
+      if (!state.text) pre.classList.add('absent');
+      row.appendChild(pre);
+      pre.scrollTop = pre.scrollHeight;
+    }
+    await followOpenLogs();
     // NOT WHILE SOMEONE IS USING IT. The runner is rebuilt on every
     // refresh, and the chooser lives inside it -- so the four-second timer
     // was deleting the chooser four seconds after it opened. Clicking a

@@ -664,3 +664,68 @@ def test_a_wrong_host_also_stops_the_request():
         finally:
             lab.stop()
         assert os.listdir(tmp) == []
+
+# ------------------------------------------------- the log, streamed
+def test_a_log_is_read_by_offset_and_only_the_new_bytes_come_back(tmp_path):
+    """A `simulate` writes for minutes. Re-reading the file every few
+    seconds would cost more to watch than to run, and would replace text a
+    reader was in the middle of."""
+    from oneground import jobs as jobsmod
+    from oneground import supervisor as supmod
+
+    sup = supmod.Supervisor(str(tmp_path))
+    job = sup.enqueue("simulate", ["simulate", "runs/x"])
+    os.makedirs(os.path.join(str(tmp_path), supmod.LOGS_DIR), exist_ok=True)
+    path = os.path.join(str(tmp_path), job.log)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write("first\n")
+
+    lab = _ui(str(tmp_path))
+    try:
+        a = lab.job_log({"id": [job.id]})
+        assert a["text"] == "first\n" and a["live"] is True
+        with open(path, "a", encoding="utf-8", newline="") as f:
+            f.write("second\n")
+        b = lab.job_log({"id": [job.id], "since": [str(a["offset"])]})
+        assert b["text"] == "second\n", "the whole file came back again"
+        assert b["offset"] > a["offset"]
+        # and nothing new is nothing, not a re-send
+        c = lab.job_log({"id": [job.id], "since": [str(b["offset"])]})
+        assert c["text"] == ""
+        assert jobsmod.QUEUED == job.state
+    finally:
+        lab.stop()
+
+
+def test_an_offset_past_the_end_says_the_log_was_replaced(tmp_path):
+    """Empty and replaced are different answers. Returning nothing for a
+    stale offset would draw as "no output" over a log that exists."""
+    from oneground import supervisor as supmod
+    sup = supmod.Supervisor(str(tmp_path))
+    job = sup.enqueue("simulate", ["simulate", "runs/x"])
+    os.makedirs(os.path.join(str(tmp_path), supmod.LOGS_DIR), exist_ok=True)
+    with open(os.path.join(str(tmp_path), job.log), "w",
+              encoding="utf-8", newline="") as f:
+        f.write("short\n")
+    lab = _ui(str(tmp_path))
+    try:
+        out = lab.job_log({"id": [job.id], "since": ["99999"]})
+        assert out["text"] is None
+        assert "replaced" in out["absent"]
+    finally:
+        lab.stop()
+
+
+def test_the_log_path_comes_from_the_record_not_the_request(tmp_path):
+    """No part of a request ever reaches a filesystem path -- the rule this
+    server has held since it was written. The id is matched against the job
+    list and the path is read off the record."""
+    lab = _ui(str(tmp_path))
+    try:
+        for attempt in ("../../etc/passwd", "logs/../../secret",
+                        "20260101T000000Z-simulate-deadbeef"):
+            with pytest.raises(ValueError) as caught:
+                lab.job_log({"id": [attempt]})
+            assert "no job" in str(caught.value), attempt
+    finally:
+        lab.stop()
