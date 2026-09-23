@@ -80,7 +80,8 @@ a failing write rather than by a docstring nobody opens.
 
 **Not done:** retiring copies 1–3. Each has a consumer and a slightly
 different contract, and converting them is a behaviour change on three more
-write paths. Named here as the remaining work rather than folded in.
+write paths. **Scoped as `tasks/044h-five-copies-of-one-transform.md`**, with
+the discoverability question at its centre rather than as three conversions.
 
 ## Three checks, three subjects — recorded where it will be read
 
@@ -164,10 +165,33 @@ proposal refused:
 It names every base it tried, so the next step is a reading rather than a
 guess, and it gives two remedies — one immediate, one permanent.
 
-**In practice most pre-043 receipts will not reach that message at all**,
-because resolution now finds the file: the recorded absolute path fails, the
-checkout base succeeds, and the digest confirms it. That is the pod case
-working where it used to fail.
+### The strongest outcome in this task: most users never see the refusal
+
+> **The change retires its own error message for most users while fixing the
+> case it was built for.**
+
+Most pre-043 receipts never reach that message, because **resolution now finds
+the file**: the recorded absolute path fails, the checkout base succeeds, and
+the `sha256` the receipt already carried confirms it is the right file. The
+user runs `propose` on an old workdir and it simply works.
+
+And it works hardest where it previously could not work at all. A pod-produced
+receipt records `/workspace/oneground/requirements.arxiv-150k.pod.yaml`, which
+has never been openable on the laptop that fetched it — two of the seven
+non-resolving paths measured in `runs/` are exactly this, and every pod
+session produces one. Those now resolve.
+
+So the two halves point in opposite directions and that is the point. The
+refusal is the loud half and it fires on what a *writer* does wrong. The
+resolver is the quiet half and it means a *reader* stops being punished for
+what a writer did wrong before the rule existed. A migration whose remedy is
+"re-run everything" would have been a worse artifact than one that reads the
+old receipts correctly and only refuses new mistakes — and this is the second,
+without anyone having asked for it as a requirement.
+
+The refusal's message still matters: it is what reaches the next person
+writing a receipt, and it is where `receipts.public_path` becomes
+discoverable. It just is not what most users will meet.
 
 **Writing, if a field still slips through:**
 
