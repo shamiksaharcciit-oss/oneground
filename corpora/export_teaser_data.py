@@ -83,6 +83,7 @@ import io
 import json
 import os
 import platform
+import re
 import sys
 import time
 
@@ -905,8 +906,12 @@ def build_verify(report_path, verify_path):
         "dimension": v["dimension"],
         "elapsed_seconds": v["elapsed_seconds"],
         "recall_at_10_measured": seq["recall_at_10"],
-        "calibration": dict(v["calibration"],
-                            error_recall=v["calibration_error_recall"]),
+        # public_sources: this block is copied from verify.json and carries
+        # `engine_line.source`, the field that reached the published page as
+        # an absolute path and was redacted by hand. Task 044e.
+        "calibration": public_sources(
+            dict(v["calibration"],
+                 error_recall=v["calibration_error_recall"])),
         "ingest": {k: v["ingest"][k] for k in
                    ("n_vectors", "batches", "seconds", "vectors_per_second")},
         "index": v["index"],
@@ -1018,6 +1023,31 @@ def k_sweep_block(path=K_SWEEP_SOURCE):
             "file named in `source`, not recomputed by this export: a second "
             "derivation of a published number is not a receipt for it."),
     }
+
+
+#: Keys whose value is a path, wherever they sit in a copied block.
+PATH_KEYS = ("source", "path")
+
+
+def public_sources(obj):
+    """A block copied from a receipt, with its path fields made publishable.
+
+    A **walker over** `receipts.public_path`, not another implementation of
+    it: the transform is the shared one and this only decides where to apply
+    it. `build_verdict` copies `verify.json`'s calibration block wholesale,
+    and that block carries `engine_line.source` -- an absolute path through
+    somebody's checkout, which reached the published `values.json` and was
+    redacted by hand afterwards. Task 044e: redaction is the hand that does
+    not scale, because it must be applied every time and only has to be
+    forgotten once.
+    """
+    if isinstance(obj, dict):
+        return {k: (public_path(v) if k in PATH_KEYS and isinstance(v, str)
+                    and v else public_sources(v))
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [public_sources(v) for v in obj]
+    return obj
 
 
 def public_price_table(table):
@@ -1233,10 +1263,76 @@ def write_inline(out):
             encoding="utf-8", newline="\n").write(body)
 
 
+#: A string shaped like somebody's filesystem. Task 044g's runtime refusal,
+#: arriving at the publishing boundary where core asked for it -- and this is
+#: the right place for it, because `write_json` below is the one writer in
+#: this project that bypasses `receipts.write_json_stable`, and the file it
+#: writes is the only one that is actually published.
+#:
+#: Wider than the receipt matcher in one way -- it catches `~/...`, which a
+#: receipt never holds but a hand-edited page datum might -- and narrower in
+#: none. Deliberately not matching a bare relative path (`runs/x/verify.json`
+#: is the correct form) or a lone username, which is
+#: `test_no_tracked_file_carries_a_machine_identifier`'s subject.
+LOCAL_PATH = re.compile(
+    r"(^|[\s\"'=(\[])("
+    r"[A-Za-z]:\\"                      # C:\ -- a drive letter and backslash
+    r"|[A-Za-z]:/"                      # C:/ -- the same thing, posix-slashed
+    r"|\\\\[^\\/\s]+\\"                 # \\server\share
+    r"|/(?:home|Users|root|workspace)/"  # unix homes, and the pod
+    r"|~[/\\]"                          # ~/ or ~\
+    r")")
+
+
+def local_paths_in(obj, at=()):
+    """Every string in a payload shaped like a local path, with its key."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from local_paths_in(v, at + (str(k),))
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            yield from local_paths_in(v, at + ("[%d]" % i,))
+    elif isinstance(obj, str):
+        m = LOCAL_PATH.search(obj)
+        if m:
+            yield ".".join(at), obj, m.group(2)
+
+
+def refuse_local_paths(path, obj):
+    """Raise if this payload would publish somebody's filesystem.
+
+    **Refuses; does not repair.** `public_price_table` in this same file
+    repairs one such field on read, and task 044e measured what that bought:
+    a machine identifier sat in three receipts for ten days *because it was
+    being repaired*, so nothing ever surfaced. A silent repair on a
+    publishing path removes the symptom and leaves the writer wrong.
+    """
+    found = list(local_paths_in(obj))
+    if not found:
+        return
+    lines = "\n".join("    %s\n        %s" % (k, v[:160])
+                      for k, v, _f in found[:5])
+    more = "\n    ... and %d more" % (len(found) - 5) if len(found) > 5 else ""
+    raise SystemExit(
+        "refusing to write %s: %d value(s) are shaped like a local path, and "
+        "this file is published.\n%s%s\n\n"
+        "  Not repaired on purpose: a page datum quietly corrected on the way "
+        "out leaves the exporter wrong and tells nobody.\n"
+        "  Pass the value through oneground.receipts.public_path() where the "
+        "field is built."
+        % (path, len(found), lines, more))
+
+
 def write_json(path, obj):
     # allow_nan=False on purpose: Python would happily write Infinity and NaN,
     # which JSON.parse rejects, and the page would fail at load rather than
     # here where the offending field can be named.
+    #
+    # The refusal goes here and not at the callers: this is the choke point
+    # every published JSON passes through, and a check at a caller protects
+    # that caller only. Same argument as receipts.write_json_stable, at the
+    # boundary that actually publishes.
+    refuse_local_paths(path, obj)
     io.open(path, "w", encoding="utf-8", newline="\n").write(
         json.dumps(obj, ensure_ascii=False, separators=(",", ":"),
                    sort_keys=False, allow_nan=False) + "\n")
