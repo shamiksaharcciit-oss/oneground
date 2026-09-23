@@ -510,3 +510,11 @@ body.mode-runs .cannot-run { color: var(--warn); }
   background: var(--panel); border: 1px solid var(--rule);
   border-radius: 4px; overflow-x: auto; white-space: pre; }
 .runner .act { margin-top: 10px; }
+
+/* The pod handover: a command to copy, never a button. */
+.handover { margin-top: 10px; padding: 10px 12px; border-radius: 6px;
+  border: 1px solid var(--warn); background: var(--field); }
+.handover .note { margin: 0 0 8px; }
+.handover-command { margin: 0; padding: 8px 10px; font-size: 12.5px;
+  background: var(--panel); border: 1px solid var(--rule);
+  border-radius: 4px; overflow-x: auto; white-space: pre; }

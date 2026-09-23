@@ -1,7 +1,7 @@
-# Task 046 — the five times this slice wanted to change a contract
+# Task 046 — the six times this slice wanted to change a contract
 
-*Collected rather than raised one at a time, because five of them is a
-finding about the seam and not five findings about a UI slice. To be ruled on
+*Collected rather than raised one at a time, because six of them is a
+finding about the seam and not six findings about a UI slice. To be ruled on
 as a shape when 046 closes.*
 
 *The fifth arrived after this note was written, and **it arrived from
@@ -96,9 +96,38 @@ weakened. `oneground/test_exit_contract.py` holds it.
 Not taken: it is `simulate`'s contract, a script may depend on the code, and
 changing it is not a UI slice's to do unasked.
 
-## What the four have in common, which is the thing to rule on
+## 6. `pod plan` returns 1 for a refusal — **pending**
 
-They are not four defects in one module. They are **one seam**, hit from four
+Found the same way as the fifth, one step further: by widening the test built
+for the rule. The first version read only `oneground/cli.py` and so checked
+six of the ten stages while reading as though it checked all ten — warning 1,
+in the test written to enforce the rule. The pod verbs are stages; their
+handlers are in `oneground/pod/cli.py`.
+
+`cmd_plan` prints
+
+    REFUSED: the cost cap is exceeded. `up` would not proceed.
+
+and returns **1**. So the tool declines, says so in the word this project
+uses for it, and exits with the code that means *did not finish*.
+
+Now that `pod plan` is a job, the consequence is immediate: `classify` reads
+1 with no receipt and records **failed**, so the page shows a crash for the
+one refusal in the product that exists to stop somebody spending money.
+
+The repair is one character — `return 2`. Declared in `jobs.EXIT_CONTRACT`
+with its cost rather than changed, because `pod` is a module this slice has
+now wanted to reach into and this is the sixth contract item, not a UI
+slice's to take.
+
+**And it sharpens the shape.** The fifth was a *finding* travelling in an
+exit code. This is a *refusal* travelling under the wrong number. Two
+different ways for the same seam to leak, in two different modules, both
+invisible until something downstream had to read an exit code and mean it.
+
+## What the six have in common, which is the thing to rule on
+
+They are not six defects in two modules. They are **one seam**, hit from six
 angles: the boundary where `intake`'s refusals stop being `intake`'s problem.
 
 - Inside `intake`, all twenty-five refusals are correct: named field, stated

@@ -313,6 +313,27 @@ EXIT_CONTRACT = {
     ("simulate", 1): "configurations were planned and not measured; the rows "
                      "that were are in simulate.json and each drop is named "
                      "in simulate_info.json:dropped",
+
+    # `pod/cli.py:cmd_plan`, when the resolved price exceeds the cost cap.
+    #
+    # **This one is a refusal with the wrong number**, which is a different
+    # defect from `simulate`'s and a clearer one. It prints "REFUSED: the
+    # cost cap is exceeded. `up` would not proceed." and returns 1 -- so the
+    # tool declines, says so in the word the project uses for it, and exits
+    # with the code that means *did not finish*.
+    #
+    # The consequence is immediate now that plan is a job: `classify` reads
+    # 1 with no receipt and records `failed`, so the page shows a crash for
+    # the one refusal that exists to stop somebody spending money. The
+    # refusal is the most useful thing that command produces.
+    #
+    # Declared rather than fixed: `pod` is the module this slice has now
+    # wanted to reach into six times, and it is raised as the sixth entry in
+    # `tasks/046-contract-changes-pending.md` rather than changed here. The
+    # repair is one character -- `return 2` -- and it is not a UI slice's.
+    ("pod plan", 1): "the resolved price exceeds the cost cap, so `up` "
+                     "would not proceed; a refusal returning the code for "
+                     "did-not-finish, recorded as contract change six",
 }
 
 

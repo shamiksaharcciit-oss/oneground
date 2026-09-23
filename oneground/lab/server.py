@@ -652,6 +652,12 @@ class LabServer:
         "characterize": "requirements", "simulate": "requirements",
         "verify": "requirements", "report": "requirements",
         "chunk": "requirements", "propose": "workdir",
+        # `pod plan <spec>` names a session spec, which is a file and can
+        # live here. `status`, `watch` and `fetch` take a pod id -- a
+        # running session's, which is not a thing in this directory -- so
+        # they stay unnameable and say so, rather than offering a box to
+        # type an id into that this page cannot check.
+        "pod plan": "session",
     }
 
     def job_targets(self, params):
@@ -672,12 +678,26 @@ class LabServer:
         if self.runs_dir is None:
             raise ValueError("a lab session over one run has no targets")
 
-        requirements = []
+        requirements, sessions = [], []
         for name in sorted(os.listdir(self.runs_dir)):
             if not name.endswith((".yaml", ".yml")):
                 continue
             path = os.path.join(self.runs_dir, name)
-            if os.path.isfile(path):
+            if not os.path.isfile(path):
+                continue
+            # A session spec and a requirements file are both YAML in the
+            # same directory, and offering one where the other belongs
+            # would produce a refusal the user cannot act on. Told apart by
+            # what the file says it is, not by its name: a `pod:` block is
+            # what `session.load` reads.
+            try:
+                with open(path, encoding="utf-8") as f:
+                    head = f.read(4096)
+            except OSError:                              # pragma: no cover
+                continue
+            if "\npod:" in head or head.startswith("pod:"):
+                sessions.append({"name": name, "arg": name})
+            else:
                 requirements.append({"name": name, "arg": name})
 
         # A workdir is whatever the run index already calls one. Calling the
@@ -698,10 +718,12 @@ class LabServer:
                     # does with an unnameable target is a rule about the
                     # page, not a fact about `pod watch`, and repeating it
                     # per stage is one fact stated four times (task 045).
-                    "why": "their target is a pod session's rather than "
-                           "this directory's, so this page cannot name one"})
+                    "why": "they take the id of a RUNNING pod session, "
+                           "which is not a thing in this directory"})
                 continue
-            choices = requirements if kind == "requirements" else workdirs
+            choices = {"requirements": requirements,
+                       "workdir": workdirs,
+                       "session": sessions}[kind]
             if not choices:
                 withheld.append({
                     "stage": stage,
@@ -713,7 +735,8 @@ class LabServer:
         return {"offered": offered, "withheld": withheld,
                 "kinds": {"requirements": "a requirements file in this "
                                           "directory",
-                          "workdir": "a run in this directory"}}
+                          "workdir": "a run in this directory",
+                          "session": "a pod session spec in this directory"}}
 
     def job_log(self, params):
         """One job's log: the CLI's own output, unchanged.

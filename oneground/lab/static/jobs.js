@@ -103,6 +103,25 @@
     // conclusion and keeps the evidence.
     if (job.why) row.appendChild(el('p', 'job-why', job.why));
 
+    // The pod card is the CLI's own card: `pod plan` prints it and the log
+    // shows it verbatim. The UI computes nothing about a session -- the
+    // lab's guard refuses it `oneground.pod`, which is the same ruling that
+    // made the supervisor a second process.
+    //
+    // And then the handover. The one operation that spends money keeps the
+    // one boundary that cannot be automated by accident, so this is a
+    // command to copy, not a button.
+    if (job.stage === 'pod plan' && job.state === 'done') {
+      const hand = el('div', 'handover');
+      hand.appendChild(el('p', 'note',
+        'The card above is what the command line printed. To create the '
+        + 'session, run this at a terminal — nothing here will:'));
+      const arg = (job.invocation || []).slice(-1)[0] || '<spec>';
+      hand.appendChild(el('pre', 'handover-command',
+        'oneground pod up ' + arg));
+      row.appendChild(hand);
+    }
+
     if (job.refusal) {
       // Verbatim. The most useful thing the tool produces, written once, in
       // the CLI, on purpose.

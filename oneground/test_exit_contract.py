@@ -20,21 +20,36 @@ from oneground import jobs, refusals
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLI = os.path.join(REPO, "oneground", "cli.py")
 
-#: The handler each stage's command dispatches to.
+#: The handler each stage's command dispatches to, and the file it is in.
+#:
+#: The pod verbs are stages too -- `jobs.STAGES` says so -- and their
+#: handlers live in `oneground/pod/cli.py`. The first version of this test
+#: read only `oneground/cli.py`, so it checked six of the ten stages while
+#: reading as though it checked all of them. Warning 1, in the test written
+#: to enforce the rule.
 HANDLERS = {
-    "characterize": "_cmd_characterize", "simulate": "_cmd_simulate",
-    "verify": "_cmd_verify", "report": "_cmd_report",
-    "chunk": "_cmd_chunk", "propose": "_cmd_propose",
+    "characterize": ("oneground/cli.py", "_cmd_characterize"),
+    "simulate": ("oneground/cli.py", "_cmd_simulate"),
+    "verify": ("oneground/cli.py", "_cmd_verify"),
+    "report": ("oneground/cli.py", "_cmd_report"),
+    "chunk": ("oneground/cli.py", "_cmd_chunk"),
+    "propose": ("oneground/cli.py", "_cmd_propose"),
+    "pod plan": ("oneground/pod/cli.py", "cmd_plan"),
+    "pod status": ("oneground/pod/cli.py", "cmd_status"),
+    "pod watch": ("oneground/pod/cli.py", "cmd_watch"),
+    "pod fetch": ("oneground/pod/cli.py", "cmd_fetch"),
 }
 
 
 def _handlers():
-    with open(CLI, encoding="utf-8") as f:
-        tree = ast.parse(f.read(), CLI)
     found = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
-            found[node.name] = node
+    for rel in sorted({where for where, _n in HANDLERS.values()}):
+        path = os.path.join(REPO, rel)
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                found[(rel, node.name)] = node
     return found
 
 
@@ -49,13 +64,21 @@ def _literal_returns(fn):
     return out
 
 
-def test_every_stage_handler_exists():
-    """If a handler is renamed this test must fail rather than silently
-    checking nothing -- an empty set of things to check is the most common
-    way a source scan stops meaning anything."""
+def test_every_stage_has_a_handler_named_here():
+    """Two things, because either alone is a scan that checks nothing.
+
+    Every stage in `jobs.STAGES` must appear here -- otherwise a stage added
+    later is simply not examined, and this file passes while covering less
+    than it did. And every handler named here must exist -- otherwise a
+    rename makes the scan read a set of zero functions and say nothing
+    cheerfully.
+    """
+    assert set(HANDLERS) == set(jobs.STAGES), (
+        "a stage is missing from this test, so it is not being checked: "
+        + repr(set(jobs.STAGES) ^ set(HANDLERS)))
     found = _handlers()
-    for stage, name in HANDLERS.items():
-        assert name in found, f"{stage}: no handler {name} in cli.py"
+    for stage, key in HANDLERS.items():
+        assert key in found, f"{stage}: no handler {key[1]} in {key[0]}"
 
 
 @pytest.mark.parametrize("stage", sorted(HANDLERS))
@@ -86,7 +109,8 @@ def test_a_stage_returns_zero_or_a_declared_non_zero(stage):
             continue
         key = (stage, value)
         assert key in jobs.EXIT_CONTRACT, (
-            f"cli.py:{lineno}: {stage} returns {value}, which is not 0 and "
+            f"{HANDLERS[stage][0]}:{lineno}: {stage} returns {value}, "
+            f"which is not 0 and "
             f"not declared in jobs.EXIT_CONTRACT. A stage's exit code says "
             f"whether the command ran, never what it found -- if this is a "
             f"finding, it belongs in the artifact; if it is a fate, declare "
@@ -108,7 +132,7 @@ def test_every_declared_exception_carries_a_reason_and_is_real():
             "case it was written for and should go")
 
 
-def test_the_one_declared_exception_is_the_one_that_costs_the_classifier():
+def test_the_declared_exceptions_are_the_ones_that_cost_the_classifier():
     """Pinned so the connection is not lost: `simulate` returning 1 for
     dropped configurations is the sole reason `EXIT_MEANING[1]` means two
     things and `classify` has to consult the workdir at all.
@@ -117,7 +141,7 @@ def test_the_one_declared_exception_is_the_one_that_costs_the_classifier():
     workdir check becomes unnecessary. Stated here because the cost of a
     declared exception is easiest to see from the thing paying it.
     """
-    assert set(jobs.EXIT_CONTRACT) == {("simulate", 1)}
+    assert set(jobs.EXIT_CONTRACT) == {("simulate", 1), ("pod plan", 1)}
     state, _why = jobs.EXIT_MEANING[1]
     assert state is None, (
         "exit 1 is undecided precisely because simulate uses it for a "
@@ -133,7 +157,7 @@ def test_verify_returns_zero_when_an_engine_contradicts_the_simulation():
     outcomes live in the artifact, not in the process, holding at the process
     boundary without anyone having stated it there.
     """
-    fn = _handlers()["_cmd_verify"]
+    fn = _handlers()[("oneground/cli.py", "_cmd_verify")]
     values = {v for _l, v in _literal_returns(fn)}
     assert values == {0}, (
         f"_cmd_verify returns {sorted(values)}; a contradiction is a result "
