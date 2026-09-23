@@ -42,6 +42,7 @@
         // loading the form there would put a page in front of a user that
         // cannot do the thing it offers.
         load('compose.js');
+        load('jobs.js');
       } else {
         document.body.classList.add('mode-run');
         load('lab.js');

@@ -544,7 +544,11 @@
     const h = window.location.hash || '#/runs';
     const parts = h.replace(/^#\//, '').split('/').map(decodeURIComponent);
     try {
-      if (parts[0] === 'new') {
+      if (parts[0] === 'jobs') {
+        if (!window.onegroundJobs) throw new Error(
+          'the jobs half did not load, so this page cannot show them');
+        await window.onegroundJobs();
+      } else if (parts[0] === 'new') {
         // The write half lives in compose.js and installs this hook. The
         // seam is here so that the router stays in one file while the POSTs
         // stay out of this one -- see that file's opening note.
@@ -587,8 +591,12 @@
       const n = document.createElement('a');
       n.href = '#/new';
       n.textContent = 'New requirements file';
+      const j = document.createElement('a');
+      j.href = '#/jobs';
+      j.textContent = 'Jobs';
       tabs.appendChild(a);
       tabs.appendChild(n);
+      tabs.appendChild(j);
     }
     const lab = document.getElementById('lab-panels');
     if (lab) lab.remove();

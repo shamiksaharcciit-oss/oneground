@@ -533,6 +533,24 @@ anything.
 
 ## 4. A key whose meaning differs by file
 
+> **A claim repeated in four places is repeated in four different wordings,
+> and the search that misses them is not careless but precise.**
+>
+> Grep finds the copies that share your *phrasing* and misses the ones that
+> share your *meaning* — and the ones that share your meaning exist
+> separately precisely because they were written for a different audience.
+> **Search for the subject, not the sentence.**
+
+That is at the head of this section rather than inside it because it is what
+the section costs you when you get it wrong, and because it was learned the
+only way it could be: by an honest, thorough search failing. The full account
+is below under *A claim with four homes*; the short version is that the
+phrase was grepped for, returned exactly one hit, that hit was fixed, and two
+further copies saying the same thing in different words went on being wrong.
+
+A search that fails through carelessness is advice. A search that fails
+through precision is evidence.
+
 **The rule.** Before adding a field to a receipt, look at what that name
 already means in every other artifact that carries it — not at whether the
 name is free here.

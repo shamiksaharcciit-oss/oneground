@@ -59,7 +59,9 @@ import threading
 import time
 import urllib.parse
 
+from oneground import jobs as jobsmod
 from oneground import provenance
+from oneground import supervisor as supmod
 from oneground.intake import fields
 
 from . import compose, contract, guard
@@ -93,6 +95,7 @@ STATIC = {
     "/static/boot.js": ("boot.js", "text/javascript; charset=utf-8"),
     "/static/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
     "/static/compose.js": ("compose.js", "text/javascript; charset=utf-8"),
+    "/static/jobs.js": ("jobs.js", "text/javascript; charset=utf-8"),
     "/static/ui.css": ("ui.css", "text/css; charset=utf-8"),
 }
 ENDPOINTS = {
@@ -111,6 +114,12 @@ ENDPOINTS = {
     # the template is that declaration written out as a file.
     "/api/compose/fields": "compose_fields",
     "/api/compose/template": "compose_template",
+    # The jobs half, all reads. The server never enqueues and never
+    # cancels: it has no write path and makes no request of its own, so the
+    # page is told where the supervisor is and speaks to it directly.
+    "/api/jobs": "job_list",
+    "/api/jobs/log": "job_log",
+    "/api/supervisor": "supervisor_address",
 }
 
 #: The write half. POST only, and only in a `ui` session -- see
@@ -597,6 +606,84 @@ class LabServer:
         return out
 
     # ------------------------------------------------- the three front doors
+    # ------------------------------------------------------------- jobs
+    def job_list(self, params):
+        """Every job the supervisor has recorded. Read from the directory.
+
+        A corrupt list is a refusal rather than an empty one, because
+        `jobs.read` already decided that and the page would otherwise draw
+        "no jobs" over a list that exists -- the same rounding the three
+        outcomes exist to prevent.
+        """
+        del params
+        if self.runs_dir is None:
+            raise ValueError("a lab session over one run has no job list")
+        try:
+            found = jobsmod.read(self.runs_dir)
+        except jobsmod.JobError as e:
+            raise ValueError(str(e)) from None
+        return {"jobs": [j.to_dict() for j in found],
+                "stages": list(jobsmod.STAGES),
+                "not_a_job": [{"stage": k, "why": v}
+                              for k, v in jobsmod.NOT_A_JOB.items()]}
+
+    def job_log(self, params):
+        """One job's log: the CLI's own output, unchanged.
+
+        The path comes from the job record rather than from the request, so
+        no part of a request ever reaches a filesystem path -- the rule this
+        server has held since it was written.
+        """
+        if self.runs_dir is None:
+            raise ValueError("a lab session over one run has no job list")
+        wanted = (params.get("id") or [""])[0]
+        for job in jobsmod.read(self.runs_dir):
+            if job.id != wanted:
+                continue
+            if not job.log:
+                return {"id": job.id, "text": None,
+                        "absent": "this job has no log"}
+            path = os.path.join(self.runs_dir, job.log)
+            if not os.path.isfile(path):
+                return {"id": job.id, "text": None,
+                        "absent": "the log has not been written yet"}
+            with open(path, encoding="utf-8", errors="replace") as f:
+                return {"id": job.id, "text": f.read(), "absent": None}
+        raise ValueError(f"no job {wanted!r} in this directory")
+
+    def supervisor_address(self, params):
+        """Where the supervisor is, so the page can speak to it directly.
+
+        The server does not forward. Its own header has promised since it was
+        written that it makes no request of its own, and that is the last
+        promise on that list still standing -- so the page gets the address
+        and does the asking.
+
+        `running: false` is a real answer the page shows as *no supervisor is
+        running, so nothing can be started from here*. Inventing one would
+        put a button on the page that fails when pressed, which reads as a
+        defect in the tool rather than as a process nobody started.
+        """
+        del params
+        if self.runs_dir is None:
+            return {"running": False,
+                    "why": "a lab session over one run runs nothing"}
+        found = supmod.address(self.runs_dir)
+        if not found:
+            return {"running": False,
+                    "why": "no supervisor has announced itself in this "
+                           "directory, so nothing can be started from here"}
+        same = found.get("build") == provenance.PACKAGE_DIR
+        return {"running": True, "url": found["url"],
+                "token": found["token"], "build": found.get("build"),
+                # A server and a supervisor on different checkouts would each
+                # be correct about themselves and wrong together.
+                "same_build": same,
+                "why": None if same else
+                       "the supervisor is running a different build from "
+                       "this server: %s against %s"
+                       % (found.get("build"), provenance.PACKAGE_DIR)}
+
     def compose_fields(self, params):
         """The declaration the form renders itself from.
 
