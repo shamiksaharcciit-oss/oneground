@@ -671,8 +671,29 @@ class LabServer:
         """
         common = {
             "mode": "runs" if self.index is not None else "run",
-            "writes": "nothing: this server has no write path",
-            "runs": ("nothing: no job, no written file, no session is "
+            # These two were flat strings saying this server writes nothing
+            # and runs nothing. The first became false for a `ui` session the
+            # hour the form landed, and it is the FOURTH place that one claim
+            # lived: the page's eyebrow, the CLI's startup line, this field,
+            # and the module docstring below. Three were corrected one at a
+            # time, each by someone looking at that one.
+            #
+            # So this is not the staleness defect, it is the two-homes
+            # defect -- `docs/PRACTICE.md` section 4. A claim with four
+            # copies has no owner, and correcting a sentence is not
+            # correcting a claim.
+            #
+            # They now answer per mode, which is the repair that makes the
+            # next change impossible to miss: a `lab` session still writes
+            # nothing and the sentence says so, and a `ui` session says what
+            # it writes. When jobs land, `runs` is the field that has to
+            # change, and it is the field a reader asks.
+            "writes": ("requirements files, through one guarded path"
+                       if self.index is not None
+                       else "nothing: this session has no write path"),
+            "runs": ("nothing: no job, no session is created from this "
+                     "page" if self.index is not None else
+                     "nothing: no job, no written file, no session is "
                      "created from this page"),
             "token": ("required on every request; see docs/UI.md for what "
                       "it protects against and what it does not"),
