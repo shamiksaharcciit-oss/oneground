@@ -94,6 +94,43 @@ both times the correction landed in the body and left the acceptance behind.
 Both survived a document that was otherwise right, because a correction is
 read as an argument and an acceptance is read as a list.
 
+### 1.2 Claim less rather than schedule a correction
+
+**The rule.** If you can see, as you write a sentence, that it will need
+editing in two commits' time, it is **already stale** — write the weaker
+sentence that will still be true, and stop. The weaker claim almost always
+costs nothing.
+
+**Why this is not §1 restated**, which is worth stating because they are one
+paragraph apart. §1 is about a sentence that goes stale *silently*, after the
+fact, with nothing to report it; the repair is an audit somebody has to
+remember to do. This is the same decay caught at a different moment — **while
+you are writing it, when you already know** — and the repair is a word. Same
+subject, different moment, different detection, and a fix two orders of
+magnitude cheaper. It sits under §1 because a reader looking for either
+should find both.
+
+**The instance.** The `oneground ui` page carried the line *"served from this
+machine · read-only · nothing runs from this page."* Task 046's step 1 gave it
+a write half, so **read-only** became false the hour the form landed.
+
+The obvious repair was to change `read-only` and leave the rest. But *nothing
+runs from this page* is step 3 of the same brief — jobs — so that clause was
+scheduled to become false too, in a commit already specified and already
+agreed. Rewriting it now and again in a fortnight is two edits and one window
+where the page misdescribes itself.
+
+So the line says what is true and stops: *"served from this machine · reads
+runs, writes requirements files."* No claim about what does or does not run,
+because that claim is in motion.
+
+> The tell: **you are about to write a sentence and you already know which
+> commit falsifies it.** Almost every time, the claim is not load-bearing and
+> the weaker one reads no worse. When it *is* load-bearing — when the reader
+> genuinely needs to know that nothing runs from this page — the answer is not
+> a hedge but a mechanism, something that fails when the claim does, which is
+> §1's "state-bearing section that admits to being one" one level further in.
+
 ---
 
 ## 2. Checks that do not check
