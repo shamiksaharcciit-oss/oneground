@@ -919,6 +919,30 @@ causes need different actions.* If they need different actions, something
 will have to choose between them, and prose is not a thing a chooser can
 read.
 
+**And the rule for doing the split, which is not *always distinguish*.** It
+is: **distinguish where the information exists, and refuse to guess where it
+does not.**
+
+`ModelUnresolved` split into three outcomes, not two. Two sites knew which
+they were — *listed twice* is decided from the request alone, and *loaded but
+reports no dimension* means the name was right — and they took the refusal
+and the failure. The third is the load attempt, where a typo and an
+unreachable hub produce much the same exception, and **it kept the ambiguous
+base.**
+
+That third site is the rule honouring itself rather than an exception to it.
+A split that forced every site onto one side would have moved the guess from
+the classifier into the raise, where it is harder to see and no better
+informed — and the base's own docstring already said the underlying exception
+distinguishes them badly, so the guess would have been made *against* recorded
+knowledge.
+
+> **A type that cannot answer is the honest type to raise.** Keeping one
+> ambiguous case is not the split failing; it is the split declining to
+> invent the one thing it does not have. The classifier then excludes that
+> type, which is a statement about the site, and the asymmetry decides what
+> happens downstream.
+
 ### 7.4.1 A refusal is produced where it is raised, once
 
 Not strictly an exemption, and here because it is the same failure seen from

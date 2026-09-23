@@ -85,11 +85,12 @@ class Job:
     """
 
     __slots__ = ("id", "stage", "invocation", "state", "workdir", "log",
-                 "started", "ended", "refusal", "exit_code", "partial")
+                 "started", "ended", "refusal", "exit_code", "partial", "why", "build")
 
     def __init__(self, id, stage, invocation, workdir, state=QUEUED,
                  log=None, started=None, ended=None, refusal=None,
-                 exit_code=None, partial=False):
+                 exit_code=None, partial=False, why=None,
+                 build=None):
         if stage not in STAGES:
             raise JobError(
                 f"{stage!r} is not a stage a job may be. Stages: "
@@ -120,6 +121,16 @@ class Job:
         #: inferred from the state, because a reader of one artifact does not
         #: have the state.
         self.partial = bool(partial)
+        #: Why this job is in the state it is in -- the sentence `classify`
+        #: returned, or the reason it was cancelled. In the record because a
+        #: reader of one job does not have the workdir in front of them and
+        #: cannot re-run the decision: a `failed` that cannot say whether the
+        #: exit code or a missing receipt decided has handed over the
+        #: conclusion and kept the evidence.
+        self.why = why
+        #: The package directory that ran it. Task 046 found two checkouts
+        #: sharing a version and a commit where only the path differed.
+        self.build = build
 
     # -- the state machine --------------------------------------------------
     def may_become(self, state):
@@ -168,7 +179,8 @@ class Job:
                 "workdir": self.workdir, "log": self.log,
                 "started": self.started, "ended": self.ended,
                 "refusal": self.refusal, "exit_code": self.exit_code,
-                "partial": self.partial}
+                "partial": self.partial, "why": self.why,
+                "build": self.build}
 
     @classmethod
     def from_dict(cls, d):
@@ -184,7 +196,8 @@ class Job:
                    log=d.get("log"), started=d.get("started"),
                    ended=d.get("ended"), refusal=d.get("refusal"),
                    exit_code=d.get("exit_code"),
-                   partial=d.get("partial", False))
+                   partial=d.get("partial", False), why=d.get("why"),
+                   build=d.get("build"))
 
     def __repr__(self):                                # pragma: no cover
         return f"<Job {self.id} {self.stage} {self.state}>"
