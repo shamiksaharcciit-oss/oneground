@@ -190,24 +190,56 @@ def count_from_quantiles(distribution, threshold=CRISP_RATIO):
     return above
 
 
-#: Vectors above the threshold, below which the count is not resolvable from
-#: zero and must not be read as one. Thirty is the conventional floor for
-#: estimating a proportion at all.
+#: How many standard errors a rate must sit from its degenerate value to be
+#: read as a proportion at all.
 #:
-#: A QUANTILE RULE WAS TRIED FIRST AND WAS WRONG. The first version of this
-#: flagged a reading whose threshold sat above the distribution's 95th
-#: percentile. Measured against the published fixtures, that flags
-#: `arxiv-150k` (p95 1.1858) and `stackexchange-150k` (p95 1.1501) as not
-#: discriminating -- and those two demonstrably do discriminate: they order
-#: consistently and reproducibly across five subsample sizes (task 036's
-#: instrument check). A criterion that calls a working measurement broken is
-#: a worse defect than the one it was written for, so it was replaced rather
-#: than tuned.
+#: TWO CRITERIA WERE TRIED BEFORE THIS AND BOTH WERE WRONG IN THE SAME WAY:
+#: they called a working measurement broken, which is a worse defect than the
+#: one they were written for. Both were caught by measurement rather than by
+#: review, and both are recorded so neither is re-proposed.
 #:
-#: What actually separated the two cases was the **absolute count**. arxiv at
-#: 0.0363 of 150,000 is 5,445 vectors; e5 at 0.0007 of 3,000 is two. Both sit
-#: in the tail of their distribution; only one is a measurement.
-MIN_VECTORS_ABOVE = 30
+#: **A quantile rule** (task 044): flag a reading whose threshold sits above
+#: the distribution's 95th percentile. That flags `arxiv-150k` (p95 1.1858)
+#: and `stackexchange-150k` (p95 1.1501) as non-discriminating under the
+#: anchor model itself -- two corpora that order consistently and reproducibly
+#: across five subsample sizes (task 036's instrument check).
+#:
+#: **An absolute-count rule** (`n >= 30`, task 044): that flags
+#: `arxiv-smoke`'s published ambiguity of 0.935, where 13 of 200 queries fall
+#: outside the threshold. Thirteen is a small count and 0.935 over 200 has a
+#: standard error of 0.017, which puts it 3.7 sigma from 1.0 -- a measurement.
+#: The rule conflated a small SAMPLE with a saturated MEASURE. Found by 044b's
+#: tests, against a fixture 044 had already passed.
+#:
+#: What both were reaching for is whether the rate is distinguishable from the
+#: value it degenerates to -- zero for a tail count, one for a saturating one
+#: -- and that is a standard error, not a count and not a quantile. It gets
+#: all four known cases right: arxiv crispness 75 sigma, arxiv-smoke ambiguity
+#: 3.7 sigma, task 036's e5 crispness 1.45 sigma, a saturated 0.999 over 2,000
+#: at 1.41 sigma.
+DISTINGUISHABILITY_SIGMA = 3.0
+
+#: Below this many on the informative side, no standard error means anything
+#: and the answer is couldn't-check regardless of arithmetic.
+MIN_INFORMATIVE_COUNT = 5
+
+
+def distinguishable(value, n, degenerate=0.0):
+    """Is a proportion readable, or is it its own degenerate value?
+
+    `degenerate` is what the reading collapses to when its threshold leaves
+    the distribution: 0.0 for a count of a tail (crispness), 1.0 for a rate
+    that saturates (ambiguity). Returns `(resolvable, n_informative, sigma)`.
+    """
+    n = int(n)
+    p = float(value)
+    distance = p if degenerate == 0.0 else (1.0 - p)
+    n_informative = int(round(distance * n))
+    if n <= 0 or n_informative < MIN_INFORMATIVE_COUNT:
+        return False, n_informative, 0.0
+    se = float(np.sqrt(max(p * (1.0 - p), 1e-12) / n))
+    sigma = distance / se if se > 0 else 0.0
+    return bool(sigma >= DISTINGUISHABILITY_SIGMA), n_informative, sigma
 
 
 def threshold_percentile(distribution, threshold=CRISP_RATIO):
@@ -255,15 +287,15 @@ def reading(d_base, threshold=CRISP_RATIO, with_distribution=False):
     dist = ratio_distribution(d_base)
     value = count_at(d_base, threshold)
     n = int(dist["n"])
-    n_above = int(round(value * n))
     pct = threshold_percentile(dist, threshold)
-    resolvable = n_above >= MIN_VECTORS_ABOVE
+    resolvable, n_above, sigma = distinguishable(value, n, degenerate=0.0)
     out = {
         "value": value,
         "threshold": float(threshold),
         "of": "the ratio distribution",
         "n": n,
         "n_above": n_above,
+        "sigma_from_zero": sigma,
         "threshold_percentile": pct,
         "resolvable": resolvable,
         "note": ("a count of the vectors above %.2f, which is the %.2fth "
@@ -276,13 +308,13 @@ def reading(d_base, threshold=CRISP_RATIO, with_distribution=False):
     if not resolvable:
         out["outcome"] = "couldnt_check"
         out["why"] = (
-            "only %d of %d vectors are above %.2f, which is fewer than the %d "
-            "needed to read a proportion at all, so this count is not "
+            "only %d of %d vectors are above %.2f -- %.2f standard errors "
+            "from zero, under the %.1f needed -- so this count is not "
             "distinguishable from zero and must not be reported as one. The "
             "threshold sits at the %.2fth percentile of this corpus's "
             "distribution. This is a couldn't-check on the reading: the "
             "distribution was measured and is the number to read."
-            % (n_above, n, threshold, MIN_VECTORS_ABOVE, pct))
+            % (n_above, n, threshold, sigma, DISTINGUISHABILITY_SIGMA, pct))
     if with_distribution:
         out["distribution"] = dist
     return out

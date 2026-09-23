@@ -38,7 +38,8 @@ import numpy as np
 from . import environment
 from . import intake
 from .measures import centroid_dists, kmeans, two_nn_lid
-from .measures.ambiguity import AMBIGUOUS_RATIO, ambiguous_query_rate
+from .measures.ambiguity import (AMBIGUOUS_RATIO, ambiguous_query_rate,
+                                 reading as ambiguity_reading)
 from .measures.crispness import (CRISP_RATIO, N_CENTROIDS, boundary_crispness,
                                  reading as crispness_reading)
 from .measures.drift import drift_pair
@@ -64,7 +65,8 @@ DECLARED_FILES = ["characterization.json", "build_info.json"]
 # no change.
 MEASURED_FIELDS = ("intrinsic_dimensionality", "boundary_crispness",
                    "crispness_reading",
-                   "skew_top10_share", "ambiguous_query_rate", "drift")
+                   "skew_top10_share", "ambiguous_query_rate",
+                   "ambiguity_reading", "drift")
 
 DECLARED_NOT_MEASURED = f"{COULDNT_CHECK}: declared, not measured"
 
@@ -161,6 +163,25 @@ def _say_reading(got, log_fn=log):
                + got["why"])
 
 
+def _say_ambiguity(got, log_fn=log):
+    """Where the ambiguity threshold fell, and whether the rate can be read.
+
+    Printed always, like the crispness one, and for a sharper reason: this
+    measure fails by SATURATING, and a rate near 1.0 reads as a strong finding
+    rather than as an instrument that has stopped discriminating. A user who
+    sees only `0.98` has no way to tell those apart; a user who also sees that
+    1.10 sits at the 97th percentile of their own distribution does.
+    """
+    log_fn("characterize: ambiguity %.4f at threshold %.2f, which is the "
+           "%.2fth percentile of this corpus's query ratio distribution "
+           "(%d of %d queries outside it)"
+           % (got["value"], got["threshold"], got["threshold_percentile"],
+              got["n_outside"], got["n"]))
+    if got.get("outcome") == COULDNT_CHECK:
+        log_fn("characterize: COULDN'T-CHECK on the ambiguity reading -- "
+               + got["why"])
+
+
 def characterize_arrays(base, queries, seed, timestamps=None,
                         query_timestamps=None, cutoff=None,
                         count_min=50, log_fn=log):
@@ -201,8 +222,20 @@ def characterize_arrays(base, queries, seed, timestamps=None,
     if len(queries) >= count_min:
         d_q, _ = centroid_dists(queries, cents, 2)
         out["ambiguous_query_rate"] = ambiguous_query_rate(d_q)
+        # Task 044b, the mirror of 044. The same ratio, thresholded from the
+        # other side: crispness counts the tail above 1.20, ambiguity counts
+        # everything below 1.10. A compressed distribution empties the first
+        # and SATURATES the second, and a saturated rate reads as "my queries
+        # are all ambiguous" -- a claim about the corpus -- where a zero
+        # crispness at least invites the question of whether it is right.
+        out["ambiguity_reading"] = ambiguity_reading(d_q,
+                                                     with_distribution=True)
+        _say_ambiguity(out["ambiguity_reading"], log_fn)
     else:
         out["ambiguous_query_rate"] = (
+            f"{COULDNT_CHECK}: {len(queries)} queries, fewer than the "
+            f"{count_min} needed (corpus.sample.queries.count_min)")
+        out["ambiguity_reading"] = (
             f"{COULDNT_CHECK}: {len(queries)} queries, fewer than the "
             f"{count_min} needed (corpus.sample.queries.count_min)")
 

@@ -16,7 +16,7 @@ fixture values stop meaning what they say.
 """
 
 from .ambiguity import AMBIGUOUS_RATIO, ambiguous_query_rate
-from .crispness import (CRISP_RATIO, MIN_VECTORS_ABOVE, N_CENTROIDS,
+from .crispness import (CRISP_RATIO, DISTINGUISHABILITY_SIGMA, N_CENTROIDS,
                         RATIO_QUANTILES, boundary_crispness, centroid_dists,
                         count_at, count_from_quantiles, kmeans,
                         ratio_distribution, ratios, reading,
@@ -26,7 +26,7 @@ from .lid import two_nn_lid
 from .skew import skew_top10_share
 
 __all__ = [
-    "AMBIGUOUS_RATIO", "CRISP_RATIO", "MIN_VECTORS_ABOVE", "N_CENTROIDS",
+    "AMBIGUOUS_RATIO", "CRISP_RATIO", "DISTINGUISHABILITY_SIGMA", "N_CENTROIDS",
     "RATIO_QUANTILES",
     "ambiguous_query_rate", "boundary_crispness", "centroid_dists",
     "count_at", "count_from_quantiles",
@@ -34,3 +34,4 @@ __all__ = [
     "ratios", "reading", "skew_top10_share", "threshold_percentile",
     "two_nn_lid",
 ]
+
