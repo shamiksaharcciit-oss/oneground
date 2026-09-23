@@ -653,6 +653,68 @@ def check_footprint_is_measured(ctx):
         "algorithm, which a formula over vector count and dimension cannot")
 
 
+# --------------------------------------------------------------- check (f2)
+def check_fanout_matches_the_build(ctx):
+    """`fanout` counts shards that exist, not shards that were requested."""
+    requirement = (
+        "`footprint().fanout` must report the shards a query can actually "
+        "touch, which is bounded by `footprint().shards`. A build that skips "
+        "an empty shard produces fewer shards than the configuration asked "
+        "for, and a family reporting the request prices every query against "
+        "shards that are not there. Task 042 measured one: a fan-out of 1501 "
+        "reported over a 960-shard index, from one build, with nothing "
+        "refusing it and nothing warning.")
+    over, under, built_fewer = [], [], []
+    for config in ctx.configs:
+        fp = ctx.footprint(config)
+        if fp.fanout is None or fp.shards is None:
+            continue
+        if float(fp.fanout) > float(fp.shards):
+            over.append((config.label, float(fp.fanout), int(fp.shards)))
+        if float(fp.fanout) < 1.0:
+            under.append((config.label, float(fp.fanout)))
+        asked = config.params.get("shards")
+        if asked is not None and int(asked) != int(fp.shards):
+            built_fewer.append(config.label)
+
+    measured = "; ".join("%s fan-out %.0f over %d shard(s)" % o
+                         for o in over[:4]) or (
+        "every configuration reports a fan-out within its shard count")
+
+    if over:
+        return CheckResult(
+            "fanout matches the build", FAILS, requirement, measured,
+            "a query cannot touch a shard that was not built, so this "
+            "configuration's cost is priced against an index it does not "
+            "have",
+            "%d of %d configurations" % (len(over), len(ctx.configs)))
+    if under:
+        return CheckResult(
+            "fanout matches the build", FAILS, requirement,
+            "; ".join("%s fan-out %.2f" % u for u in under[:4]),
+            "a query touches at least one shard", "")
+
+    # It passes: the invariant it asserts held on every configuration.
+    #
+    # The `meaning` states how strong that evidence is, because a family whose
+    # every build matches its request cannot be told apart here from one that
+    # reports the request -- and the honest place for that distinction is the
+    # mutant, which reproduces the defect and requires this check to reject
+    # it. Downgrading a held invariant to couldn't-check because a *stronger*
+    # claim is unproven would report a gap where a measurement exists.
+    strength = (
+        "%d configuration(s) built fewer shards than requested, so the "
+        "fan-out was seen to follow the artifact rather than the request"
+        % len(built_fewer) if built_fewer else
+        "no configuration in this grid built fewer shards than it asked for, "
+        "so this confirms the bound and not that the family reads the build; "
+        "the mutant in the suite's tests is what requires that")
+    return CheckResult(
+        "fanout matches the build", PASSES, requirement, measured,
+        "every configuration's fan-out is within its shard count -- "
+        + strength, "")
+
+
 # ---------------------------------------------------------------- check (g)
 def check_state_is_emitted_and_renders(ctx):
     """State meets its contract and carries every column the lab draws from."""
@@ -770,6 +832,7 @@ CHECKS = (
     check_determinism,
     check_determinism_across_environments,
     check_footprint_is_measured,
+    check_fanout_matches_the_build,
     check_state_is_emitted_and_renders,
     check_refusals_not_crashes,
 )

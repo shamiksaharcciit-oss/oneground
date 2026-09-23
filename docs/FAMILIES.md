@@ -244,11 +244,13 @@ one machine cannot answer it, and `docs/STATE.md` says what does.
 
 ### 4.1 If you extend the suite, read this first
 
-**The suite was wrong three times before it was right.** Not about the
-families — about itself. Every one of the three produced a confident,
-specific, false result on a shipped family, and they are recorded here because
-the next person to add a check will make the same kind of mistake in a new
-place.
+**The suite was wrong three times before it was right, and twice more when it
+was extended.** Not about the families — about itself. The first three each
+produced a confident, specific, false result on a shipped family; the last two
+were found while adding the tenth check, by an author who had read the first
+three. They are recorded here because the next person to add a check will make
+the same kind of mistake in a new place, and because knowing the list is not
+the same as not making them.
 
 **1. It reported a knob that does nothing, and the knob works.** It said
 `candidates` was declared and never read, in all three families. `candidates`
@@ -287,6 +289,43 @@ green.
 The shape all three share: **the suite was measuring itself and reporting the
 family.** A green result and a red result are both claims, and a check you
 have not watched fail is not evidence of either.
+
+Two more were found while adding the tenth check, in task 042c. Both are
+things the author reached for *because* the first three had been read.
+
+**4. A held measurement was downgraded to couldn't-check because a stronger
+claim was unproven.** `fanout matches the build` asserts that a family's
+fan-out is within its shard count. It held on every configuration of every
+family. The first version reported **couldn't-check** anyway, reasoning that a
+family reporting the requested count and one reporting the built count would
+look identical wherever the two agree — so the result did not prove the
+family reads the build.
+
+That reasoning is true and it is about a different claim. The check asserts a
+bound; the bound was measured and it held. Reporting couldn't-check said no
+measurement was available when one was.
+
+> The rule: **couldn't-check is for what was not measured, not for what was
+> measured weakly.** This is the hedge form of the error the three outcomes
+> exist to prevent, and it is the exact inverse of rounding an unknown up to a
+> verdict — equally wrong, and more tempting, because it feels careful. If a
+> check's evidence is weaker than a reader might assume, **say how strong it
+> is** in `meaning`, and let the outcome report what was actually found. A
+> check that answers couldn't-check on a healthy tree teaches its readers to
+> ignore it.
+
+**5. A mutant that does not run the rule's own code proves only that the
+defect is reproducible.** Warning 3 already says to add a mutant with every
+check. The first mutant here restated the rule — it asserted `fanout >
+shards` for a deliberately broken family — and passed. It would have gone on
+passing if the check itself had been deleted, because it never called it.
+
+> The rule: **a mutant runs the check, not a copy of it.** Break the family,
+> hand it to `run_conformance`, and assert the suite names *that* check with
+> `FAILS`. Assert too that the unbroken family passes the same check on the
+> same corpus, so a failure is the mutation and not the fixture. A rule and a
+> mutant that share no code drift apart, and the day they do, the mutant is
+> still green and proving nothing.
 
 ---
 

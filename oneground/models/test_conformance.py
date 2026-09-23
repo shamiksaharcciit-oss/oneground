@@ -603,5 +603,41 @@ def _main():
     return 1 if failed else 0
 
 
+# ---- task 042c: a fan-out is a cost paid over shards that exist ------------
+
+def test_hash_sharded_fanout_follows_the_build_not_the_request_synthetic():
+    """The measured case: ask for more shards than there are vectors.
+
+    `build` skips empty shards, so the partition is smaller than its own
+    label. Before 042c the footprint reported both numbers and they
+    contradicted each other; now the fan-out follows what exists.
+    """
+    x, q = _corpus()
+    model = models.get("hash_sharded")
+    asked = len(x) + 1
+    cfg = Config.make("hash_sharded", {"shards": asked, "M": 16,
+                                       "efSearch": 64})
+    f = model.footprint(model.build(x, cfg, SEED))
+    assert f.shards < asked, (
+        "this corpus did not produce an empty shard, so the case this test "
+        f"exists for did not arise (asked {asked}, built {f.shards})")
+    assert f.fanout == float(f.shards), f
+    assert f.fanout < asked, f
+
+
+def test_semantic_sharded_fanout_is_capped_by_the_regions_that_exist_synthetic():
+    """`search` skips a probed region with no shard, so a query cannot pay
+    for more regions than were built however high `probe` is."""
+    x, q = _corpus()
+    model = models.get("semantic_sharded")
+    cfg = Config.make("semantic_sharded",
+                      {"centroids": 4, "epsilon": 0.0, "probe": 64,
+                       "M": 16, "efSearch": 64})
+    f = model.footprint(model.build(x, cfg, SEED))
+    assert f.shards <= 4, f
+    assert f.fanout == float(min(64, f.shards)), f
+    assert f.fanout < 64, "the cap did not apply"
+
+
 if __name__ == "__main__":
     sys.exit(_main())

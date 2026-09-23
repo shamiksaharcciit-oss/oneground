@@ -219,13 +219,24 @@ class HashSharded:
         # reports for the indexes actually built, summed over shards (034).
         M = int(built.config.get("M", _d("M"))) \
             if indexes.algorithm_of(built.config) == HNSW else 0
-        n_shards = int(built.config.get("shards", _d("shards")))
+        # What was BUILT, not what was asked for (task 042c). `build` skips a
+        # shard that came back empty, so a configuration asking for 4 can
+        # produce 3 -- and reporting 4 here priced every query at four shard
+        # searches over a three-shard index. `search` iterates
+        # `shards.items()`, so the fan-out this family pays IS the built shard
+        # count, and the two now come from one expression rather than from
+        # two places that happened to agree.
+        #
+        # This is wrong at every shard count, not only at the impossible ones
+        # task 042 found: one empty shard is enough, and an empty shard needs
+        # only a hash collision pattern, not `shards > len(vectors)`.
+        built_shards = len(built.state["shards"])
         return Footprint(
             stored_vectors=built.n_base,          # no replication
             amplification=1.0,
             memory_bytes=estimate_memory_bytes(built.n_base, built.dim, M),
-            fanout=float(n_shards),               # the cost this family shows
-            shards=len(built.state["shards"]),
+            fanout=float(built_shards),           # the cost this family shows
+            shards=built_shards,
             index_bytes=sum(indexes.measured_bytes(s)
                             for s in built.state["shards"].values()),
             vector_bytes=indexes.stored_vector_bytes(

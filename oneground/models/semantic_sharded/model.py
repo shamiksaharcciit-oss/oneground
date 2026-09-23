@@ -316,7 +316,20 @@ class SemanticSharded:
             stored_vectors=stored,
             amplification=float(stored / built.n_base),
             memory_bytes=estimate_memory_bytes(stored, built.dim, M),
-            fanout=float(built.config.get("probe", _d("probe"))),
+            # Capped at what was built (task 042c). `search` skips a probed
+            # region with no shard -- `if r not in shards: continue` -- so a
+            # query cannot touch more shards than exist, however high `probe`
+            # is. Reporting the requested probe priced queries against regions
+            # that are not there.
+            #
+            # `min`, not the built count: below the cap the requested probe IS
+            # what a query pays, and this is an upper bound on the fan-out
+            # rather than a measurement of it. The exact per-query figure
+            # varies with which regions a query probes, and `footprint` is
+            # handed no queries to measure it from -- which is stated here
+            # rather than silently approximated.
+            fanout=float(min(int(built.config.get("probe", _d("probe"))),
+                             len(built.state["shards"]))),
             shards=len(built.state["shards"]),
             index_bytes=sum(indexes.measured_bytes(s)
                             for s in built.state["shards"].values()),
