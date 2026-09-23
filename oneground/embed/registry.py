@@ -40,11 +40,33 @@ PROBE_RECORDS = 64
 
 
 class ModelUnresolved(ValueError):
-    """A model name that sentence-transformers could not load.
+    """Base: a model name that could not be resolved.
 
-    Names what was tried and what the failure was, because the two common
-    causes -- a typo and no network -- need different actions from the reader
-    and the underlying exception distinguishes them badly.
+    Kept as the base so `except ModelUnresolved` still catches every case,
+    and **raised directly only where a typo and an unreachable hub genuinely
+    cannot be told apart** -- which is one of the three sites below.
+
+    It used to be the only class here, and its own docstring carried the
+    defect: *the two common causes -- a typo and no network -- need
+    different actions from the reader, and the underlying exception
+    distinguishes them badly*. That put the distinction in the message,
+    where a person can act on it and no caller can. The two subclasses are
+    the same distinction moved into the type, for the sites that know.
+    """
+
+
+class ModelUnknown(ModelUnresolved):
+    """The name is wrong on its face. **A refusal.**
+
+    Decided from the request alone, without asking anything outside this
+    process, so no environment can make it wrong.
+    """
+
+
+class ModelUnusable(ModelUnresolved):
+    """The model loaded and cannot be used. **A failure.**
+
+    The name resolved, so nothing the user wrote is wrong.
     """
 
 
@@ -78,6 +100,14 @@ def resolve(name, device="cpu", max_seq_length=None, log=None):
             max_seq_length=(max_seq_length if max_seq_length is not None
                             else _declared_limit(name)), log=log)
     except Exception as e:                                     # noqa: BLE001
+        # THE BASE, DELIBERATELY. This is the one site where a typo and an
+        # unreachable hub cannot be told apart: sentence-transformers raises
+        # much the same thing for both, which is what the base's docstring
+        # has always said. Guessing here is the failure the split exists to
+        # prevent -- calling it a refusal would tell a user with a broken
+        # network that the tool meant it and send them to fix a name that
+        # was never wrong. The message already carries both readings, in
+        # order, for the person who can tell.
         raise ModelUnresolved(
             "could not resolve embedding model %r on device %r: %s: %s. "
             "The name is passed to sentence-transformers unchanged, so it must "
@@ -91,7 +121,9 @@ def resolve(name, device="cpu", max_seq_length=None, log=None):
     dim = _dimension_of(model)
     limit = int(getattr(model, "max_seq_length", 0) or 0)
     if not dim:
-        raise ModelUnresolved(
+        # It loaded, so the name was right and nothing the user wrote is
+        # wrong. A failure.
+        raise ModelUnusable(
             "%r loaded but reports no embedding dimension, so nothing "
             "downstream can size an index for it" % name)
     return ResolvedModel(name=name, dimension=int(dim), max_seq_length=limit,
@@ -129,7 +161,9 @@ def resolve_all(names, device="cpu", log=None):
     seen, out = set(), []
     for name in names:
         if name in seen:
-            raise ModelUnresolved(
+            # Decided from the list itself. No network, no filesystem, no
+            # way for an environment to make this wrong: a refusal.
+            raise ModelUnknown(
                 "model %r is listed twice. Each model is its own run of "
                 "everything; listing one twice would measure it twice under "
                 "one label." % name)

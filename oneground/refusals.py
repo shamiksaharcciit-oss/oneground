@@ -83,6 +83,12 @@ REFUSALS = {
     "oneground.environment.ForeignPackage":
         "the imported package is not the working tree's own; same path as "
         "the above",
+    "oneground.embed.registry.ModelUnknown":
+        "a model name wrong on its face -- listed twice -- decided from the "
+        "request alone, so no environment can make the answer wrong",
+    "oneground.embed.NoModelNamed":
+        "text with no model named to embed it with; the tool will not "
+        "choose one, because the model decides what every measurement means",
 }
 
 #: Deliberately **not** refusals, with the reason, because the next reader
@@ -93,11 +99,21 @@ NOT_REFUSALS = {
     "oneground.adapters.base.AdapterError":
         "an engine operation failed: the engine broke, or the network did",
     "oneground.embed.EmbedError":
-        "its own docstring is 'text was supplied with no model to embed it "
-        "with, OR the model failed' -- one type carrying a refusal and a "
-        "failure, which is this module's own finding one level down. "
-        "Splitting it is a change to `embed`, not to this list, and until "
-        "then the safe reading is failure",
+        "the base of a split pair now, and raised nowhere: `NoModelNamed` "
+        "is the refusal and `EmbedFailed` the failure. A caller that "
+        "catches the base has said it does not care which, so this table "
+        "cannot answer for it either",
+    "oneground.embed.EmbedFailed":
+        "a named model was there and embedding came apart; nothing the user "
+        "wrote is wrong",
+    "oneground.embed.registry.ModelUnresolved":
+        "the base, raised at exactly one site: the load attempt, where a "
+        "typo and an unreachable hub cannot be told apart. Excluding it is "
+        "a statement about that site rather than about the table -- see the "
+        "asymmetry note below",
+    "oneground.embed.registry.ModelUnusable":
+        "the model loaded and cannot be used, so the name was right and "
+        "nothing the user wrote is wrong",
     "oneground.verify.ProbeUnavailable":
         "the readiness probe could not be performed, which is a "
         "couldn't-check about the engine rather than a refusal of the "
@@ -107,6 +123,25 @@ NOT_REFUSALS = {
         "work has happened; it is left out until someone decides which, "
         "rather than guessed at here",
 }
+
+# WHICH WAY TO GUESS, WHEN A TYPE CANNOT ANSWER
+# ----------------------------------------------
+# The exclusions above are not a backlog. A type that carries both a refusal
+# and a failure has to be excluded, and the exclusion is a statement about
+# the type: *this class does not carry enough to answer*.
+#
+# And the asymmetry decides which way to lean when a guess is unavoidable:
+#
+#   Calling a failure a refusal tells the user the tool MEANT it, and sends
+#   them to fix something that was never wrong -- a model name that was
+#   perfect, while the machine could not reach the hub.
+#
+#   Calling a refusal a failure shows a traceback for a typo. That is bad,
+#   and it is bad in the direction of saying LESS rather than saying
+#   something false.
+#
+# So the safe direction is to say less. Absent from this table means "not
+# known to be a refusal", never "known to be a failure".
 
 #: What `main` returns for a refusal. The code `guard_or_exit` and
 #: `_cmd_propose` already used, so a refusal exits the same way whichever

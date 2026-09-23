@@ -875,7 +875,51 @@ match exactly.
 > outside, which is warning 3: a passing check must be able to fail, and here
 > the two designs differ only in whether it can.
 
-### 7.4 A refusal is produced where it is raised, once
+### 7.4 A distinction that goes into a message is available to a human and to nobody else
+
+**The rule**, and it sits above the two instances below because both are
+cases of it.
+
+When you know something a caller would need — which of two things happened,
+what to do about it, which field is at fault — and you put it in the
+*message*, you have given it to a person reading a screen and to nothing
+else. Every programmatic caller downstream must either re-derive it, parse
+your prose for it, or do without.
+
+**The instance that names itself.** `embed.registry.ModelUnresolved`:
+
+> *"Names what was tried and what the failure was, because the two common
+> causes — a typo and no network — need different actions from the reader
+> and the underlying exception distinguishes them badly."*
+
+Read what that docstring knows. The information **existed a layer down**. It
+was **known to be poor there** — *distinguishes them badly*. It was
+**correctly re-expressed** for a reader, with both causes in order. And it
+was then **lost for every caller**, because it went into prose rather than
+into the type. A typo is a refusal; an unreachable hub is a failure; one
+class, so one answer, wrong for one of them whichever way it is given.
+
+**It is the same shape as the action sitting in `reason` rather than
+`remedy`** — task 045's finding, where a couldn't-check verdict said *"To
+decide X: this configuration was not the one verified"*, a sentence with a
+remedy's grammar and an obstacle's content. There too the tool knew what
+would settle it, and there too the knowledge went into a string a person
+reads instead of a field a caller can branch on.
+
+Naming the pair is what makes it a rule rather than two anecdotes:
+
+> **If a caller would branch on it, it belongs in the type, the field or the
+> verdict — not in the sentence.** Put it in the sentence *as well*, always;
+> a person still has to read it. But a distinction that exists only there has
+> been recorded rather than made available, and the difference is invisible
+> until something downstream has to ask.
+
+The tell: **you are writing "because" into a message.** *…because the two
+causes need different actions.* If they need different actions, something
+will have to choose between them, and prose is not a thing a chooser can
+read.
+
+### 7.4.1 A refusal is produced where it is raised, once
 
 Not strictly an exemption, and here because it is the same failure seen from
 the other side: a rule that exists, is written down, and is implemented in

@@ -75,12 +75,74 @@ def test_every_declared_refusal_carries_a_reason():
 def test_the_exclusions_are_named_with_their_reason():
     """An exception wrongly called a refusal would hide a defect. The ones
     left out say why, so the next reader does not have to re-decide."""
-    assert "oneground.embed.EmbedError" in refusals.NOT_REFUSALS
-    assert "OR the model failed" in \
-        refusals.NOT_REFUSALS["oneground.embed.EmbedError"]
     for name, why in refusals.NOT_REFUSALS.items():
         assert why and len(why) > 25, name
     assert not set(refusals.REFUSALS) & set(refusals.NOT_REFUSALS)
+
+
+def test_the_two_types_that_carried_both_outcomes_are_split():
+    """They used to be one class each, promising a refusal and a failure at
+    once, and a caller handed one could not tell which it got.
+
+    `EmbedError` said so in its docstring and was raised nowhere, which made
+    the split free. `ModelUnresolved` was live in three places and said so
+    too: *a typo and no network need different actions from the reader*. The
+    distinction was in the message, where a person can act on it and no
+    caller can; it is in the type now.
+    """
+    from oneground import embed
+    from oneground.embed import registry
+
+    # each base is kept, so `except Base` still catches both halves
+    assert issubclass(embed.NoModelNamed, embed.EmbedError)
+    assert issubclass(embed.EmbedFailed, embed.EmbedError)
+    assert issubclass(registry.ModelUnknown, registry.ModelUnresolved)
+    assert issubclass(registry.ModelUnusable, registry.ModelUnresolved)
+
+    # and the halves land on opposite sides of the table
+    assert refusals.is_refusal(embed.NoModelNamed("x"))
+    assert not refusals.is_refusal(embed.EmbedFailed("x"))
+    assert refusals.is_refusal(registry.ModelUnknown("x"))
+    assert not refusals.is_refusal(registry.ModelUnusable("x"))
+
+    # the base of each stays out: a caller catching it said it does not care
+    assert not refusals.is_refusal(embed.EmbedError("x"))
+    assert not refusals.is_refusal(registry.ModelUnresolved("x"))
+
+
+def test_the_undecidable_site_still_raises_the_base():
+    """One of the three sites cannot tell a typo from an unreachable hub --
+    sentence-transformers raises much the same thing for both. Guessing there
+    is the failure the split exists to prevent, so it keeps the base, and
+    the base is excluded.
+
+    Asserted on the source, because the site cannot be reached without a
+    network and a model download.
+    """
+    import ast
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(refusals.__file__)),
+                        "embed", "registry.py")
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), path)
+    raised = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call) \
+                and isinstance(node.exc.func, ast.Name):
+            raised.append(node.exc.func.id)
+    assert raised.count("ModelUnresolved") == 1, raised
+    assert "ModelUnknown" in raised and "ModelUnusable" in raised
+
+
+def test_the_exclusion_asymmetry_is_recorded_where_the_decision_is_made():
+    """Which way to lean when a guess is unavoidable. Calling a failure a
+    refusal tells the user the tool meant it; calling a refusal a failure
+    says less rather than something false."""
+    import inspect
+    src = inspect.getsource(refusals)
+    assert "the tool MEANT it" in src
+    assert "saying LESS rather than saying" in src
+    assert 'never "known to be a failure"' in src
 
 
 def test_a_declared_type_actually_exists_and_is_an_exception():

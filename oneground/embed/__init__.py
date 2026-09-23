@@ -14,11 +14,37 @@ import numpy as np
 
 from ..receipts import sha256_file
 
-__all__ = ["load_model", "embed", "EmbedError"]
+__all__ = ["load_model", "embed", "EmbedError", "NoModelNamed",
+           "EmbedFailed"]
 
 
 class EmbedError(RuntimeError):
-    """Text was supplied with no model to embed it with, or the model failed."""
+    """Base: something went wrong embedding. **Raise one of the two below.**
+
+    This used to read *"text was supplied with no model to embed it with, or
+    the model failed"* -- one class for a refusal and a failure, and a
+    caller handed it could not tell which it got. It was never raised, which
+    is why it was split before anything depended on it: the cheapest moment
+    to separate a type that promises two things is before the first raise.
+
+    The base is kept so `except EmbedError` catches both, and so that a
+    caller who genuinely does not care does not have to name two.
+    """
+
+
+class NoModelNamed(EmbedError):
+    """No model was named to embed the text with. **A refusal.**
+
+    The user's file did not say, the tool will not choose -- the model
+    decides what every measurement means -- and the remedy is to name one.
+    """
+
+
+class EmbedFailed(EmbedError):
+    """A named model was there and embedding it came apart. **A failure.**
+
+    Nothing the user wrote is wrong; something broke.
+    """
 
 
 def load_model(model_name, device="cpu", max_seq_length=512, log=None):
