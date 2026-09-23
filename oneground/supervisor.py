@@ -263,25 +263,66 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):                                 # noqa: N802
         self.server.channel._answer(self)
 
+    def do_OPTIONS(self):                              # noqa: N802
+        """The preflight, for the one permitted origin and no other."""
+        self.server.channel._preflight(self)
+
     def _only_post(self):
         _send(self, 405, {"error": "the supervisor answers POST; the job "
                                    "list is read from the runs directory"})
 
-    do_GET = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = _only_post
+    do_GET = do_PUT = do_PATCH = do_DELETE = _only_post
 
 
-def _send(req, status, obj):
-    body = json.dumps(obj).encode("utf-8")
+def _send(req, status, obj, extra=()):
+    body = b"" if obj is None else json.dumps(obj).encode("utf-8")
     req.send_response(status)
-    req.send_header("Content-Type", "application/json")
+    if obj is not None:
+        req.send_header("Content-Type", "application/json")
     req.send_header("Content-Length", str(len(body)))
     req.send_header("X-Content-Type-Options", "nosniff")
+    for name, value in extra:
+        req.send_header(name, value)
     req.end_headers()
-    req.wfile.write(body)
+    if body:
+        req.wfile.write(body)
 
 
 class _HTTPServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
+
+
+class OriginRefused(ValueError):
+    """An allowance that is not exactly one origin."""
+
+
+def _one_origin(value):
+    """Exactly one origin, or None. Refused at construction.
+
+    A wildcard is refused because it is the whole loosening with none of the
+    narrowness. A list is refused because the first list is always two
+    entries and the second is always longer, and a value nobody can read at
+    a glance is a value nobody audits.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise OriginRefused("an origin allowance is one origin as a string")
+    value = value.strip()
+    if value == "*":
+        raise OriginRefused(
+            "a wildcard is not an allowance, it is the absence of one; name "
+            "the single origin the page is served from")
+    if "," in value or " " in value:
+        raise OriginRefused(
+            "exactly one origin, never a list: %r. Two callers mean two "
+            "supervisors or one decision nobody has made" % value)
+    if not value.startswith(("http://", "https://")):
+        raise OriginRefused(
+            "an origin is scheme://host:port, not %r" % value)
+    if value.rstrip("/") != value:
+        raise OriginRefused("an origin carries no path, not even %r" % value)
+    return value
 
 
 class Channel:
@@ -294,9 +335,40 @@ class Channel:
     #: A body larger than this is not a job request.
     MAX_BODY = 1 << 16
 
-    def __init__(self, sup, host="127.0.0.1", port=0, token=None):
+    def __init__(self, sup, host="127.0.0.1", port=0, token=None,
+                 allow_origin=None):
+        """`allow_origin` is **exactly one origin, or none at all.**
+
+        The lab's server may not make a request of its own -- its own header
+        has said so since it was written, and that is the last promise on
+        that list still standing. So the page talks to this process directly,
+        and this process has to permit one origin to do it.
+
+        Which is a loosening, and it is spent here rather than there on a
+        distinction worth stating: **the lab's no-CORS rule protects a server
+        that serves evidence; this serves an action already gated by a
+        token.** Those are different properties, so spending one is not
+        spending the other.
+
+        Three things hold it narrow.
+
+        **One origin, never a wildcard and never a list.** `*` and any value
+        carrying a comma or a space are refused at construction, not at
+        request time, because a configuration mistake should not wait for a
+        request to become visible.
+
+        **It is not a substitute for the token.** An allowed origin with no
+        token is refused exactly as any other request is. CORS says which
+        page the browser will let read a reply; it says nothing about who
+        may ask.
+
+        **`None` means no cross-origin access at all**, which is the default,
+        so a supervisor started without being told an origin is not quietly
+        open to one.
+        """
         self.sup = sup
         self.token = token or secrets.token_urlsafe(32)
+        self.allow_origin = _one_origin(allow_origin)
         self.httpd = _HTTPServer((host, port), _Handler)
         self.httpd.channel = self
         self.port = self.httpd.server_address[1]
@@ -335,6 +407,37 @@ class Channel:
         except OSError:                                  # pragma: no cover
             pass
 
+    # -- the one origin ----------------------------------------------------
+    def _permitted(self, req):
+        """The request's Origin, if it is the one permitted. Exact string
+        comparison: a prefix match would let `http://127.0.0.1:1234.evil`
+        through, which is the classic way this check is got wrong."""
+        offered = req.headers.get("Origin")
+        if not self.allow_origin or not offered:
+            return None
+        return self.allow_origin if offered == self.allow_origin else None
+
+    def _cors_headers(self, req):
+        origin = self._permitted(req)
+        if origin is None:
+            return ()
+        return (("Access-Control-Allow-Origin", origin),
+                ("Vary", "Origin"),
+                ("Access-Control-Allow-Headers", SUPERVISOR_TOKEN_HEADER
+                 + ", Content-Type"),
+                ("Access-Control-Allow-Methods", "POST"),
+                ("Access-Control-Max-Age", "600"))
+
+    def _preflight(self, req):
+        if self._permitted(req) is None:
+            # No allowance echoed, so the browser refuses the real request.
+            # Answered rather than dropped, so the page sees a refusal it can
+            # show instead of a network error it cannot explain.
+            return _send(req, 403, {
+                "error": "this supervisor permits one origin and it is not "
+                         "this one"})
+        _send(req, 204, None, extra=self._cors_headers(req))
+
     # -- answering ---------------------------------------------------------
     def _answer(self, req):
         try:
@@ -350,11 +453,17 @@ class Channel:
         # the refusal. Learned twice already in this slice.
         raw = req.rfile.read(length) if length else b""
 
+        # The allowance decides what a browser may READ; the token decides
+        # who may ASK. An allowed origin with no token is refused exactly as
+        # anything else is, and the refusal still carries the allowance so
+        # the page can read it and say so.
+        cors = self._cors_headers(req)
         offered = req.headers.get(SUPERVISOR_TOKEN_HEADER) or ""
         if not hmac.compare_digest(offered.encode("utf-8"),
                                    self.token.encode("utf-8")):
             return _send(req, 403, {
-                "error": "refused: this supervisor's token is required"})
+                "error": "refused: this supervisor's token is required"},
+                extra=cors)
 
         try:
             body = json.loads(raw.decode("utf-8")) if raw else {}
@@ -365,16 +474,17 @@ class Channel:
 
         path = urllib.parse.urlsplit(req.path).path
         if path == "/enqueue":
-            return self._enqueue(req, body)
+            return self._enqueue(req, body, cors)
         if path == "/cancel":
-            return self._cancel(req, body)
-        return _send(req, 404, {"error": "not found"})
+            return self._cancel(req, body, cors)
+        return _send(req, 404, {"error": "not found"}, extra=cors)
 
-    def _enqueue(self, req, body):
+    def _enqueue(self, req, body, cors=()):
         invocation = body.get("invocation")
         if not isinstance(invocation, list) or not invocation:
             return _send(req, 400, {
-                "error": "a job is a CLI invocation and this names none"})
+                "error": "a job is a CLI invocation and this names none"},
+                extra=cors)
         try:
             job = self.sup.enqueue(body.get("stage"), invocation,
                                    workdir=body.get("workdir"))
@@ -382,10 +492,11 @@ class Channel:
             # The supervisor's own refusal, verbatim. It already names what
             # is wrong and what the set is; rephrasing here would be the
             # second implementation one hop further out.
-            return _send(req, 400, {"error": str(e), "refusal": str(e)})
-        return _send(req, 200, {"job": job.to_dict()})
+            return _send(req, 400, {"error": str(e), "refusal": str(e)},
+                         extra=cors)
+        return _send(req, 200, {"job": job.to_dict()}, extra=cors)
 
-    def _cancel(self, req, body):
+    def _cancel(self, req, body, cors=()):
         wanted = body.get("id")
         for job in self.sup.read():
             if job.id != wanted:
@@ -394,9 +505,11 @@ class Channel:
                 return _send(req, 409, {
                     "error": "this job is already %s; a terminal state is "
                              "terminal, and a late cancellation must not "
-                             "rewrite what happened" % job.state})
-            return _send(req, 200, {"job": self.sup.cancel(job).to_dict()})
-        return _send(req, 404, {"error": "no job %r in this list" % wanted})
+                             "rewrite what happened" % job.state}, extra=cors)
+            return _send(req, 200, {"job": self.sup.cancel(job).to_dict()},
+                         extra=cors)
+        return _send(req, 404, {"error": "no job %r in this list" % wanted},
+                     extra=cors)
 
 
 def address(runs_dir):

@@ -643,8 +643,34 @@ while diagnosing something else.
 > change would have broken it again. Deriving it leaves one place that can be
 > wrong, and it is the place a reader asks.
 
-The tell is the same as this section's: **before you fix the copy in front of
-you, search for the others.** Grep the distinctive phrase, not the file.
+**And the fourth was found by reading, after a grep had already looked for
+it.** That is the part that makes this the strongest instance the section
+has, because the obvious defence was tried and did not work.
+
+After the second correction I grepped for the distinctive phrase — *"nothing
+runs from this page"* — and it returned exactly one hit, which I fixed. The
+third copy said `"writes": "nothing: this server has no write path"`. The
+fourth said *"write a file, anywhere: there is no write path, and no method
+but GET"*. **Both say the same thing and neither contains the phrase**, so
+the search was honest, thorough, and blind.
+
+> The tell, sharpened by that: **a claim repeated in four places is repeated
+> in four different wordings.** Grep finds the copies that share your
+> phrasing and misses the ones that share your meaning — and the ones that
+> share your meaning are the ones written by someone else, or by you, for a
+> different audience, which is why they exist separately at all.
+>
+> So search for the **subject**, not the sentence: every place that talks
+> about writing, not every place that says "no write path". It is a slower
+> search and it is the only one that terminates.
+
+The fourth copy was in `server.py`'s own list of *what it never does* — a
+served module's header, which is where a reader checks first and where I had
+been reading all week. It was falsified by my own commit and corrected only
+when I went to add something next to it.
+
+The tell before all of that: **before you fix the copy in front of you,
+search for the others.**
 
 > *A second footnote, one layer inside the fix for this very section.* The
 > form's selects rendered blank, so each gained an unselected option naming
