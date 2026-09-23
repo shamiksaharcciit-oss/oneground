@@ -65,6 +65,7 @@ from oneground.lab import contract, guard                    # noqa: E402
 from oneground.lab.runs import (declared_set, find_state,     # noqa: E402
                                 plan, states_in)
 from oneground.lab.views import GroundView, QueryTraceView    # noqa: E402
+from oneground.receipts import public_path                    # noqa: E402
 
 __all__ = ["declared_set", "find_state", "plan", "states_in", "draw_ground",
            "draw_query", "draw_every_query", "main"]
@@ -270,11 +271,16 @@ def main():
 
     if args.out:
         with open(args.out, "w", encoding="utf-8", newline="\n") as f:
-            json.dump({"state_file": os.path.basename(base_path),
+            # public_path, not os.path.basename: a basename is half of it
+            # written by hand, and the half it drops is which file inside the
+            # checkout this was. Found by `receipts.pathguard` (task 044f) --
+            # `query_trace_state` below is the instance the guard's key-name
+            # detector could not see and its provenance detector could.
+            json.dump({"state_file": public_path(base_path),
                        "config_label": head["config_label"],
                        "epsilon": {"requested": p["epsilon"],
                                    "simulated": p["simulated"],
-                                   "query_trace_state": os.path.basename(
+                                   "query_trace_state": public_path(
                                        p["trace_path"])},
                        "ground": ground, "query": trace,
                        "every_query": every,
