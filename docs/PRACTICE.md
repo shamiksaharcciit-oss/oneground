@@ -136,6 +136,34 @@ the default and gets it right.
 > implementation of a rule is a second place for it to be wrong, and this one
 > disagreed with the first in the most common case there is.
 
+**A second instance, and it is a test rather than a module** — which is the
+half of this rule that is easy to miss, because a test does not look like an
+implementation of anything. It looks like a check *on* one.
+
+Task 046 gave the lab a write path, so `guard.py` gained
+`WRITING_MODES = ("w", "a", "x", "+")` and a parsed scan that reads it. The
+read half's `test_the_server_has_no_write_path` had carried its own scan since
+041: a search for a quoted `"w"` anywhere in a served module's source. It
+failed the same hour — on `guard.py`, **on the constant that spells out the
+rule it was enforcing**.
+
+It had also been weaker than it looked for as long as it had existed, and
+nothing had said so. `os.replace` moves a file into place and carries no
+quoted mode at all, so a served module that renamed its way to a write would
+have passed a test whose name says no served module writes.
+
+> The tell: **a rule gaining a declaration breaks its own restatement.** The
+> check and the rule had drifted apart long before anything went red, and
+> nothing could report the drift while the rule existed only inside the check.
+> The day it was written down as data, the restatement failed on the
+> declaration itself.
+>
+> That is the cheapest notice this class of defect ever gives, and it arrives
+> only if the declaration lands somewhere the restatement can see. So when you
+> replace a convention with a declaration, **run the old checks before
+> deleting anything**: the ones that break on your new constant are the ones
+> that were restating you.
+
 **3. A check passed for the wrong reason, which is worse than one that
 fails.** *Refusals, not crashes* fed `nlist=1501` to `single_node_hnsw` and
 saw a `ParameterError`, so it passed. The refusal was about **belonging** —
