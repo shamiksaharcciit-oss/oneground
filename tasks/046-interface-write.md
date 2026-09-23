@@ -29,11 +29,24 @@ why its guard was settled before the brief existed.
 ## What is already decided, and is not reopened here
 
 - **The UI is a front-end over the CLI, never a second implementation.**
-  Every action is a CLI invocation, and the receipt records which.
+  Every action is a CLI invocation, and the receipt must record which.
+  **The rule is decided; the mechanism is work in this slice.** No receipt
+  writer records an invocation today — `docs/INTERFACE.md` §2 says so, and
+  it is still true: nothing captures `sys.argv` or an equivalent. Step 3
+  is where it becomes true. Do not reach for a field that is not there.
 - **The write guard is `parse(write(D)) == D`**, on every write, on the
   parsed document rather than the bytes. The guard checks nothing is lost
   between the form's document and the file; coverage and comment
   fidelity are acceptance, because no guard has access to intent.
+
+  **Byte-identity is not a stronger version of this rule; it is a
+  different and incompatible one.** `write(D) == bytes` would forbid the
+  comments the front-door ruling requires the form to write — the
+  identity is over the parsed document precisely because that same ruling
+  says comments are never read back as data. A reader who sees "rather
+  than the bytes" as a bare preference will reach for the obvious
+  strengthening and trade one ruling for another without noticing. That
+  is why the reason sits beside the rule and not beneath it.
 - **`D` is built from form state**, not by editing a loaded document, so
   upload-and-edit and fill-from-empty produce the same file for the same
   inputs — which makes the identity load-bearing rather than cheap.
@@ -60,16 +73,52 @@ why its guard was settled before the brief existed.
 
 2. **The file explains itself.** Each field's explanation is written into
    the file as a comment, generated from the same string the form
-   displays. The intake field table this requires does not exist —
-   `Param.note` is the precedent and it covers only family parameters.
-   Build it, and generate `requirements.example.yaml` and
-   `requirements.declared.example.yaml` from it or delete them: 56
+   displays. The explanation and the refusal for a field come from one
+   declaration, **within the scope below**, or they will diverge and the
+   shared-string test will pass while a field is explained one way and
+   refused another.
+
+   **Reuse `Param` as the declaration shape; build a separate registry.**
+   `oneground/models/base.py:Param` already carries `type`, `minimum`,
+   `maximum`, `choices`, `belongs_to` and a `note` — the note being the
+   human explanation and `belongs_to` the conditional. Do not invent a
+   second declaration format. What does not carry over is the registry:
+   `declare_parameters` is keyed by family, and intake fields are not a
+   family's parameters, so the table is a new registry over the existing
+   shape.
+
+   **The table's scope is bounded, and it was measured.** Against the 25
+   refusals `intake.load()` raises today (`docs/UI.md`, *The field table:
+   what it can carry, and what it cannot*):
+
+   | | |
+   |---|---|
+   | plain type, range, enum, required | **~11** — derive directly |
+   | value-conditional | **4** — fit `belongs_to` exactly |
+   | relational: xor, one-of, implies, uniqueness | **6** — **cannot** |
+   | not about a declared field at all | **4** — a missing file, a
+     non-mapping, a wrong schema version, an *unknown* stray key |
+
+   `belongs_to` is one key and one value set. Exclusive-or, one-of and
+   implies are none of those, and they are the mistakes a user makes
+   while filling a form: `vectors.path` xor `text.path`, `model` xor
+   `models`, `text` implying one of them. **An implementer who does not
+   know they are excluded will believe the table is finishable, stop at
+   eleven, and leave the form re-expressing fourteen refusals it was
+   ruled must execute.**
+
+   **An incomplete table is a timing defect, not a correctness one.** The
+   write guard already refuses every relational violation at write time:
+   a document with both paths set does not round-trip to an unequal
+   document — `load()` **raises**. So no incomplete table can let a bad
+   file be written; what it costs is *when* the user learns, at save
+   rather than while typing. Complete the table field by field while the
+   guard holds the line. This step is an increment, not a precondition.
+
+   Also generate `requirements.example.yaml` and
+   `requirements.declared.example.yaml` from the table or delete them: 56
    hand-written comment lines in two files is a second body of
    explanation, which is what the table exists to prevent.
-
-   The explanation and the refusal for a field come from one declaration,
-   or they will diverge and the shared-string test will pass while a
-   field is explained one way and refused another.
 
 3. **Jobs.** Each stage is a job — `characterize`, `simulate`, `verify`,
    `report`, `chunk`, `propose` — with a state (queued, running, done,
@@ -130,7 +179,9 @@ why its guard was settled before the brief existed.
 - The guard runs on every write, with mutants; the source scan holds.
 - Validation is `intake`'s, invoked; a refusal is the CLI's words.
 - The file carries its explanations; the example files are generated or
-  gone; explanation and refusal come from one declaration.
+  gone; explanation and refusal come from one declaration **for every
+  field in the table's scope**, with the relational refusals named as
+  outside it rather than silently missing.
 - Jobs record their invocation, and replay matches under §2's rule.
 - The supervisor survives a closed tab and a server restart; its crash
   does not kill a job; cancellation leaves a receipt and partial outputs
