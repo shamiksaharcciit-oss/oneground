@@ -709,6 +709,25 @@ each.
 > two cases split. **The exemptions that were right were about names. The
 > exemptions that were wrong were about imports.**
 
+**A third, at a third level, which is where this stops being a
+rationalisation of two cases.** Task 046 needed a job record. The lab permits
+exactly one served module to open a file for writing, so a job list the
+server could write would have been a second write path inside the served
+package — and again an exemption was one line away.
+
+The three are worth listing together because they are the same argument at
+three sizes:
+
+| what was refused | the exemption on offer | where it actually belonged |
+|---|---|---|
+| a **dataclass** (`Param`) from `oneground.models` | allowlist the import | `oneground/param.py`, a leaf |
+| a **function** (`producing_version`) from `oneground.receipts` | allowlist the import | `oneground/provenance.py`, a leaf |
+| a **module** (the job record) from the served package | allow a second writer | outside it: the server reads jobs, the supervisor writes them |
+
+A dataclass, a function, a whole module. Each time the guard was describing
+the architecture rather than obstructing it, and each time the exemption
+would have been the cheapest possible way to not hear it.
+
 > The test, when you cannot tell which case you are in: **would the exemption
 > still be right if the guard did not exist?** Intake would still name those
 > two keys, so the exemption describes something true. The lab would still
