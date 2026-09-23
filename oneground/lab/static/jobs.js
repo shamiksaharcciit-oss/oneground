@@ -156,16 +156,33 @@
     await refresh();
   }
 
+  // NOT WIRED, DELIBERATELY, AND THE REASON IS ON THE PAGE.
+  //
+  // This sent `[stage, '.']` -- so clicking `characterize` enqueued
+  // `oneground characterize .`, against the runs directory itself, which
+  // nobody had named. Measured: the CLI exits 1 with
+  // `PermissionError: [Errno 13] Permission denied: '.'` and a traceback,
+  // because `intake.load` checks that a path exists and not that it is a
+  // file. The user would have got a stack trace for a job whose target
+  // they were never asked for.
+  //
+  // **A job that runs against something the user did not name is what the
+  // job record exists to prevent.** The record's whole value is that it
+  // says exactly what ran; a default nobody chose makes it say exactly what
+  // ran and nothing about what was meant.
+  //
+  // So the buttons are inert until the page can name a target, and the page
+  // says so rather than looking broken. Whether the target is picked from a
+  // list or asked for at the click is a design decision, not a defect, and
+  // it is not being made here by whichever is easier to write.
+  const CANNOT_RUN_YET =
+    'Nothing can be started yet: this page cannot name what a stage would '
+    + 'run against. A job records exactly what ran, so starting one against '
+    + 'a directory nobody chose would produce a record that is accurate and '
+    + 'meaningless.';
+
   async function run(stage) {
-    // The invocation is built here and recorded whole. `runs/<name>` is the
-    // directory this session serves, which the supervisor is already
-    // pointed at.
-    try {
-      await ask('/enqueue', { stage: stage, invocation: [stage, '.'] });
-    } catch (e) {
-      fail(e.refusal || e.error || String(e));
-    }
-    await refresh();
+    fail(CANNOT_RUN_YET);
   }
 
   function fail(message) {
@@ -210,15 +227,33 @@
   function runner() {
     const box = el('section', 'runner');
     box.appendChild(el('h3', null, 'Start a stage'));
-    const row = el('div', 'runner-row');
-    (spec.stages || []).forEach((stage) => {
-      const b = el('button', 'door', stage);
-      b.type = 'button';
-      b.disabled = !(sup && sup.running);
-      b.addEventListener('click', () => { run(stage); });
-      row.appendChild(b);
+
+    // Two groups, because `pod plan` and `characterize` are different kinds
+    // of thing and one undifferentiated row of ten invites reading them as
+    // equivalent. The pod group is named, which the sentence beneath about
+    // `pod up` then has something to be beneath.
+    const groups = [
+      ['The pipeline', (spec.stages || []).filter(
+        (s) => s.indexOf('pod ') !== 0)],
+      ['A pod session, prepared here and run at a terminal',
+       (spec.stages || []).filter((s) => s.indexOf('pod ') === 0)],
+    ];
+    groups.forEach(([title, stages]) => {
+      if (!stages.length) return;
+      box.appendChild(el('h4', 'runner-group', title));
+      const row = el('div', 'runner-row');
+      stages.forEach((stage) => {
+        const b = el('button', 'door', stage);
+        b.type = 'button';
+        // Inert until the page can name a target -- see CANNOT_RUN_YET.
+        b.disabled = true;
+        b.title = CANNOT_RUN_YET;
+        b.addEventListener('click', () => { run(stage); });
+        row.appendChild(b);
+      });
+      box.appendChild(row);
     });
-    box.appendChild(row);
+    box.appendChild(el('p', 'note cannot-run', CANNOT_RUN_YET));
 
     // What is never a job, named with the ruling rather than absent from
     // the row. Someone who finds `pod up` missing assumes an omission.

@@ -327,13 +327,23 @@ table.ingredients th { white-space: nowrap; font-size: .75rem;
    phone, because the file it writes is the point and a preview squeezed into
    a third of a narrow screen is a decoration. */
 .compose-doors { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
-.compose-doors .door {
+/* `.door` was scoped `.compose-doors .door` -- a descendant selector -- so
+   the jobs page's buttons, which are `.door` inside `.runner-row`, matched
+   NO RULE AT ALL and rendered as bare UA buttons: unreadable.
+
+   Worth being exact about why the var() check missed it. That check
+   verifies every `var(--x)` names a declared token, and here there was no
+   `var()` to check, because there was no rule. A stylesheet check cannot
+   see a missing rule; only a rendered page can. Hence the contrast test,
+   which reads computed styles rather than source. */
+.door {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 8px 14px; border: 1px solid var(--rule); border-radius: 6px;
   background: var(--panel); color: var(--ink); cursor: pointer;
   font: inherit;
 }
-.compose-doors .door:hover { border-color: var(--ink-soft); }
+.door:hover:not(:disabled) { border-color: var(--ink-soft); }
+.door:disabled { opacity: 0.5; cursor: not-allowed; }
 #compose-upload { position: absolute; width: 1px; height: 1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -412,7 +422,6 @@ table.ingredients th { white-space: nowrap; font-size: .75rem;
 .runner { margin: 20px 0; }
 .runner h3 { font-size: 13px; color: var(--ink-soft); margin-bottom: 8px; }
 .runner-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-.runner .door:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .job { border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px;
   margin-bottom: 12px; background: var(--panel); }
@@ -447,3 +456,7 @@ table.ingredients th { white-space: nowrap; font-size: .75rem;
 @media (max-width: 860px) {
   .job-when { margin-left: 0; width: 100%; }
 }
+
+.runner-group { font-size: 12px; color: var(--ink-soft); margin: 14px 0 6px;
+  font-weight: 600; }
+.cannot-run { margin-top: 10px; }
