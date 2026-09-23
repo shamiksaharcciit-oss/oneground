@@ -161,6 +161,42 @@ been?"* reports its own coverage gap as the family's defect.
 > The rule: before asserting a key is unread, satisfy its `belongs_to`. If you
 > cannot, the outcome is **couldn't-check**, not **fails**.
 
+**The purest instance this page has, and it is three lines long.** Task 046's
+supervisor must not hold the child process it starts -- if the supervisor
+dies, a running `simulate` has to survive it. The test asserted that on the
+source:
+
+```python
+src = inspect.getsource(supervisor)
+for held in ("atexit", "setsid", "CREATE_NEW_PROCESS_GROUP", ...):
+    assert held not in src
+```
+
+It failed. On the word `atexit`, found in the module's own docstring, in the
+sentence:
+
+> *"No process group, no job object, no `atexit` that reaps it: if this
+> process dies the run continues."*
+
+**The docstring said exactly the opposite of what the search concluded**, and
+the search could not tell the difference, because a text match cannot
+distinguish a thing from its description. The two were written the same hour
+by the same author, which is the part to sit with: this is not a stale check
+meeting changed code. It is a check that never could have worked, passing
+nothing and failing on prose, at the moment of its writing.
+
+> The rule: **a check must run the rule, not search for it.** Parse the
+> source and look at what the code *does* -- names bound, calls made,
+> arguments passed. Searching text finds the subject and its documentation
+> and its disclaimers and its TODO about someday adding the thing, and
+> reports them all as the subject.
+
+It is warning 5's rule -- *a mutant runs the check, not a copy of it* -- one
+step earlier, at the check itself rather than at the check's own test. And it
+has now happened twice in one slice: the write-path scan reported
+`str.replace("\\", "/")` as a file write before it was parsed, and this.
+Both were text searches standing in for a question about code.
+
 **2. It reported `M` and `efSearch` unreachable in every family, because it
 reimplemented a rule that already existed.** It tested belonging with
 `config.params.get("index") in ("hnsw",)`. But `index` **elides at its
@@ -919,26 +955,32 @@ causes need different actions.* If they need different actions, something
 will have to choose between them, and prose is not a thing a chooser can
 read.
 
-**And the rule for doing the split, which is not *always distinguish*.** It
-is: **distinguish where the information exists, and refuse to guess where it
-does not.**
+**And the rule for doing the split, which is not *always distinguish*.** The
+argument comes first, because the consequence is only obvious once it is
+made.
 
-`ModelUnresolved` split into three outcomes, not two. Two sites knew which
-they were — *listed twice* is decided from the request alone, and *loaded but
-reports no dimension* means the name was right — and they took the refusal
-and the failure. The third is the load attempt, where a typo and an
-unreachable hub produce much the same exception, and **it kept the ambiguous
-base.**
+> **Forcing every site onto one side does not remove the guess. It moves the
+> guess from the classifier into the raise** — where it is harder to see, no
+> better informed, and made against recorded knowledge.
 
-That third site is the rule honouring itself rather than an exception to it.
-A split that forced every site onto one side would have moved the guess from
-the classifier into the raise, where it is harder to see and no better
-informed — and the base's own docstring already said the underlying exception
-distinguishes them badly, so the guess would have been made *against* recorded
-knowledge.
+Harder to see, because a classifier's table is one place a reader can audit
+and a raise is one line among thousands. No better informed, because the
+raise knows exactly what the classifier knows and nothing more. And *against
+recorded knowledge* is the sharp part: `ModelUnresolved`'s own docstring said
+the underlying exception distinguishes a typo from a dead network **badly**.
+A split that made that site pick a side would have overruled a fact the
+codebase had already written down about itself.
+
+> So: **distinguish where the information exists, and refuse to guess where
+> it does not.** That is the consequence, not the premise.
+
+`ModelUnresolved` therefore split into three outcomes, not two. *Listed
+twice* is decided from the request alone and became the refusal; *loaded but
+reports no dimension* means the name was right and became the failure; and
+the load attempt **kept the ambiguous base**.
 
 > **A type that cannot answer is the honest type to raise.** Keeping one
-> ambiguous case is not the split failing; it is the split declining to
+> ambiguous case is not the split failing, it is the split declining to
 > invent the one thing it does not have. The classifier then excludes that
 > type, which is a statement about the site, and the asymmetry decides what
 > happens downstream.
