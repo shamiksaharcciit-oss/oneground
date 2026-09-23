@@ -1337,15 +1337,32 @@ SUPERSEDED_RUN = {
     "threshold_ms": 40.0,
     "report": ("fixtures/arxiv-150k/report/"
                "superseded-2026-09-09-tf8sd2usxbblsm.report.json"),
+    # THE DATES WERE WRONG HERE, ON THE NOTE WHOSE SUBJECT IS EXACTNESS.
+    # The first version said the page "showed a different verdict until
+    # 2026-09-20" -- it showed it until the copy landed, and 20 September is
+    # when our report was BUILT. It said "re-measured on 2026-09-20" -- the
+    # measurement was 2026-09-13 (verify_info.json, 17:09:13Z).
+    #
+    # Both are the same conflation as `geometry_from`'s chase, three
+    # declarations above: **when something was measured against when a record
+    # of it was made.** Made twice in one task, the second time in prose.
+    #
+    # Core's wording is kept because it cannot go stale: naming the re-export
+    # rather than a date means the sentence is true whatever day the deploy
+    # lands, so the note never has to know one.
+    "measured_on": "2026-09-13",
+    "report_built_on": "2026-09-20",
     "note": (
-        "This page showed a different verdict until 2026-09-20. On 2026-09-09 "
-        "a single verify run measured p95 latency at 38.22 ms against a 40.0 "
-        "ms threshold and the configuration met it -- by 1.8 ms, on one run. "
-        "Re-measured on 2026-09-20 on the same fixture and the same "
-        "configuration, pgvector fails it in all three runs (316.87, 317.41 "
-        "and 332.23 ms) and qdrant cannot be judged at all, because the "
-        "baseline round-trip was 60% of the query p95 and the number would "
-        "have measured the network more than the engine. "
+        "Until the page was re-exported from the report of 2026-09-20, it "
+        "showed a different verdict. On 2026-09-09 a single verify run "
+        "measured p95 latency at 38.22 ms against a 40.0 ms threshold and the "
+        "configuration met it -- by 1.8 ms, on one run. Measured again on "
+        "2026-09-13 on the same fixture and the same configuration (the "
+        "report from that run was built on 2026-09-20), pgvector fails it in "
+        "all three runs (316.87, 317.41 and 332.23 ms) and qdrant cannot be "
+        "judged at all, because the baseline round-trip was 60% of the query "
+        "p95 and the number would have measured the network more than the "
+        "engine. "
         "**That earlier run is not the basis of this verdict and its verify "
         "receipt no longer exists** -- it was never committed, so only its "
         "report survives, and it is linked above. It is shown because a "
