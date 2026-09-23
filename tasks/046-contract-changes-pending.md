@@ -4,6 +4,15 @@
 finding about the module and not four findings about a UI slice. To be ruled
 on as a shape when 046 closes.*
 
+**A consequence worth recording before the instances**, because it is the
+first place this slice's two halves meet without being wired together: the
+form writes requirements files *into* the runs directory, and the jobs page
+offers a stage only when it can name a target in that directory — so **saving
+a requirements file is what makes `characterize` offerable.** Nothing
+connects them. Neither knows the other exists. They meet because both were
+made to ask what a thing is rather than to assume one, and that is the only
+kind of connection that does not need maintaining.
+
 **The shape, stated first so the instances read as evidence for it:** a slice
 that touches no measurement and adds no stage has needed to reach into how
 `intake` and the CLI express a refusal **four times in one week**. Every one
@@ -80,7 +89,93 @@ The three smaller questions that follow from it, for the same ruling:
 1. Should `refusals.py`'s table live where the refusals do — a declaration in
    each module, rather than one list that has to know sixteen dotted names?
 2. Is `exit 2` the contract, or an implementation detail this slice promoted?
-   It is now load-bearing for the supervisor's classifier.
+   **My reading, asked for and measured, is below.**
 3. Does `intake` owe a refusal for every way a requirements file can be
    unusable, or only for every way its *contents* can be? Number 4 above is
    that question with a concrete instance.
+
+
+---
+
+# On `exit 2`: my reading, measured
+
+*Asked for before the ruling. The short answer is that the premise of my own
+question was wrong: this slice did not promote an implementation detail to a
+contract. Exit 2 was already a contract — an undocumented one that three
+parts of the tree depended on — and what 046 did was extend it to the place
+it was missing and write it down for the first time.*
+
+## What was already true
+
+| where | assertions on exit 2 | what it meant there |
+|---|---|---|
+| `fixture/test_verify.py` | 10 | a fixture did not verify |
+| `test_environment.py` | 4 | the environment guard refused |
+| `lab/test_server.py` | 1 | the lab refused to start |
+
+Fifteen assertions across three files, all predating this slice, none of them
+written by it. And **no document anywhere states an exit code** — I grepped
+`docs/` and `README.md`: the only matches are prose about pipelines and a
+remote runner.
+
+So exit 2 was a *convention with tests* — which is a contract by every
+practical measure, since breaking it breaks fifteen assertions, and not a
+contract by the only measure a user has, since nothing tells them.
+
+`cli.py` returned 2 six times before this slice. It now returns it for every
+declared refusal type as well. **That is the same meaning applied where it was
+missing**, not a new meaning. The promotion that happened was from
+*undocumented* to *written down*, which is the direction worth having.
+
+## The real problem hiding inside it
+
+The three places above do not all mean the same thing, and one of them is the
+project's third outcome.
+
+- *the environment guard refused* — **the tool declined.** A refusal.
+- *the lab refused to start* — **the tool declined.** A refusal.
+- *a fixture did not verify* — **the tool ran, and the answer was no.** That
+  is not a refusal and not a failure. It is a negative result, and this
+  project has a whole vocabulary for exactly that distinction.
+
+So exit 2 currently carries two of the three outcomes, and
+`jobs.EXIT_MEANING` maps it to `refused` without qualification. **Nothing is
+broken today**, and the reason is worth stating precisely, because it is not
+luck:
+
+`fixture verify` is not a job stage. And the stage that could most obviously
+have had this problem does not: `_cmd_verify` returns **0** even when a real
+engine contradicts the simulation, because the contradiction is written into
+`verify.json`. That is the project's own rule — **the three outcomes live in
+the artifact, not in the process** — holding at the process boundary without
+anyone having said so there.
+
+The day a stage exits 2 for a negative result, `classify` will call it
+`refused` and the page will say *the tool declined* about an answer the tool
+gave. Nothing would report it: the job record would be internally consistent
+and wrong, which is §4's shape again.
+
+## What I would write down, if it were mine to rule
+
+Not *exit 2 means refused*. That is true of the job stages and false of
+`fixture verify`, so writing it would make a document wrong on the day it
+shipped. The sentence that is true of everything today and is worth being
+held to:
+
+> **A stage's exit code says whether the command ran. It never says what the
+> command found.**
+>
+> - `0` — it ran. What it found is in the artifact.
+> - `2` — it declined, with a reason, and printed it.
+> - `1` — it did not finish. Whether anything survives is the workdir's to
+>   say, not the code's.
+
+That makes `fixture verify` the named exception rather than a
+counter-example — it is a checker whose whole output *is* the verdict, so its
+exit code carries one — and it gives the supervisor's classifier a rule it
+can be held to rather than a mapping that happens to work.
+
+**And it makes one thing checkable that currently is not:** a test that every
+stage returns 0 when it completes, whatever it found. That is the assertion
+that would have caught the failure above before it existed, and it does not
+exist today.
