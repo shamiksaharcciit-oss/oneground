@@ -263,21 +263,89 @@ def distinguishable(value, n, degenerate=0.0):
 #: kinds is dominated by the looser one. So the reference is the full fixtures
 #: only, and this comment is where that choice is recorded rather than
 #: inferred from an absence.
+#: **Stored at the precision they were measured (task 044d), not rounded.**
+#:
+#: THE ENDPOINT RULE, which nobody stated and nobody designed for
+#: ---------------------------------------------------------------
+#: `against_published` weighs a corpus against the range these values span,
+#: and the values spanning it ARE published corpora. So a fixture in this
+#: table is calibrated ground by construction and can never legitimately read
+#: outside. Whether it does is decided entirely by which way its stored
+#: literal was rounded:
+#:
+#:     an endpoint is safe IF AND ONLY IF the low edge rounds DOWN
+#:     and the high edge rounds UP -- outward, away from the band's interior.
+#:
+#: Two tables, two edges each: **four independent coin flips, and not a
+#: property anyone chose.** Crispness won both of its. Ambiguity lost both --
+#: `sec-filings-10k` measured 65.436356 and was stored as `65.44` (up, so
+#: above the low edge) and `stackexchange-150k` measured 90.871567 and was
+#: stored as `90.87` (down, so below the high edge), and each told a user that
+#: the measure had never been calibrated on the corpus that calibrated it.
+#:
+#: The interior fixture cannot fail however it rounds, which is why only the
+#: two edges of each table are at risk and why the luck ran at two-for-four
+#: rather than one-in-six. A defect that survives by the direction of a
+#: rounding is not fixed, it is lucky.
+#:
+#: Storing at measured precision removes the flip rather than compensating for
+#: it. `test_the_stored_edges_are_the_measured_extremes` asserts the rule
+#: directly -- as an ordering between the stored edges and the measured
+#: extremes -- so a future rounding in the wrong direction is caught at the
+#: constant rather than at whichever consequence someone happens to test.
+#:
+#: Derived from the published `ground_view_*.parquet`, which is also what that
+#: test recomputes them from -- not from a fresh k-means, which lands a few
+#: ten-thousandths away and would reintroduce the same disagreement by another
+#: route.
 PUBLISHED_CRISP_PERCENTILES = {
-    "arxiv-150k": 96.37,
-    "sec-filings-10k": 89.25,
-    "stackexchange-150k": 98.83,
+    "arxiv-150k": 96.373005,
+    "sec-filings-10k": 89.253265,
+    "stackexchange-150k": 98.829571,
 }
+
+#: How far outside the stored band a reading may sit and still count as inside.
+#:
+#: **Not a tolerance on the comparison, and not tunable.** It absorbs two
+#: bounded things and nothing else: the half-unit of the stored decimals
+#: (5e-7 at six places) and the last-bit differences between numpy versions
+#: recomputing the same percentile. It is 500,000 times finer than the 0.5
+#: percentile-point grid the distribution is reported on, so it cannot absorb
+#: a disagreement anyone could measure.
+#:
+#: Widening this is the move task 044d exists to forbid: the band was never
+#: too tight, the literals were too short.
+EDGE_EPSILON = 1e-6
 
 #: What the comparison assumes, and it is not nothing.
 #:
 #: These percentiles were measured at the published settings: 150,000 vectors
-#: and `N_CENTROIDS` regions. `characterize` always uses `N_CENTROIDS`, so the
-#: centroid count matches by construction -- but a user sampling fewer vectors
-#: is compared against a band measured on more, and how much the threshold's
-#: position moves with sample size **has not been measured**. That is task
-#: 044c's question and until it is answered this comparison carries the
-#: assumption rather than having discharged it.
+#: and `N_CENTROIDS` regions. Both halves of that have now been measured, and
+#: this comment said otherwise until task 044d.
+#:
+#: **Sample size: measured by 044b**, which set `MIN_N_FOR_TRANSFER` from the
+#: drift table three declarations below. The comparison is simply not made
+#: below that floor, so this is discharged rather than assumed.
+#:
+#: **Centroid count: measured by 044c.** `characterize` always uses
+#: `N_CENTROIDS`, so the counts match by construction -- but "matches by
+#: construction" was doing more work here than anyone had checked. 044c swept
+#: k from 16 to 4096 and found this band moves a great deal with it: arxiv's
+#: own threshold position runs from the 85.69th percentile at k=16 to the
+#: 96.53rd at k=512. So the construction is load-bearing, not incidental, and
+#: the thing that discharges it is that one constant feeds every caller.
+#:
+#: What is still assumed: that three full fixtures are enough to bound the
+#: band. They are not many -- `ambiguity.PUBLISHED_AMBIGUITY_PERCENTILES`
+#: records the same limit, and `docs/FIXTURES.md` carries it as a stated
+#: limit rather than a wish.
+#:
+#: (Until 044d this comment read that the sample-size drift "has not been
+#: measured. That is task 044c's question" -- wrong twice over, three lines
+#: above the constant 044b set from measuring it, and about a task whose
+#: question was the centroid count. Recorded because two comments in one
+#: module disagreeing about whether a thing is measured is the
+#: `docs/PRACTICE.md` section 4 mechanism in a smaller key.)
 PUBLISHED_PERCENTILE_BASIS = (
     "measured on the full published fixtures at 150,000 vectors and "
     "N_CENTROIDS regions; smoke fixtures excluded. The threshold's position "
@@ -342,7 +410,9 @@ def against_published(pct, per_fixture, threshold, what, n=None):
             "percentile of this corpus, which is reported above."
             % (int(n), MIN_N_FOR_TRANSFER, pct))
         return out
-    outside = not (lo <= pct <= hi)
+    # EDGE_EPSILON, because the endpoints of this band ARE published fixtures
+    # and a strict comparison made two of them read outside it (task 044d).
+    outside = not (lo - EDGE_EPSILON <= pct <= hi + EDGE_EPSILON)
     out["outside_published_range"] = outside
     if outside:
         out["note"] = (

@@ -65,10 +65,17 @@ AMBIGUOUS_RATIO = 1.10
 #: it can say that e5's 97.7 is outside and it cannot say much finer than
 #: that. A fourth and fifth full fixture would tighten it; see
 #: `docs/FIXTURES.md`, which records this as a stated limit rather than a wish.
+#: **Stored at measured precision, not rounded (task 044d).** This is the
+#: table where the rounding actually bit: both endpoints read outside their own
+#: band. `sec-filings-10k` measures 65.436356 and was stored as `65.44`, which
+#: rounds UP and so sat above the low edge; `stackexchange-150k` measures
+#: 90.871567 and was stored as `90.87`, which rounds down and so sat below the
+#: high edge. Each endpoint is a coin flip on the direction of its own
+#: rounding, and this band lost both. See `crispness.EDGE_EPSILON`.
 PUBLISHED_AMBIGUITY_PERCENTILES = {
-    "arxiv-150k": 89.28,
-    "sec-filings-10k": 65.44,
-    "stackexchange-150k": 90.87,
+    "arxiv-150k": 89.277750,
+    "sec-filings-10k": 65.436356,
+    "stackexchange-150k": 90.871567,
 }
 
 

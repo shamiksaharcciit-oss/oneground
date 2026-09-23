@@ -1,13 +1,15 @@
-# For `docs/PRACTICE.md` §2 — warning 8
+# For `docs/PRACTICE.md` §2 — a synthetic test that implies a real claim
 
 *From task 044c, for the interface stream to place. §2 is "Checks that do not
-check" and its warnings are numbered 1–7; this is the eighth and it belongs
-there rather than in a section of its own. What it cost is at the bottom, per
-the page's constraint.*
+check" and this belongs there rather than in a section of its own. **No number
+is written in below**: it was drafted when §2 ended at warning 7, and a
+warning 8 has since landed that is not this one — numbering it here would be
+the stale-state defect §1 is about. What it cost is at the bottom, per the
+page's constraint.*
 
 ---
 
-**8. A test that passes on synthetic data and would imply a claim only real
+**A test that passes on synthetic data and would imply a claim only real
 data supports.** This project already names synthetic tests — 550 of them end
 in `_synthetic`, and `docs/CLAIMS.md` treats the suffix as the disclosure. The
 suffix says *the data is made up*. It does not say **which of the things the
