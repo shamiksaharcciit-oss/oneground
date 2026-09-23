@@ -557,3 +557,37 @@ def test_the_required_field_of_a_block_is_offered_from_empty():
     for name in ("corpus.sample.vectors.path", "corpus.sample.text.path",
                  "corpus.sample.queries.path"):
         assert fields.BY_NAME[name].belongs_to is None, name
+
+def test_the_server_makes_no_request_of_its_own():
+    """The last unbroken promise in `server.py`'s own list, and the one the
+    write half puts under pressure: a job has to be enqueued and the
+    supervisor owns the job list.
+
+    Held until it is ruled on, and held by a check rather than by the
+    docstring alone -- which is the lesson from the two bullets beside it
+    that stopped being true without anything noticing. Parsed, not searched:
+    the header discusses making requests at length, and a text match would
+    find the discussion.
+    """
+    import ast
+    import os
+    from oneground.lab import guard
+
+    outbound = {"urlopen", "urlretrieve", "Request", "HTTPConnection",
+                "HTTPSConnection", "create_connection", "connect", "get",
+                "post", "put", "delete", "request"}
+    owners = {"urllib", "requests", "httpx", "socket", "http"}
+    problems = []
+    for name in guard.TRANSPORT_MODULES + guard.CONTRACT_MODULES             + guard.WRITE_MODULES:
+        path = os.path.join(guard.LAB_DIR, name)
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if isinstance(fn, ast.Attribute) and fn.attr in outbound                     and isinstance(fn.value, ast.Name)                     and fn.value.id in owners:
+                problems.append((name, node.lineno,
+                                 f"{fn.value.id}.{fn.attr}()"))
+    assert problems == [], (
+        "a served module makes a request of its own: " + repr(problems))

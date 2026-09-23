@@ -20,14 +20,28 @@ either finds anything.
 
 WHAT IT NEVER DOES
 ------------------
-- write a file, anywhere: there is no write path, and no method but GET
+- write a file **itself**: exactly one served module opens one for writing
+  (`compose.py`, requirements files, through the write guard), and
+  `guard.check_write_path` refuses the session at startup if any other can.
+  This list said "no write path, and no method but GET" until task 046 gave
+  the page a form -- both halves false the hour it landed, in the served
+  module's own header, which is where a reader checks. Corrected rather than
+  deleted: what it guarantees is narrower now and still worth stating.
 - send a file from the run directory: states are drawn, never served raw, and
   the only files served are the interface's own, from a fixed table -- no part
   of a request path is ever joined to a directory
-- run a simulation: the recall panel's action is a command for the user
+- run a simulation, or anything else: a job is run by the supervisor, a
+  second process, because a server that may not import the measuring packages
+  cannot run them
 - answer a request without this session's token, or for a Host it did not bind
-- send a CORS header, list a directory, log a request line (it carries the
-  token), or make a request of its own
+- send a CORS header, list a directory, or log a request line (it carries the
+  token)
+- **make a request of its own.** Still true, and the one on this list most
+  under pressure: the write half needs a job enqueued and the supervisor owns
+  the job list. Forwarding would be the easy way and would turn this server
+  into something that makes requests, which is a property worth more than the
+  convenience. See `tasks/046-interface-write.report.md`; the ruling is not
+  this module's to make.
 
 What the token does and does not protect against is in docs/LAB.md.
 """

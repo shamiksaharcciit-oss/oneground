@@ -225,3 +225,194 @@ class Supervisor:
         job.why = ("cancelled; whatever it had written is kept and marked "
                    "partial rather than presented as complete")
         return self._replace(job)
+
+# ======================================================== the channel
+# The server may not write, so it cannot enqueue a job itself. It asks this
+# process to, over loopback, with a token -- the same shape as the lab's own
+# door and for the same reason.
+#
+# WHY NOT A FILE THE SERVER DROPS IN A DIRECTORY. Because that is a write,
+# and the whole point of the split is that the served package has exactly one
+# module that opens a file for writing and it writes requirements files. A
+# queue directory would be a second write path wearing a different hat, and
+# `guard.check_write_path` would have to be taught to ignore it -- an
+# exemption that describes convenience rather than the world (section 5).
+#
+# The server finds this process the way a reader finds anything here: a file
+# in the runs directory, written by the process that owns it.
+
+import hmac                                                   # noqa: E402
+import http.server                                            # noqa: E402
+import secrets                                                # noqa: E402
+import threading                                              # noqa: E402
+import urllib.parse                                           # noqa: E402
+
+#: Where the supervisor says how to reach it.
+ADDRESS_NAME = "supervisor.json"
+
+SUPERVISOR_TOKEN_HEADER = "X-Oneground-Supervisor-Token"
+
+
+class _Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "oneground-supervisor"
+    sys_version = ""
+
+    def log_message(self, fmt, *args):                 # noqa: A002
+        """Nothing is logged: a request line carries the token."""
+
+    def do_POST(self):                                 # noqa: N802
+        self.server.channel._answer(self)
+
+    def _only_post(self):
+        _send(self, 405, {"error": "the supervisor answers POST; the job "
+                                   "list is read from the runs directory"})
+
+    do_GET = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = _only_post
+
+
+def _send(req, status, obj):
+    body = json.dumps(obj).encode("utf-8")
+    req.send_response(status)
+    req.send_header("Content-Type", "application/json")
+    req.send_header("Content-Length", str(len(body)))
+    req.send_header("X-Content-Type-Options", "nosniff")
+    req.end_headers()
+    req.wfile.write(body)
+
+
+class _HTTPServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+
+class Channel:
+    """A loopback door onto one supervisor.
+
+    Bound to 127.0.0.1, with a token the caller must present. The address
+    file is how the server finds both.
+    """
+
+    #: A body larger than this is not a job request.
+    MAX_BODY = 1 << 16
+
+    def __init__(self, sup, host="127.0.0.1", port=0, token=None):
+        self.sup = sup
+        self.token = token or secrets.token_urlsafe(32)
+        self.httpd = _HTTPServer((host, port), _Handler)
+        self.httpd.channel = self
+        self.port = self.httpd.server_address[1]
+        self.url = "http://%s:%d" % (host, self.port)
+        self._thread = None
+
+    def start(self):
+        self._thread = threading.Thread(target=self.httpd.serve_forever,
+                                        daemon=True)
+        self._thread.start()
+        self.announce()
+        return self
+
+    def announce(self):
+        """Write where this supervisor is, for the server to read.
+
+        It carries the build for the same reason `/api/check` does: a server
+        and a supervisor running different checkouts would each be correct
+        about themselves and wrong together, which is the defect that has
+        now appeared three times.
+        """
+        os.makedirs(self.sup.runs_dir, exist_ok=True)
+        target = os.path.join(self.sup.runs_dir, ADDRESS_NAME)
+        tmp = target + ".writing"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump({"url": self.url, "token": self.token,
+                       "pid": os.getpid(),
+                       "build": provenance.PACKAGE_DIR}, f, indent=1)
+        os.replace(tmp, target)
+
+    def stop(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        try:
+            os.remove(os.path.join(self.sup.runs_dir, ADDRESS_NAME))
+        except OSError:                                  # pragma: no cover
+            pass
+
+    # -- answering ---------------------------------------------------------
+    def _answer(self, req):
+        try:
+            length = int(req.headers.get("Content-Length") or 0)
+        except ValueError:
+            req.close_connection = True
+            return _send(req, 400, {"error": "unreadable Content-Length"})
+        if length > self.MAX_BODY:
+            req.close_connection = True
+            return _send(req, 413, {"error": "a job request is not that big"})
+        # Read before any refusal: answering a POST without draining resets
+        # the connection and the caller sees a transport error instead of
+        # the refusal. Learned twice already in this slice.
+        raw = req.rfile.read(length) if length else b""
+
+        offered = req.headers.get(SUPERVISOR_TOKEN_HEADER) or ""
+        if not hmac.compare_digest(offered.encode("utf-8"),
+                                   self.token.encode("utf-8")):
+            return _send(req, 403, {
+                "error": "refused: this supervisor's token is required"})
+
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except (ValueError, UnicodeDecodeError) as e:
+            return _send(req, 400, {"error": "unreadable body: %s" % e})
+        if not isinstance(body, dict):
+            return _send(req, 400, {"error": "expected a JSON object"})
+
+        path = urllib.parse.urlsplit(req.path).path
+        if path == "/enqueue":
+            return self._enqueue(req, body)
+        if path == "/cancel":
+            return self._cancel(req, body)
+        return _send(req, 404, {"error": "not found"})
+
+    def _enqueue(self, req, body):
+        invocation = body.get("invocation")
+        if not isinstance(invocation, list) or not invocation:
+            return _send(req, 400, {
+                "error": "a job is a CLI invocation and this names none"})
+        try:
+            job = self.sup.enqueue(body.get("stage"), invocation,
+                                   workdir=body.get("workdir"))
+        except jobs.JobError as e:
+            # The supervisor's own refusal, verbatim. It already names what
+            # is wrong and what the set is; rephrasing here would be the
+            # second implementation one hop further out.
+            return _send(req, 400, {"error": str(e), "refusal": str(e)})
+        return _send(req, 200, {"job": job.to_dict()})
+
+    def _cancel(self, req, body):
+        wanted = body.get("id")
+        for job in self.sup.read():
+            if job.id != wanted:
+                continue
+            if not job.live:
+                return _send(req, 409, {
+                    "error": "this job is already %s; a terminal state is "
+                             "terminal, and a late cancellation must not "
+                             "rewrite what happened" % job.state})
+            return _send(req, 200, {"job": self.sup.cancel(job).to_dict()})
+        return _send(req, 404, {"error": "no job %r in this list" % wanted})
+
+
+def address(runs_dir):
+    """How to reach the supervisor for this directory, or None.
+
+    None is a real answer and the page says so: *no supervisor is running,
+    so nothing can be started from here*. Pretending otherwise would put a
+    button on the page that fails when pressed, which is worse than an
+    absent one because it looks like a defect in the tool rather than a
+    process nobody started.
+    """
+    try:
+        with open(os.path.join(runs_dir, ADDRESS_NAME), encoding="utf-8") as f:
+            found = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(found, dict) or not found.get("url"):
+        return None
+    return found
