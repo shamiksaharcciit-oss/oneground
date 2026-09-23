@@ -11,25 +11,33 @@ corpus.
 Task 041 built the read half of the interface: a page that shows, for every
 figure in a report, the file and field it was read from and the value at that
 field. Building it produced eight findings, and **five of them are not about
-the interface.** Four are collected here.
+the interface.** Five are collected here — four from 041, and one the
+proposals stream found while building 044.
 
 They share one property, and it is the reason they are one task:
 
 > **Each is a defect in what a claim says, not in how a claim is drawn.**
 
-The interface refused all four. It renders a claim verbatim, so a renderer
-that corrected a claim's sentence, rewrote its citation or collapsed fifteen
-claims into one would make the screen and the receipt disagree — and a reader
-comparing the two would be right to trust neither. An ugly token on a page is
-a smaller fault than a page that quietly improves its source.
+The interface refused all five. It renders a claim verbatim, so a renderer
+that corrected a claim's sentence, rewrote its citation, supplied a missing
+remedy or collapsed fifteen claims into one would make the screen and the
+receipt disagree — and a reader comparing the two would be right to trust
+neither. An ugly token on a page is a smaller fault than a page that quietly
+improves its source.
 
-So the page displays them, and this is where they get fixed.
+So the page displays them, and this is where they get fixed. Four were found
+by building the page; the fifth was found by a test the page's own rules
+required, which is the same thing one step further on.
 
 **The order matters and the first one is why.** Finding 1 is a check whose
-name promised more than it delivered, and it is the reason the other three
-survived review: a project with a claim invariant reasonably assumes its
-claims have been checked. Fix that first, and the others become things the
-suite can hold rather than things a reader has to notice.
+name promised more than it delivered, and it is the reason the others survived
+review: a project with a claim invariant reasonably assumes its claims have
+been checked. Fix that first, and the rest become things the suite can hold
+rather than things a reader has to notice.
+
+**Two of the five are the same two lines.** Findings 2 and 5 both land on
+`verdict.py:364` and `:524` — the same pair of couldn't-check verdicts carry
+an unreconstructable citation *and* no remedy. Do them together.
 
 ---
 
@@ -208,6 +216,83 @@ Required behaviour:
 
 ---
 
+### 5. A couldn't-check without a remedy fails the rule where it matters most
+
+**The sharpest of the five**, because the remedy is the only part of a
+couldn't-check a reader can act on. A verdict that says *I could not check
+this* and stops has told them the one thing they already suspected.
+
+Found by the proposals stream while building 044:
+`test_every_couldnt_check_claim_carries_a_remedy` fails on the arXiv workdir,
+on two claims reading:
+
+> *"To decide latency_p95: this configuration was not the one verified — the
+> verify run built hnsw in a single namespace, which is not a hash_sharded
+> deployment."*
+
+That names the obstacle thoroughly and **never names an action.** The action
+is: *verify this configuration, built as hash_sharded, on a real engine.*
+
+**The shape is larger than those two claims**, and the count is the finding:
+
+| in `oneground/report/verdict.py` | |
+|---|---|
+| couldn't-check verdicts constructed | **29** |
+| that set `remedy=` | **0** |
+| that set `couldnt_check_kind=` | **0** |
+
+`Verdict` has carried both fields since **task 034**, whose own docstring
+says why:
+
+> *"`not_verified` is a run that could have happened and did not — remedy: run
+> it. `not_verifiable_here` is a configuration no engine in this run can build
+> — remedy: a different engine, or an adapter that does not exist. A reader
+> who cannot tell them apart cannot act."*
+
+The field is serialized (`verdict.py:81`) and read (`claims.py:1119`). Exactly
+one path populates it — `oneground/adapters/index_families.py`, the coverage
+check added by the same task. Every couldn't-check `verdict.py` issues leaves
+both empty.
+
+Several of the 29 do carry an action **inside `reason`** — *"run `oneground
+verify` against a real engine"* — which is better than nothing and is in the
+wrong field: a drawer, a card or a summary looking for the remedy finds an
+empty string and shows none. The two at `verdict.py:364` and `:524` carry no
+action anywhere.
+
+Required behaviour:
+
+- Every couldn't-check verdict sets `couldnt_check_kind` and `remedy`.
+- A remedy names **an action**, not the obstacle: what to run, what to change,
+  or that no action exists and why. "No action exists" is a remedy; silence is
+  not.
+- Where an action is currently inside `reason`, it moves to `remedy` and the
+  reason keeps the explanation. Neither field repeats the other.
+- The two at `verdict.py:364` and `:524` get *verify this configuration, built
+  as the family the row names, on a real engine.*
+
+**Findings 2 and 5 meet at the same two lines.** `verdict.py:364` and `:524`
+produce both the unactionable reason *and* the citation Finding 2 describes —
+they carry `source="verify_info.json:engine_facts.index_params"`, which names
+a per-engine field from a verdict spanning every engine. One edit closes both,
+and doing them apart would touch the same two verdicts twice.
+
+**Why it went unnoticed, which is a finding about the check rather than the
+code.** `test_every_couldnt_check_claim_carries_a_remedy` reads a local
+workdir. In CI there is none, so it **skips** and the suite is green; it is
+red only on a machine holding that workdir. A check that passes everywhere it
+runs and only runs where nobody looks reported nothing for as long as it
+existed.
+
+That is task 041's Finding 6b in a second place: *a check that fires when
+something is missing is only tested by making it missing*, and a check that
+skips rather than fails has made itself missing. Whoever fixes this should
+say whether the test should fail rather than skip — 041's
+`oneground/lab/test_evidence.py` shows the shape, where a tracked fixture is
+`required=True` and only a genuinely local run may skip.
+
+---
+
 ## What this may not do
 
 - **Fix any of these in a renderer.** Every one of the four is a defect in
@@ -237,6 +322,11 @@ Required behaviour:
 - The spanning citation is two claims with `member` set, or one claim citing
   both values, and resolves under the new check.
 - No claim's `text` contains an outcome constant, asserted over a real report.
+- Every couldn't-check verdict sets `couldnt_check_kind` and `remedy`, and
+  every remedy names an action — asserted over all 29 in `verdict.py`, not
+  over the two that were noticed.
+- The remedy check fails rather than skips where its input is tracked, and the
+  report says which inputs are tracked and which may honestly be absent.
 - Repeated-in-substance claims are emitted as one quantified claim whose
   `holds_for` is derived from the rows, with the arXiv claim count before and
   after and a statement that no fact was dropped.
