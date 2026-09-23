@@ -263,6 +263,33 @@ Stated plainly, because the position paper's slice 2 adds all of it:
 - **No measurement is computed.** A number on screen came from a file the CLI
   wrote, or it is not on screen.
 
+### A candidate for slice 2: the crispness distribution
+
+Task 044 made `boundary_crispness` a **named reading of a distribution**
+rather than a bare count, and `characterize` now writes a `crispness_reading`
+block — value, threshold, percentile, `n_above`, `resolvable`, and a 201-point
+quantile grid — into a user's own workdir's `characterization.json`.
+
+**The characterize page does not draw it, and that is not breakage.** The page
+declares its fields and draws `boundary_crispness`, which is correct: the
+stored reading equals it to machine precision. Nothing on screen is wrong;
+there is a measure available that the page does not yet know about.
+
+Two reasons this is design work rather than a column, and both are worth
+settling before anyone starts:
+
+- **The field is present in a user's run and absent in a published fixture's.**
+  Fixtures keep deriving the distribution on demand, deliberately, so a view
+  declaring `crispness_reading` must ask `has()` and gap its absence with a
+  reason. That is precisely the contract's absent-field case, and
+  `oneground ui --demo` hits it on the first page it opens, because the demo
+  *is* a published fixture.
+- **A page showing the distribution and the count must say which is a reading
+  of which.** They are one measurement, not two. Drawn side by side without
+  that relationship stated, a reader sees two numbers about crispness and has
+  to guess whether they agree — which is the shape of the defect the evidence
+  drawer exists to make impossible elsewhere.
+
 ---
 
 ## The security model, unchanged

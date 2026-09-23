@@ -299,8 +299,28 @@ sentence that restates their obstacle.
   disguised by an opening clause. A sentence that begins *To decide X* and
   does not say how to decide X is worse than a blank, because a blank is
   obviously missing.
-- Couldn't-check verdicts on constraints outside `ENGINE_CONSTRAINTS` get a
-  kind and a remedy too, or a recorded reason why they cannot.
+
+  **This is finding 5's other half, one layer along: right shape, no
+  content.** The first half is an action sitting in `reason` where nothing
+  looking for a remedy will find it — right words, wrong field, and worse than
+  absent because it reads as done. The second is a sentence carrying a
+  remedy's opening words and an obstacle's content — right shape, wrong
+  content, and worse than absent for the same reason. Both defeat a reader and
+  a reviewer in the same way: the thing has the appearance of the thing. A
+  check that asks *"is there a remedy?"* answers yes to both.
+
+- **Routing covers every constraint, not two of them.** The loop runs only
+  over `ENGINE_CONSTRAINTS = ("latency_p95", "qps")`, so a couldn't-check on
+  `recall_at_k`, `storage_amplification`, `memory_budget` or `monthly_budget`
+  **never enters routing at all** — it arrives with `couldnt_check_kind: None`,
+  `remedy: ""`, and the fall-through sentence. This is the larger half of the
+  finding: the two claims anyone looked at are inside the routed set and still
+  unrouted, and every constraint outside it was never in scope.
+
+  Either every constraint's couldn't-check is routed, or the ones that are not
+  carry a recorded reason why routing does not apply to them. "It was only
+  ever written for engine constraints" is a fact about the code, not a reason
+  a reader can act on.
 
 #### Findings 2 and 5 are the same two lines
 
@@ -382,6 +402,9 @@ skips when it is absent.
   constraints outside `ENGINE_CONSTRAINTS` that never enter the routing loop.
 - `how_to_resolve` routes every kind that carries a remedy, and its
   fall-through no longer returns a reason prefixed with *To decide X*.
+- Routing reaches **every constraint**, not only `latency_p95` and `qps`, or
+  each constraint it does not reach carries a recorded reason why — asserted
+  over a report whose couldn't-checks span more than the engine constraints.
 - A tracked input exercises the not-verifiable-here path, so the case fails
   for everyone or for no one.
 - The remedy check fails rather than skips where its input is tracked, and the
