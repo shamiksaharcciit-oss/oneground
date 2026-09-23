@@ -1,12 +1,22 @@
 """The intake field table: one declaration per requirements field.
 
-**It lives in `intake` rather than in the lab**, for two reasons that
-agree. The lab's guard refuses `oneground.models` to every served module, so a
-table in the lab could not import `Param` without an exemption -- and an
-exemption would have been the wrong repair, because this is the better home
-on the merits: a field's explanation and its refusal must not diverge, and the
-refusals are in this package. The declaration sits beside the thing it must
-agree with. The lab imports it.
+**It lives in `intake` rather than in the lab because a field's explanation
+and its refusal must not end up in different packages.** They are two strings
+about one field; the whole reason this table exists is that they cannot be
+allowed to diverge; and the refusals are here, twenty-five of them. So the
+declaration sits beside the thing it has to agree with, and the lab imports
+it.
+
+The guard is how that became visible rather than why it is right, and the
+order matters. A table in the lab could not import `Param` at all -- the lab's
+guard refuses `oneground.models` to every served module -- and an exemption
+was available and easy. Taking it would have put a field's explanation in one
+package and the refusal it must match in another, and would have done it by
+talking a guard out of a refusal that was correct.
+
+**A guard refusing something reasonable earns one question before it earns an
+exemption: what is it saying about where this belongs?** Here the answer was
+the whole design decision, and it was free.
 
 A new registry over an existing shape. `models/base.py:Param` already carries
 `type`, `minimum`, `maximum`, `choices`, `belongs_to` and `note`, and this
@@ -52,7 +62,7 @@ violates one does not survive `load()`. What an absent declaration costs is
 timing defect and not a correctness one.
 """
 
-from oneground.models.base import NO_DEFAULT, Param
+from oneground.param import NO_DEFAULT, Param
 
 #: Re-exported deliberately. The lab's guard refuses `oneground.models` to
 #: every served module, so the write path cannot ask `models.base` whether a

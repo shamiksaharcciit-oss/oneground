@@ -56,6 +56,7 @@ together say *exactly one module writes, and it is this one*.
 """
 
 import os
+import tempfile
 
 import yaml
 
@@ -186,6 +187,100 @@ def state_from_mapping(data):
     """
     return {p.name: _get(data, p.name) for p in fields.FIELDS
             if _get(data, p.name) is not None}
+
+
+def open_text(text):
+    """**Door two.** An uploaded file, as form state, validated on arrival.
+
+    Three things happen here and the order is the point. The bytes are
+    parsed; the document is validated by `intake` itself; and only then is it
+    flattened to state. What comes back is state, so the upload path rejoins
+    `document()` rather than becoming a second way to build a file.
+
+    **Validation does not need to know where the file will live.** `load()`
+    reads the document and never touches the filesystem -- only
+    `input_paths()` does, and `load()` does not call it -- so a temp file
+    anywhere validates exactly what a file in the runs directory would. That
+    is worth stating because the obvious worry is that a relative path would
+    resolve differently, and it would, if anything resolved it.
+
+    A refusal is named against **the field it belongs to** rather than
+    reported as a parse position, which is the whole difference between
+    arriving in a form and arriving at a traceback.
+    """
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise WriteRefused(
+            "this file is not readable as YAML",
+            refusal=_yaml_refusal(e)) from None
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise WriteRefused(
+            "a requirements file is a mapping of fields",
+            refusal="the document is a "
+                    f"{type(data).__name__}, not a mapping of fields")
+
+    handle, tmp = tempfile.mkstemp(suffix=".yaml", prefix="oneground-open-")
+    os.close(handle)
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        try:
+            intake.load(tmp)
+            refusal, field = None, None
+        except intake.RequirementsError as e:
+            refusal = str(e).replace(tmp + ": ", "")
+            field = _field_named_in(refusal)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:                                # pragma: no cover
+            pass
+
+    state = state_from_mapping(data)
+    return {
+        "state": state,
+        "refusal": refusal,
+        "field": field,
+        # Keys the table does not declare. Carried in the answer rather than
+        # dropped in silence: the form cannot show them, and a user whose
+        # file loses a block deserves to be told which one before they save
+        # rather than after.
+        "not_offered": sorted(set(_flatten(data)) - set(_flatten(
+            document(state)))),
+    }
+
+
+def _yaml_refusal(error):
+    """A YAML error, as a sentence rather than a stack.
+
+    The `problem` and the line are the two parts a person can act on; the
+    rest of a `yaml.YAMLError` is about the parser.
+    """
+    mark = getattr(error, "problem_mark", None)
+    problem = getattr(error, "problem", None) or str(error)
+    if mark is None:
+        return problem
+    return f"line {mark.line + 1}, column {mark.column + 1}: {problem}"
+
+
+def _field_named_in(refusal):
+    """Which declared field a refusal is about, or None.
+
+    `intake` names the field in every message it raises -- that is its own
+    first rule -- so this looks for a declared name in the sentence rather
+    than parsing the sentence. The longest match wins, because
+    `corpus.sample.text.model` contains `corpus.sample.text`, and the more
+    specific field is the one the form should point at.
+
+    None is a real answer and not a failure: eleven of the twenty-five
+    refusals are not about a declared field at all, and saying so is more
+    useful than attaching one of them to a field it does not belong to.
+    """
+    named = [p.name for p in fields.FIELDS if p.name in refusal]
+    return max(named, key=len) if named else None
 
 
 # ------------------------------------------------------------- the render

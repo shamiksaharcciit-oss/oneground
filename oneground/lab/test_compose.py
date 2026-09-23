@@ -261,3 +261,259 @@ def test_a_presence_sentinel_answers_a_question_with_no_value_in_it():
         if wanted in fields.SENTINELS:
             continue                    # a presence question: no value in it
         assert isinstance(wanted, tuple) and wanted, param.name
+
+# ============================================================ the front doors
+# Over HTTP, because "the form writes the file" is a property of the surface
+# and not only of the writer beneath it.
+import http.client                                            # noqa: E402
+import json as _json                                          # noqa: E402
+import tempfile                                               # noqa: E402
+
+from oneground.lab import server                              # noqa: E402
+
+TOKEN = "t" * 32
+
+
+def _ui(directory):
+    """A `oneground ui` session: a directory of runs, and the write half."""
+    return server.LabServer(runs_dir=directory, token=TOKEN, port=0).start()
+
+
+def _post(lab, path, body, token=TOKEN, method="POST"):
+    conn = http.client.HTTPConnection("127.0.0.1", lab.port, timeout=30)
+    headers = {"Host": f"127.0.0.1:{lab.port}",
+               "Content-Type": "application/json"}
+    if token is not None:
+        headers[server.TOKEN_HEADER] = token
+    raw = _json.dumps(body).encode("utf-8") if body is not None else b""
+    conn.request(method, path, body=raw, headers=headers)
+    r = conn.getresponse()
+    status, payload = r.status, r.read()
+    conn.close()
+    try:
+        return status, _json.loads(payload)
+    except ValueError:
+        return status, payload
+
+
+def _fetch(lab, path, method="GET"):
+    conn = http.client.HTTPConnection("127.0.0.1", lab.port, timeout=30)
+    conn.request(method, path, headers={
+        "Host": f"127.0.0.1:{lab.port}", server.TOKEN_HEADER: TOKEN})
+    r = conn.getresponse()
+    status, payload = r.status, r.read()
+    conn.close()
+    try:
+        return status, _json.loads(payload)
+    except ValueError:
+        return status, payload
+
+
+def test_the_three_doors_over_http_end_at_the_same_file():
+    """The acceptance line, through the surface rather than under it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _ui(tmp)
+        try:
+            # door one: type it
+            status, typed = _post(lab, "/api/compose/preview",
+                                  {"state": TIER1})
+            assert status == 200, typed
+
+            # door three: take the template, then fill it
+            status, template = _fetch(lab, "/api/compose/template")
+            assert status == 200 and "oneground" in template["text"]
+
+            # door two: upload what door one produced
+            status, opened = _post(lab, "/api/compose/open",
+                                   {"text": typed["text"]})
+            assert status == 200, opened
+            assert opened["refusal"] is None
+            status, uploaded = _post(lab, "/api/compose/preview",
+                                     {"state": opened["state"]})
+            assert status == 200
+
+            assert typed["document"] == uploaded["document"]
+            assert typed["text"] == uploaded["text"]
+
+            # and saving lands one file, named relative to the session's dir
+            status, saved = _post(lab, "/api/compose/write",
+                                  {"state": TIER1, "path": "r.yaml"})
+            assert status == 200, saved
+            assert saved["path"] == "r.yaml"
+            assert os.path.isfile(os.path.join(tmp, "r.yaml"))
+        finally:
+            lab.stop()
+
+
+def test_an_uploaded_file_is_refused_against_a_field_not_a_position():
+    """Door two validates on arrival, and the error names the field it
+    belongs to -- the whole difference between arriving in a form and
+    arriving at a traceback."""
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _ui(tmp)
+        try:
+            bad = ("oneground: 1\n"
+                   "run: {name: x, seed: 1}\n"
+                   "corpus:\n  sample:\n"
+                   "    text: {path: ./docs.jsonl}\n"
+                   "    queries: {path: ./q.npy}\n")
+            status, out = _post(lab, "/api/compose/open", {"text": bad})
+            assert status == 200, out
+            assert out["field"] == "corpus.sample.text.model"
+            assert "neither" in out["refusal"]
+            # the refusal is the CLI's sentence, not the form's
+            assert "oneground will not choose one for you" in out["refusal"]
+
+            # A defect in `intake`, surfaced rather than hidden: a
+            # `corpus:` holding a list crashes `load()` with
+            # AttributeError instead of refusing, because `load()`
+            # checks that the DOCUMENT is a mapping and never that a
+            # block inside it is. The form answers rather than dropping
+            # the connection, and says whose defect it is. The repair
+            # belongs to `intake`, not to the form that found it.
+            status, out = _post(lab, "/api/compose/open",
+                                {"text": "corpus: [this is a list]\n"})
+            assert status == 500, out
+            assert "defect in the tool" in out["error"]
+            assert out["raised"].startswith("AttributeError")
+        finally:
+            lab.stop()
+
+
+def test_a_file_that_is_not_yaml_is_named_by_line_not_by_stack():
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _ui(tmp)
+        try:
+            status, out = _post(lab, "/api/compose/open",
+                                {"text": "run:\n  name: [unclosed\n"})
+            assert status == 400, out
+            assert "line" in out["refusal"]
+        finally:
+            lab.stop()
+
+
+def test_the_write_endpoint_refuses_in_the_cli_s_words_and_writes_nothing():
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _ui(tmp)
+        try:
+            state = dict(TIER1)
+            state["corpus.sample.text.path"] = "./docs.jsonl"
+            status, out = _post(lab, "/api/compose/write",
+                                {"state": state, "path": "r.yaml"})
+            assert status == 400, out
+            assert "are both set" in out["refusal"]
+            assert os.listdir(tmp) == []
+        finally:
+            lab.stop()
+
+
+def test_a_write_cannot_land_outside_the_directory_the_session_serves():
+    with tempfile.TemporaryDirectory() as tmp:
+        inner = os.path.join(tmp, "runs")
+        os.mkdir(inner)
+        lab = _ui(inner)
+        try:
+            for escape in ("../escaped.yaml", "../../escaped.yaml",
+                           os.path.join(tmp, "escaped.yaml")):
+                status, out = _post(lab, "/api/compose/write",
+                                    {"state": TIER1, "path": escape})
+                assert status == 400, (escape, out)
+                assert "outside the directory" in out["error"], escape
+            assert os.listdir(tmp) == ["runs"]
+            assert os.listdir(inner) == []
+        finally:
+            lab.stop()
+
+
+def test_a_lab_session_over_one_run_refuses_every_write():
+    """Reading a run can never trigger a write, enforced rather than
+    intended: the write half belongs to `oneground ui`."""
+    from oneground.lab import test_server as S
+    with tempfile.TemporaryDirectory() as tmp:
+        wd = S._workdir(tmp, "run", 0.2, receipts=True)
+        lab = S._lab(wd)
+        try:
+            status, out = _post(lab, "/api/compose/write",
+                                {"state": TIER1, "path": "r.yaml"},
+                                token=S.TOKEN)
+            assert status == 405, out
+            assert "reads and never writes" in out["error"]
+            before = sorted(os.listdir(wd))
+            status, _ = _post(lab, "/api/compose/preview", {"state": TIER1},
+                              token=S.TOKEN)
+            assert status == 405
+            assert sorted(os.listdir(wd)) == before
+        finally:
+            lab.stop()
+
+
+def test_a_read_route_cannot_be_posted_and_a_write_route_cannot_be_got():
+    """The split is in the table rather than in a conditional somebody has to
+    remember to write."""
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _ui(tmp)
+        try:
+            status, out = _post(lab, "/api/runs", {})
+            assert status == 405 and "read-only" in out["error"]
+            status, out = _fetch(lab, "/api/compose/write")
+            assert status == 405 and "answers POST" in out["error"]
+        finally:
+            lab.stop()
+
+
+def test_the_write_half_still_needs_the_token():
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _ui(tmp)
+        try:
+            status, out = _post(lab, "/api/compose/write",
+                                {"state": TIER1, "path": "r.yaml"},
+                                token=None)
+            assert status == 403 and "token" in out["error"]
+            assert os.listdir(tmp) == []
+        finally:
+            lab.stop()
+
+
+def test_an_oversized_body_is_refused_before_it_is_parsed():
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _ui(tmp)
+        try:
+            huge = {"state": {"run.name": "x" * (server.MAX_BODY + 10)}}
+            status, out = _post(lab, "/api/compose/write", huge)
+            assert status == 413, out
+        finally:
+            lab.stop()
+
+
+def test_the_form_renders_itself_from_the_declaration():
+    """The form carries no labels of its own. It asks for the table, which is
+    what makes one declaration rather than an agreement between two."""
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _ui(tmp)
+        try:
+            status, out = _fetch(lab, "/api/compose/fields")
+            assert status == 200
+            offered = {f["name"]: f for f in out["fields"]}
+            assert len(offered) == len(fields.FIELDS)
+            for param in fields.FIELDS:
+                assert offered[param.name]["note"] == param.note
+            assert len(out["outside_the_table"]) == 11
+            assert offered["run.seed"]["required"] is True
+            assert offered["corpus.declared.text_length"]["choices"] == [
+                "short", "medium", "long"]
+        finally:
+            lab.stop()
+
+
+def test_a_served_module_that_writes_stops_the_session_starting():
+    """The write-path scan is load-bearing at startup, like the contract."""
+    real = guard.check_write_path
+    guard.check_write_path = lambda: {"runs.py": [(1, "write", "open(w)")]}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            with pytest.raises(server.LabRefused) as caught:
+                server.LabServer(runs_dir=tmp, token=TOKEN, port=0)
+            assert "open a file for writing" in str(caught.value)
+            assert "compose.py" in str(caught.value)
+    finally:
+        guard.check_write_path = real

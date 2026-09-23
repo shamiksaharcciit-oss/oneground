@@ -45,7 +45,9 @@ import threading
 import time
 import urllib.parse
 
-from . import contract, guard
+from oneground.intake import fields
+
+from . import compose, contract, guard
 from . import citations as citationsmod
 from . import runs as runsmod
 from .receipt import draw_receipt
@@ -88,7 +90,28 @@ ENDPOINTS = {
     "/api/trace": "trace",
     "/api/query-index": "query_index",
     "/api/ids": "ids",
+    # The write half's two reads. They are GETs because they change nothing:
+    # the field table is the declaration the form renders itself from, and
+    # the template is that declaration written out as a file.
+    "/api/compose/fields": "compose_fields",
+    "/api/compose/template": "compose_template",
 }
+
+#: The write half. POST only, and only in a `ui` session -- see
+#: `answer_write`. Kept in their own map rather than mixed into `ENDPOINTS`
+#: so that a read route can never be reached by POST and a write route can
+#: never be reached by GET: the split is in the table, not in a conditional
+#: somebody has to remember to write.
+WRITE_ENDPOINTS = {
+    "/api/compose/open": "compose_open",
+    "/api/compose/preview": "compose_preview",
+    "/api/compose/write": "compose_write",
+}
+
+#: A requirements file is prose-sized. This is two orders of magnitude more
+#: than the largest example in the tree and it is here so that an unbounded
+#: body cannot be posted to a loopback server.
+MAX_BODY = 1 << 20
 SECURITY_HEADERS = (
     ("Content-Security-Policy",
      "default-src 'none'; script-src 'self'; style-src 'self'; "
@@ -258,12 +281,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):                                   # noqa: N802
         self.server.lab.answer(self)
 
+    def do_POST(self):                                  # noqa: N802
+        self.server.lab.answer_write(self)
+
     def _no_write_path(self):
         self.server.lab.send(self, 405, {
             "error": "the lab has no write path; only GET is answered"},
             extra=(("Allow", "GET"),))
 
-    do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = _no_write_path
+    do_PUT = do_PATCH = do_DELETE = do_OPTIONS = _no_write_path
 
 
 class _HTTPServer(http.server.ThreadingHTTPServer):
@@ -305,6 +331,18 @@ class LabServer:
         self.warning = check_host(host, i_know)
         broken = {**guard.check_views(), **guard.check_transport(),
                   **guard.check_contract()}
+        # Task 046: a served module that writes is refused at startup, like
+        # a view that measures. The write path is one module by declaration
+        # (`guard.WRITE_MODULES`) and this is where that stops being a
+        # convention -- a session does not start if anything else can write.
+        writes = guard.check_write_path()
+        if writes:
+            raise LabRefused(
+                "these modules are served and open a file for writing, and "
+                "only " + ", ".join(guard.WRITE_MODULES) + " may: " +
+                "; ".join(f"{m}:{line} {detail}"
+                          for m, found in sorted(writes.items())
+                          for line, _, detail in found))
         unclassified = guard.unclassified_modules()
         if unclassified:
             raise LabRefused(
@@ -356,16 +394,15 @@ class LabServer:
 
     # ------------------------------------------------------------ requests
     def answer(self, req):
+        refusal = self._refuse_unless_addressed(req)
+        if refusal is not None:
+            return refusal
         split = urllib.parse.urlsplit(req.path)
-        if (req.headers.get("Host") or "").lower() not in self._hosts:
-            return self.send(req, 403, {"error": "refused: unexpected Host"})
         params = urllib.parse.parse_qs(split.query, keep_blank_values=True)
-        offered = req.headers.get(TOKEN_HEADER) or \
-            (params.get(TOKEN_PARAM) or [""])[0]
-        if not hmac.compare_digest(offered.encode("utf-8"),
-                                   self.token.encode("utf-8")):
-            return self.send(req, 403, {
-                "error": "refused: this lab session's token is required"})
+        if split.path in WRITE_ENDPOINTS:
+            return self.send(req, 405, {
+                "error": f"{split.path} writes; it answers POST"},
+                extra=(("Allow", "POST"),))
         if split.path in STATIC:
             name, content_type = STATIC[split.path]
             return self.send_bytes(req, 200, self.static[name], content_type)
@@ -379,6 +416,217 @@ class LabServer:
         except contract.ContractError as e:
             return self.send(req, 500, {"error": f"contract: {e}"})
         return self.send(req, 200, body)
+
+    def answer_write(self, req):
+        """POST, for the write half only.
+
+        Host and token are checked exactly as `answer` checks them, by
+        calling nothing twice: the two share `_refuse_unless_addressed`, so a
+        change to the session's security model cannot reach one and miss the
+        other.
+
+        **A `lab` session refuses every write.** `oneground lab` opens one
+        run for reading and that has not changed; the write half belongs to
+        `oneground ui`, which is pointed at a directory of runs. Reading a
+        run can never trigger a write, and this is where that is enforced
+        rather than intended.
+        """
+        # The body is read before any refusal -- including the token one,
+        # which is why this runs first. See the note below.
+        # The body is read before any refusal, and that ordering is not
+        # cosmetic. Answering a POST without draining what the client is
+        # still sending resets the connection -- on Windows the client sees
+        # `RemoteDisconnected` and never reads the refusal, so a 405 written
+        # carefully in the CLI's words arrives as a transport error. Two
+        # tests caught it and both were about refusals, which is where it
+        # would always show up first.
+        try:
+            length = int(req.headers.get("Content-Length") or 0)
+        except ValueError:
+            req.close_connection = True
+            return self.send(req, 400, {"error": "unreadable Content-Length"})
+        if length > MAX_BODY:
+            # The one case the body is not drained: reading it is the thing
+            # being refused. So the connection is closed deliberately rather
+            # than left to reset.
+            req.close_connection = True
+            return self.send(req, 413, {
+                "error": f"a requirements document over {MAX_BODY} bytes is "
+                         "not one this form wrote"})
+        raw = req.rfile.read(length) if length else b""
+
+        # Only now. The body is bounded above, so draining it costs a known
+        # amount and buys a refusal the client can actually read.
+        refusal = self._refuse_unless_addressed(req)
+        if refusal is not None:
+            return refusal
+
+        split = urllib.parse.urlsplit(req.path)
+        endpoint = WRITE_ENDPOINTS.get(split.path)
+        if endpoint is None:
+            if split.path in ENDPOINTS or split.path in STATIC:
+                return self.send(req, 405, {
+                    "error": f"{split.path} is read-only; it answers GET"},
+                    extra=(("Allow", "GET"),))
+            return self.send(req, 404, {"error": "not found"})
+        if self.runs_dir is None:
+            return self.send(req, 405, {
+                "error": "this is a `oneground lab` session over one run, "
+                         "which reads and never writes. The write half is "
+                         "`oneground ui`, over a directory of runs."},
+                extra=(("Allow", "GET"),))
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except (ValueError, UnicodeDecodeError) as e:
+            return self.send(req, 400, {"error": f"unreadable body: {e}"})
+        if not isinstance(body, dict):
+            return self.send(req, 400, {"error": "expected a JSON object"})
+        try:
+            out = getattr(self, endpoint)(body)
+        except compose.WriteRefused as e:
+            return self.send(req, 400, self._refused(e))
+        except (ValueError, KeyError) as e:
+            return self.send(req, 400, {"error": str(e)})
+        except Exception as e:                        # noqa: BLE001
+            # The CLI's validator raised something that is not a refusal.
+            # That is a defect in the validator rather than in the document,
+            # and the honest answer says so: a refusal names a field and
+            # tells the user what to change, and this cannot, because
+            # nothing decided the document was wrong -- something fell over
+            # reading it.
+            #
+            # It is answered rather than allowed to escape, because an
+            # unanswered POST drops the connection and the user sees a
+            # transport error for a defect in the tool. Task 046 found one
+            # this way: a `corpus:` holding a list crashes `intake.load()`
+            # with AttributeError instead of refusing.
+            return self.send(req, 500, {
+                "error": "the validator did not refuse this document, it "
+                         "failed while reading it, which is a defect in the "
+                         "tool rather than in the file",
+                "raised": f"{type(e).__name__}: {e}"})
+        return self.send(req, 200, out)
+
+    def _refuse_unless_addressed(self, req):
+        """The Host and token checks, in one place for both verbs."""
+        if (req.headers.get("Host") or "").lower() not in self._hosts:
+            return self.send(req, 403, {"error": "refused: unexpected Host"})
+        params = urllib.parse.parse_qs(
+            urllib.parse.urlsplit(req.path).query, keep_blank_values=True)
+        offered = req.headers.get(TOKEN_HEADER) or \
+            (params.get(TOKEN_PARAM) or [""])[0]
+        if not hmac.compare_digest(offered.encode("utf-8"),
+                                   self.token.encode("utf-8")):
+            return self.send(req, 403, {
+                "error": "refused: this lab session's token is required"})
+        return None
+
+    @staticmethod
+    def _refused(e):
+        """A refusal, verbatim, never rephrased and never summarised.
+
+        `refusal` is the CLI's own words where the document reached `load()`
+        and was turned away. `lost` is the guard catching the form instead --
+        the document parsed and came back different -- and it names the
+        fields, because a guard that says only *they differ* hands back the
+        obstacle rather than anything to do with it.
+        """
+        out = {"error": str(e), "refusal": e.refusal}
+        if e.lost:
+            out["lost"] = [{"field": name, "written": a, "read_back": b}
+                           for name, a, b in e.lost]
+        return out
+
+    # ------------------------------------------------- the three front doors
+    def compose_fields(self, params):
+        """The declaration the form renders itself from.
+
+        The form does not carry its own labels. It asks for the table and
+        draws what it is given, which is what makes "the explanation in the
+        file is the string the form showed" a property of one declaration
+        rather than an agreement between two.
+        """
+        del params
+        return {"fields": [{
+            "name": p.name,
+            "type": getattr(p.type, "__name__", str(p.type)),
+            "note": p.note,
+            "choices": list(p.choices) if p.choices else None,
+            "minimum": p.minimum,
+            "maximum": p.maximum,
+            "required": p.default is fields.NO_DEFAULT,
+            "belongs_to": ([p.belongs_to[0], p.belongs_to[1]]
+                           if p.belongs_to else None),
+        } for p in fields.FIELDS],
+            "outside_the_table": [
+                {"rule": name, "kind": kind, "why": why}
+                for name, kind, why in fields.OUTSIDE_THE_TABLE]}
+
+    def compose_template(self, params):
+        """Door three: a file to keep, not a blank form.
+
+        Built through `document()` like the other two, from whatever the
+        request carries, so a template is a document and not a special case.
+        """
+        del params
+        return {"text": compose.render(compose.document({}))}
+
+    def compose_open(self, body):
+        """Door two: a file that arrived, turned into form state.
+
+        Validated on arrival, and an error is named against the field it
+        belongs to rather than reported as a parse position. The document is
+        **not** edited in place: what comes back is state, and state goes
+        through `document()` like anything typed.
+        """
+        text = body.get("text")
+        if not isinstance(text, str):
+            raise ValueError("expected `text`, the file that was uploaded")
+        return compose.open_text(text)
+
+    def compose_preview(self, body):
+        """Door one, before saving: the file as it stands, shown live.
+
+        Changes nothing. It is a POST because it carries the form state, not
+        because it writes.
+        """
+        state = body.get("state")
+        if not isinstance(state, dict):
+            raise ValueError("expected `state`, the form's fields")
+        doc = compose.document(state)
+        return {"text": compose.render(doc), "document": doc}
+
+    def compose_write(self, body):
+        """Saving. Through the guard, like every other write."""
+        state = body.get("state")
+        name = body.get("path")
+        if not isinstance(state, dict):
+            raise ValueError("expected `state`, the form's fields")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("expected `path`, where to write the file")
+        target = self._inside_runs_dir(name)
+        written = compose.write(compose.document(state), target)
+        return {"path": os.path.relpath(written, self.runs_dir)
+                .replace("\\", "/")}
+
+    def _inside_runs_dir(self, name):
+        """Where a write may land: under the directory this session serves.
+
+        The session was pointed at a directory and everything it writes stays
+        in it. A path that climbs out is refused by comparing the resolved
+        path to the resolved root, rather than by inspecting the string for
+        `..` -- a string check is a second implementation of what the
+        filesystem already answers, and it is the one that gets a symlink
+        wrong.
+        """
+        target = os.path.abspath(os.path.join(self.runs_dir, name))
+        root = os.path.abspath(self.runs_dir)
+        if os.path.commonpath([root, target]) != root:
+            raise ValueError(
+                f"{name} is outside the directory this session serves")
+        if os.path.isdir(target):
+            raise ValueError(f"{name} is a directory")
+        return target
 
     @staticmethod
     def _epsilon(params):

@@ -279,6 +279,13 @@ TRANSPORT_ALLOWLIST = {
         {"vector-data"},
         "the contract names partition.centroids in order to refuse it to "
         "every view"),
+    "oneground/intake/__init__.py": (
+        {"vector-data"},
+        "the requirements schema: `corpus.sample.vectors.path` and "
+        "`corpus.sample.queries.path` are the names of two keys holding "
+        "file paths, and intake never opens either -- it validates the "
+        "document and hands the paths on. The rule is a name rule, and "
+        "here the name is not the thing (task 046)"),
 }
 
 

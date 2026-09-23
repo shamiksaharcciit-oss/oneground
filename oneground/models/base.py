@@ -221,80 +221,18 @@ def deterministic_faiss(enabled=True):
 # change that was never applied. So every family declares the keys it reads,
 # and a configuration naming anything else is refused, with the declared set.
 
-# What a key is to a family.
-PARAMETER = "parameter"    # the architecture; the only role a policy changes
-RUN = "run"                # set per run by the simulator, uniform across it
-BUILD = "build"            # how the index is built, not what it is
-CONSTANT = "constant"      # fixed inside the family; refused in any config
-
-ROLES = (PARAMETER, RUN, BUILD, CONSTANT)
+# What a key is to a family, and the shape one is declared in, both live in
+# `oneground/param.py` and are re-exported here. Importing this module loads
+# the family registry, numpy and three index types; the interface needs the
+# shape without any of that, and the lab's guard refuses it the rest. Every
+# existing importer of `base.Param` is unaffected -- task 046.
+from oneground.param import (  # noqa: E402,F401
+    BUILD, CONSTANT, NO_DEFAULT, PARAMETER, ROLES, RUN, Param)
 
 
 class ParameterError(ValueError):
     """A configuration names or sets a key its family does not accept."""
 
-
-class _NoDefault:
-    """A declared key the family has no default for: it must be named."""
-
-    def __repr__(self):                               # pragma: no cover
-        return "<no default>"
-
-
-NO_DEFAULT = _NoDefault()
-
-
-@dataclass(frozen=True)
-class Param:
-    """One declared key.
-
-    `minimum`/`maximum` are validity bounds -- what the family can build at
-    all -- not recommendations. `swept` says whether the family's `configs()`
-    reads a requirements grid for it; a declared key that is not swept can
-    still be pinned by an `include` entry. `fixed` is a constant's value, for
-    the message that refuses it.
-    """
-
-    name: str
-    type: type
-    role: str = PARAMETER
-    minimum: Optional[float] = None
-    maximum: Optional[float] = None
-    swept: bool = False
-    fixed: Any = None
-    # What the family uses when a config does not name this key. Declared
-    # here so there is one of it: before task 032 the same number appeared in
-    # the family's `config.get(key, X)` calls, again in the dict `configs()`
-    # seeds an `include` entry from, and nowhere a reader could look it up.
-    # `NO_DEFAULT` means the key must be named.
-    default: Any = NO_DEFAULT
-    # Whether this key appears in a label when it is at its default.
-    #
-    # Task 032 canonicalised a label by *filling* the defaults, so that a
-    # parameter written at its default and the same parameter omitted are one
-    # label and one row. Task 034 then added `index`, whose default is the
-    # behaviour every published label was measured under -- and filling it
-    # would append `index=hnsw` to labels that are a public interface, while
-    # eliding every default would collapse those same labels to `family[]`,
-    # since each is composed entirely of parameters at their defaults.
-    #
-    # So the table says which, per key, and the invariant holds either way:
-    # `always` fills a missing default, `when_set` elides one, and both make
-    # the two spellings of a default one label. The direction that does not
-    # move a label already published is the one a new key takes.
-    in_label_at_default: bool = True
-    # Which value of another key this one belongs to: ("index", ("ivf",
-    # "ivf_pq")) means the key is accepted only when `index` is one of those.
-    # A knob an algorithm would ignore is refused rather than accepted (034),
-    # for the reason 026 refuses a key no family reads.
-    belongs_to: Optional[Any] = None
-    # The closed set of values this key may take, for a key whose type does
-    # not bound it. `minimum`/`maximum` bound a number; nothing bounded a
-    # string until 034 declared `index`, and an unknown algorithm accepted
-    # and then quietly built as HNSW is the accept-and-ignore defect 026
-    # exists to stop.
-    choices: Optional[Any] = None
-    note: str = ""
 
 
 # --------------------------------------------------------------------------
