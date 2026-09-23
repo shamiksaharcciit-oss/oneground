@@ -1,8 +1,14 @@
 # 044c — decision and migration: `skew_top10_share` carries its k
 
-**For the developer to rule.** Nothing in this file has been applied. It
-touches a published value's *meaning*, which is why it is brought rather than
-done.
+**APPLIED, unmerged, on branch `task-044c`.** Ruled by the developer: *"skew
+is a property of the corpus at k=256, so k travels with it wherever it is
+published or it is not one of the five."* The four fixture YAMLs are named in
+§1 below, which is the naming CLAUDE.md requires, and the diff is on the
+branch for review.
+
+**No published number moved.** Verified after applying: the three `value:`
+fields and all four `tolerance:` fields are byte-unchanged, and the four specs
+still parse.
 
 ## The decision
 
@@ -96,31 +102,28 @@ the change. This section is that naming, for the developer to authorise.
 + this is the one of the five that holds no tolerance away from it;
 ```
 
-### 3. `oneground/characterize.py` — the reported dict
+### 3. `oneground/measures/skew.py` and `oneground/characterize.py`
 
-`skew_top10_share` becomes a reading with its parameter beside it, the same
-shape 044 gave crispness. A user's own workdir, not a published fixture:
+**Changed from the proposal as written.** The draft inlined a dict in
+`characterize`. Applied instead as `skew.reading()`, a module function beside
+`skew_top10_share` — which is the shape 044 and 044b already gave the other
+two, and the only shape that is testable on its own. Inlining it in the caller
+would have put the third member of a family somewhere the first two are not.
 
-```python
-out["skew_top10_share"] = skew_top10_share(r_b[:, 0], len(base))
-out["skew_reading"] = {
-    "value": out["skew_top10_share"],
-    "n_centroids": N_CENTROIDS,
-    "uniform_baseline": 10.0 / N_CENTROIDS,
-    "excess_over_uniform": out["skew_top10_share"] / (10.0 / N_CENTROIDS),
-    "note": ("the share of vectors in the 10 largest of %d regions. The "
-             "region count is part of this reading, not a setting behind "
-             "it: 10 regions of 4096 is a different question from 10 of "
-             "256, and the value is not comparable across counts. Measured "
-             "in task 044c: this is the only one of the five measures with "
-             "no tolerance band in the centroid count."
-             % N_CENTROIDS),
-}
-```
+`skew.reading(region_ids, n_base, n_centroids=N_CENTROIDS)` returns `value`,
+`n_centroids`, `of`, `uniform_baseline`, `excess_over_uniform`,
+`empty_regions`, `largest_region`, `comparable_with` and `note`.
 
-`out["skew_top10_share"]` is left exactly as it is, so every existing
-consumer, test and published comparison is unaffected — the same containment
-044 used for `boundary_crispness`.
+It **omits** the `resolvable` key its two siblings carry, deliberately: there
+is no threshold here to empty out, so a resolvability test would be a question
+about nothing. A skew reading is never couldn't-check — it is either
+comparable with another at the same count or not comparable at all — and this
+project does not report an outcome it cannot mean.
+
+`characterize_arrays` gains one line, `out["skew_reading"] = …`.
+`out["skew_top10_share"]` is untouched, so every existing consumer, test and
+published comparison is unaffected — the containment 044 used for
+`boundary_crispness`.
 
 ### 4. The printed summary, `characterize.py:633`
 
@@ -135,10 +138,24 @@ count that 0.039 comes from:
 
 ### 5. A test
 
-`skew_top10_share` at two different k on the same region assignment must not
-be compared — a test that asserts the reading carries `n_centroids` and that
-the value at k=256 is the published one, named for what it checks rather than
-for the function.
+`oneground/measures/test_skew_carries_its_count.py`, eight tests, named for
+what they check rather than for the function. Two guard that the published
+function is unchanged; the rest are about the count being present and the
+comparison being refused across counts.
+
+The one worth reading is
+`test_the_uniform_baseline_does_not_make_the_two_comparable`. It asserts that
+two *synthetic* even partitions at k=64 and k=256 both give
+`excess_over_uniform == 1.0` — that is, the rescaling **does** work on
+synthetic data — and then asserts that the reading still refuses the
+comparison. That is the point: the rescaling's failure is a measured fact
+about real corpora (1.19 → 3.10 on arxiv-150k), not something a synthetic
+fixture can show, so the test records why it cannot be the evidence rather
+than quietly passing and implying it is.
+
+`test_the_module_records_the_range_it_was_measured_over` asserts the sweep's
+range and three of its numbers are in the module docstring — because "load-
+bearing" without a range is not a measurement any more than "stable" is.
 
 ## What this migration does not do
 

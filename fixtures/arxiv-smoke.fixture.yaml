@@ -109,7 +109,17 @@ characterization:
     value: TO_BE_FILLED
     tolerance: 0.02
   skew_top10_share:
-    definition: share of base vectors in the 10 largest centroid regions
+    definition: >
+      Share of base vectors in the 10 largest centroid regions, under k-means
+      with 256 centroids - the same centroids crispness and ambiguity use.
+      The centroid count is part of this definition and not a detail behind
+      it: 10 regions of 4096 is a different question from 10 of 256, and the
+      value is not comparable across counts. Task 044c measured this on the
+      two full 150k fixtures; this smoke fixture was not swept and exists to
+      check that a command runs rather than to calibrate a measure. An even
+      partition would put 10/256 = 0.039 here - though with 2,000 vectors in
+      256 regions the ten largest hold far more than an even share by
+      construction.
     value: TO_BE_FILLED
     tolerance: 0.02
   drift:

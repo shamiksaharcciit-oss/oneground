@@ -5,14 +5,16 @@
   "n_queries": 2000,
   "inputs": {
     "vectors": {
-      "path": "C:\\Users\\polo2\\oneground-assets\\stackexchange-150k\\vectors.npy",
+      "path": "vectors.npy",
       "file_sha256": "067d8ffbdf16f08f0a43e3fa1fccb3ca4a62093cd8f00069038f7d88bee17f30",
-      "array_sha256": "2b4afad45b358eb79d7c24b8c2525534c3c8aee37abd824b1f05cda53585b531"
+      "array_sha256": "2b4afad45b358eb79d7c24b8c2525534c3c8aee37abd824b1f05cda53585b531",
+      "path_note": "recorded relative to the repository root, or as a basename when outside it: a receipt does not name the filesystem it was produced on"
     },
     "queries": {
-      "path": "C:\\Users\\polo2\\oneground-assets\\stackexchange-150k\\queries.npy",
+      "path": "queries.npy",
       "file_sha256": "465a37757bd7dd1daef7ac2bf9a62a9c32deb8d32e907493cc75c22e4ac76b54",
-      "array_sha256": "339df65a2417a2de41c051f6cf748bd968133f45a8341fb058416cd4fa79502a"
+      "array_sha256": "339df65a2417a2de41c051f6cf748bd968133f45a8341fb058416cd4fa79502a",
+      "path_note": "recorded relative to the repository root, or as a basename when outside it: a receipt does not name the filesystem it was produced on"
     }
   },
   "constants": {

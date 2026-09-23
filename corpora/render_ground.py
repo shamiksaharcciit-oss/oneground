@@ -219,7 +219,12 @@ def variant_b(base, cents, out, times, name="ground_b_copies",
         caption(ax, [
             "84% of vectors sit within ε of four regions. "
             "There is no boundary to shard on.",
-            "crispness 0.036  ·  ambiguity 0.891  ·  storage 3.7×",
+            # Task 044c: the count is part of the crispness figure, not a
+            # setting behind it -- cut the same corpus into 2,048 regions and
+            # it reads 0.053. A figure of this measure carries its k wherever
+            # it is published.
+            "crispness 0.036 at 256 regions  ·  ambiguity 0.891  ·  "
+            "storage 3.7×",
         ])
     save(fig, out, name)
     times[name] = time.time() - t0

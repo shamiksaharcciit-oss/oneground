@@ -32,9 +32,9 @@ So, plainly: **`skew_top10_share` as published is not a property of the
 corpus. It is a property of the corpus at k=256.** Either k is reported beside
 it as part of the measure, or it should not be reported as one of the five.
 The decision and the migration are in
-[`tasks/044c-skew-migration.md`](044c-skew-migration.md) — recommended:
-report k beside it; no published number moves; nothing under `fixtures/`
-is touched.
+[`tasks/044c-skew-migration.md`](044c-skew-migration.md). **Ruled and
+applied**, unmerged on this branch: k travels with the value wherever it is
+published. No published number moved.
 
 **The obvious rescaling is refuted rather than untried.** Dividing by the
 uniform baseline 10/k does not make it k-invariant — `skew/(10/k)` on arXiv
@@ -47,6 +47,70 @@ specs: crispness says *"under k-means with 256 centroids"*, ambiguity says
 largest centroid regions"* and stops. **The measure that is 98× sensitive to
 the count is the one whose published definition never names it.**
 
+## The fourth write site, and I opened it
+
+**Second only to the measurement, and it is against my own work in the task
+immediately after the one that established the rule.**
+
+Task 043 built `receipts.public_path` and ruled that a machine-local path is
+sanitised **at the write site**, because sanitising at publish time had
+already forced the identical fix at three separate boundaries in one task —
+the teaser exporter, the fixture builder, the report writer. The rule was
+written down, the transform shipped, and I wrote 043's report.
+
+Then 044c wrote a scratch script that recorded the asset store's absolute path
+into its output, and I copied that output into the tracked tree and committed
+it. **A fourth write site, opened by the author of the rule, one task later.**
+
+> I had the transform, I knew the rule, and I opened a fourth write site
+> without asking whether a file that gets committed is a receipt. It is.
+
+### The general form, which is the part that carries
+
+> **A rule you have written down is not a rule you have applied, and the tell
+> is a new write site rather than a new file.**
+
+Nothing about the file looked like a receipt. It was scratch output, under
+`runs/`, which is gitignored — so at the moment it was written the rule
+genuinely did not apply to it. It became a receipt later, when rule 9 said the
+evidence a report cites must live where the report does. **The property that
+matters is not what kind of file it is but whether anything will ever commit
+it**, and that question is asked at the write site or it is not asked at all.
+
+That is why "is this a receipt?" is the wrong question and "does this write a
+path?" is the right one. The first depends on a decision nobody has made yet.
+
+### What caught it, and what did not
+
+Not review — I read the sweep script four times while extending it. Not the
+copy step, where I verified the digests carefully and verified the wrong
+property: that the copy matched its source, not that either was fit to commit.
+Not the CRLF correction, which was *about the digests of these exact files*
+and still did not ask what was in them.
+
+It was `test_no_tracked_file_carries_a_machine_identifier`, which task 015
+found missing and 017 built after task 016 published two absolute developer
+paths in a decision log with nothing noticing. **A guard written for exactly
+this, two years of tasks earlier, catching its own author.** It is the second
+time in three tasks that a mechanical check caught what reading did not, and
+the first time nothing else would have.
+
+### The repair, and why it is not a regex
+
+`receipts.public_paths_in` at the write site in the sweep script, and the same
+function applied to the four tracked copies. Not a local string replacement,
+though one would have been shorter: 043's finding is that a second private
+implementation of a shared rule is a second place for it to be wrong, and
+writing one *inside the fix for that finding* would have been the fifth
+instance rather than the fourth.
+
+Cost: the tracked copies are no longer byte-identical to the run outputs, so
+the report's digest table records the sanitised copies and says why. No
+measured value changed — only four `inputs.*.path` strings.
+
+Sent to the interface stream for `docs/PRACTICE.md` as
+`tasks/practice-a-rule-written-down-is-not-a-rule-applied.md`.
+
 ## Repo state expected vs found
 
 | expected | found |
@@ -54,7 +118,7 @@ the count is the one whose published definition never names it.**
 | `tasks/044c-centroid-count.md` on `main` | yes; branched `task-044c` from `8c07b4b` |
 | 042d landed (the brief's precondition) | yes — `tasks/042d-shards-refusal.report.md`, merged |
 | `crispness.py` declares the three constants as described | yes, with one difference below |
-| `arxiv-150k` and `stackexchange-150k` vectors local | yes, `C:\Users\polo2\oneground-assets\` |
+| `arxiv-150k` and `stackexchange-150k` vectors local | yes, in the developer's asset store outside the checkout |
 | `sec-filings-10k` vectors local | **no**, as the brief predicted — only `documents.jsonl.zst` |
 
 One difference from the brief's quotation. The brief quotes
@@ -84,25 +148,35 @@ Scripts: `tasks/scratch/044c_centroid_sweep.py` (the sweep),
 `044c_band_edge.py`. All import project code unmodified.
 
 Outputs: `runs/044c/*.json`. `runs/` is gitignored by project rule, so the
-four sweep JSONs are also copied to `tasks/044c-centroid-count.sweep/` and
-verified there by sha256 — rule 9, because every number below is cited from
-them. The copies are byte-identical to the run outputs.
+four sweep JSONs are also copied to `tasks/044c-centroid-count.sweep/` — rule
+9, because every number below is cited from them.
 
-**Two digests per file, because one of them would have been misleading.** git
-normalises CRLF to LF on `add`, so the sha256 of the copy I verified is not
-the sha256 a fresh clone produces:
+**The tracked copies differ from the run outputs in exactly one way, and the
+difference is a defect of mine that a test caught.** The sweep wrote the
+absolute path of the asset store into each JSON's `inputs` block. Harmless in
+`runs/`, which is gitignored; a **machine identifier in the tracked tree** the
+moment the copies were committed, which is what
+`test_no_tracked_file_carries_a_machine_identifier` exists to stop. It failed
+on this branch and was right to.
 
-| file | as written (CRLF) | as committed (LF) |
-|---|---|---|
-| `arxiv-150k.default.json` | `5d723d7dcd5eb5d2…` | `b91eaeff675564cb…` |
-| `arxiv-150k.allpts.json` | `663e09cb772347c8…` | `e0a165d721d34cc4…` |
-| `stackexchange-150k.default.json` | `3f6552dbf61ac3ce…` | `3298ad9a7efc9e37…` |
-| `stackexchange-150k.allpts.json` | `f1b081b424bf1be6…` | `bb90f059cad1f6e0…` |
+Both were fixed with 043's own transform rather than a private one:
+`receipts.public_paths_in` in the sweep script at the write site, and the same
+function applied to the tracked copies. The paths now read `vectors.npy` and
+`queries.npy`, with `path_note` beside them; which fixture they belong to is
+the `fixture` key at the top of each file. **No measured value changed** —
+only the `inputs.*.path` strings.
 
-The first column proves the copy matches the run that produced it; the second
-is what a reader can check. Recording only the first would have been a digest
-nobody else could reproduce — the failure mode rule 9 exists to prevent,
-arriving by a route rule 9 does not mention.
+Digests of the tracked copies, as committed (LF; git normalises CRLF on
+`add`, so a digest of my working copy would be one no reader could reproduce):
+
+| file | sha256 |
+|---|---|
+| `arxiv-150k.default.json` | `22a90a80afe70044…` |
+| `arxiv-150k.allpts.json` | `dda2005a35d7e55b…` |
+| `stackexchange-150k.default.json` | `ba66bab4a8a9f0c3…` |
+| `stackexchange-150k.allpts.json` | `9d423ddb950a4bda…` |
+
+This is its own finding and it is below, under *The fourth write site*.
 
 ### The second arm, which nobody briefed, and without which none of this reads
 
@@ -289,6 +363,17 @@ the gap is downstream — the teaser caption, the report renderer, and any
 prose that quotes 0.036 without the clause. Unlike skew this is not a
 migration, because nothing about the value's meaning is missing from its
 definition; it is a propagation.
+
+**Written up for core as
+[`tasks/044c-teaser-k-propagation.md`](044c-teaser-k-propagation.md)**, with
+the four teaser digests so core can prove they hold this copy before editing.
+Nothing under `site/teaser/` was changed. Three text changes, no re-export:
+`values.json` already carries `geometry.n_centroids`, so the page can say the
+count without a new digest or a `?v=` churn. The one that matters is the
+ε = 0.00 caption, which today names the ratio 1.20 and omits the count it is
+more sensitive to; the proposal gives the reader 0.053 at 2,048 regions beside
+0.036 at 256, because a second number from the same corpus is what makes the
+dependence legible rather than merely disclosed.
 
 Stackexchange has no U: its crispness rises monotonically, 0.0009 → 0.0455.
 **The two corpora respond to k in different shapes**, which is itself the
@@ -491,14 +576,18 @@ the file.
 | Both questions answered with numbers | **PASS** — bands above; 72/72 readings resolvable |
 | Degeneracy judged by `crispness.distinguishable` | **PASS** — no fourth criterion invented |
 | Sweep brackets 256 by ≥ 1 order of magnitude each way | **PASS** — 16× down, 16× up |
-| No published value moved | **PASS** — `git status fixtures/ site/ docs/ oneground/` empty; nothing outside `tasks/` and `runs/` was written |
+| No published value moved | **PASS** — after the migration, every `value:` and `tolerance:` in the four specs is byte-unchanged; nothing under `fixtures/<id>/` touched, so no MANIFEST digest moved |
+| The four specs still parse | **PASS** — `yaml.safe_load` on all four, skew values 0.075 / 0.069 / 0.089 / `TO_BE_FILLED` |
+| No encoding damage from the YAML edits | **PASS** — byte-level check, no BOM on any of the four |
 | No constant changed | **PASS** — `N_CENTROIDS`, `CRISP_RATIO`, `AMBIGUOUS_RATIO` untouched; the control arm is a copy in scratch, not an edit |
-| Cited artifacts in the main checkout, verified by digest | **PASS** — `tasks/044c-centroid-count.sweep/`, four files, sha256 compared against `runs/044c/`; both CRLF and committed-LF digests recorded |
+| `site/teaser/` untouched | **PASS** — not read for editing, not written; its four digests are recorded in the propagation document for core |
+| Cited artifacts in the main checkout, verified by digest | **PASS** — `tasks/044c-centroid-count.sweep/`, four files, committed-LF digests recorded above |
+| No tracked file carries a machine identifier | **FAILED, then fixed** — the sweep JSONs and one report line carried the asset store's absolute path; `receipts.public_paths_in` applied at the write site and to the copies. See *The second arm* above; this is 043's finding recurring against me. |
 | Full suite | see below |
 | `sec-filings-10k` swept | **COULDN'T-CHECK** — see below |
 
 **`sec-filings-10k` is couldn't-check and is not rounded up.** Its vectors are
-not on this machine — `oneground-assets/sec-filings-10k/` holds only
+not on this machine — the asset store holds only its
 `documents.jsonl.zst` — and its published `ground_view_*.parquet` carry
 `ratio` at k=256 only, which is one point of a sweep. Re-deriving them means
 re-embedding 10k chunked filings, and `docs/CHUNKING.md`'s open item is that
@@ -543,9 +632,12 @@ right about the fact it checks and structurally blind to this one — the same
 shape as 043's finding that an exhaustive absence test cannot see a wrong
 value.
 
-Not fixed: outside 044c's subject. The remedy is small — store the percentiles
-at the precision they were measured, or compare with an explicit rounding
-allowance — and it should be a brief so the test is written to fail first.
+Not fixed: outside 044c's subject. **Ruled into
+[`tasks/044d-band-edge.md`](044d-band-edge.md)**, written up from the
+developer's ruling rather than left in a message — the omission 042d recorded.
+The brief requires the failing test before the fix, forbids widening the
+tolerance to make it pass, and carries Observed 2 below as its second
+instance.
 
 **2. `PUBLISHED_PERCENTILE_BASIS` attributes an answered question to this
 task.** It says the threshold's drift with sample size *"has not been
@@ -553,7 +645,8 @@ measured. That is task 044c's question"* — but 044b measured exactly that and
 set `MIN_N_FOR_TRANSFER` from it, with the table, **three lines below in the
 same file**. Two comments in one module disagreeing about whether a thing is
 measured, which is the `docs/PRACTICE.md` mechanism in a smaller key. 044c's
-question was the centroid count, and the sentence should say so.
+question was the centroid count, and the sentence should say so. **Folded into
+044d as step 3**, same file and same family as the band edge.
 
 **3. The `measures/__init__.py` docstring is false about two of three
 constants** and is the target `crispness.py:52` points at. Not edited: the
@@ -585,24 +678,57 @@ not say so.
 
 ## Repo now contains
 
+### The measurement
+
 | path | what |
 |---|---|
 | `tasks/044c-centroid-count.report.md` | this report |
-| `tasks/044c-skew-migration.md` | the skew decision and its migration, for ruling; **not applied** |
-| `tasks/044c-centroid-count.sweep/*.json` | the four sweep outputs, copied from `runs/044c/` and verified by sha256 |
+| `tasks/044c-centroid-count.sweep/*.json` | the four sweep outputs, copied from `runs/044c/`, both digests recorded |
 | `runs/044c/` | the same four JSONs and their logs (gitignored, as `runs/` is) |
-| `tasks/scratch/044c_*.py` | six scratch scripts (gitignored, as `tasks/scratch/` is) |
+| `tasks/scratch/044c_*.py` | seven scratch scripts (gitignored, as `tasks/scratch/` is) |
 
-**No file under `oneground/`, `fixtures/`, `docs/`, `site/`, `models/`,
-`policies/` or `corpora/` was created, edited or deleted.**
+### The skew migration — applied on the developer's ruling, unmerged
+
+| path | change |
+|---|---|
+| `fixtures/arxiv-150k.fixture.yaml` | skew `definition:` names the count; its own measured span 0.0076–0.7465 |
+| `fixtures/stackexchange-150k.fixture.yaml` | same; its own span 0.0083–0.7004 |
+| `fixtures/sec-filings-10k.fixture.yaml` | same, stating it was **not swept** and its own k-sensitivity is couldn't-check |
+| `fixtures/arxiv-smoke.fixture.yaml` | same, stating a smoke fixture does not calibrate a measure |
+| `docs/FIXTURES.md` | the shared definition paragraph names the 256 |
+| `oneground/measures/skew.py` | `reading()` beside the unchanged `skew_top10_share`, with the sweep in the docstring |
+| `oneground/characterize.py` | `out["skew_reading"]`; the printed summary names the count |
+| `oneground/measures/test_skew_carries_its_count.py` | new, 8 tests |
+| `corpora/render_ground.py` | the caption reads `crispness 0.036 at 256 regions` — ruled in: a figure of this measure carries its k wherever it is published, and *"the migration did not name it"* is a fact about the migration rather than a reason |
+
+**No `value:` or `tolerance:` moved in any spec**, verified after applying;
+all four specs still parse and none gained a BOM. Nothing under
+`fixtures/<id>/` was touched, so no MANIFEST digest moved.
+
+### Brought, not applied
+
+| path | what |
+|---|---|
+| `tasks/044c-skew-migration.md` | the decision and the applied diff's rationale |
+| `tasks/044c-teaser-k-propagation.md` | the exact teaser change, for core, with the four current digests. **`site/teaser/` untouched.** |
+| `tasks/044d-band-edge.md` | the brief for the band-edge defect and its second instance |
+| `tasks/practice-a-synthetic-test-that-implies-a-real-claim.md` | §2 warning 8 for `docs/PRACTICE.md`, the interface stream's to place |
+| `tasks/practice-a-rule-written-down-is-not-a-rule-applied.md` | the fourth-write-site rule, for the same page; companion to its §4, which came from the same task |
 
 ## Blocked on developer
 
-1. **The skew decision.** `tasks/044c-skew-migration.md` — recommended:
-   report k beside the value; no number moves; four fixture YAML definition
-   strings need naming per CLAUDE.md before they can be edited.
-2. **The teaser/propagation half of the U-shape finding.** Whether 0.036
-   travels with its k wherever it is published. I have not touched
-   `site/teaser/`, which is standing instruction.
-3. **Whether the band-edge defect (Observed 1) becomes a brief.** It is live
-   today on a published fixture.
+1. **Review the applied skew migration** on this branch, then the merge.
+2. **Route `tasks/044c-teaser-k-propagation.md` to core.** Three text changes,
+   no re-export, no digest churn.
+3. **Two notes for `docs/PRACTICE.md`, the interface stream's to place or
+   drop:**
+   - `practice-a-rule-written-down-is-not-a-rule-applied.md` — the
+     fourth-write-site rule. Companion to that page's §4, which came from the
+     same task; this is 043's *other* rule breaking against the same author
+     one task later.
+   - `practice-a-synthetic-test-that-implies-a-real-claim.md` — §2 warning 8.
+     Offered with its own weakness stated, since the trap was caught while
+     writing rather than after a false result. The developer's inclination
+     that it belongs, and the reason — a near-miss is cheaper evidence rather
+     than absent evidence, and a bar of *it must have shipped* teaches people
+     to wait until one does — is recorded in the note for them to rule on.

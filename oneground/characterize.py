@@ -43,7 +43,7 @@ from .measures.ambiguity import (AMBIGUOUS_RATIO, ambiguous_query_rate,
 from .measures.crispness import (CRISP_RATIO, N_CENTROIDS, boundary_crispness,
                                  reading as crispness_reading)
 from .measures.drift import drift_pair
-from .measures.skew import skew_top10_share
+from .measures.skew import reading as skew_reading, skew_top10_share
 from .receipts import (MANIFEST_NAME, library_versions, producing_version,
                       round_floats,
                        sha256_file, write_json_stable, write_manifest)
@@ -203,6 +203,14 @@ def characterize_arrays(base, queries, seed, timestamps=None,
     d_b, r_b = centroid_dists(base, cents, 2)
     out["boundary_crispness"] = boundary_crispness(d_b)
     out["skew_top10_share"] = skew_top10_share(r_b[:, 0], len(base))
+
+    # Task 044c. The centroid count is part of what this number means, not a
+    # setting behind it: swept from 16 to 4096 it spans two orders of
+    # magnitude and leaves the published tolerance at the first step either
+    # way -- the only one of the five with no tolerance band in the count.
+    # So the reading carries `n_centroids`, and `skew_top10_share` above is
+    # left exactly as it was, the same containment 044 gave crispness.
+    out["skew_reading"] = skew_reading(r_b[:, 0], len(base))
 
     # Task 044. The ratio distribution is the measurement and `boundary_
     # crispness` above is a reading of it at 1.20, which is why the reading
@@ -631,7 +639,8 @@ def _summary(req, charj, workdir, listed, elapsed):
     print(f"  ambiguous_query_rate       {_fmt(ch['ambiguous_query_rate'])}"
           f"   (d2 <= {AMBIGUOUS_RATIO} x d1)")
     print(f"  skew_top10_share           {_fmt(ch['skew_top10_share'])}"
-          f"   (even would be {10 / N_CENTROIDS:.3f})")
+          f"   (10 largest of {N_CENTROIDS} regions; even would be "
+          f"{10 / N_CENTROIDS:.3f})")
     if isinstance(drift, dict):
         print(f"  drift  before / after      {_fmt(drift['drift_before'])} / "
               f"{_fmt(drift['drift_after'])}   (cutoff {drift['cutoff']}, "

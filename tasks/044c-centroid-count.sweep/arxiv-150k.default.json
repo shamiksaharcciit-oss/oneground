@@ -5,14 +5,16 @@
   "n_queries": 2000,
   "inputs": {
     "vectors": {
-      "path": "C:\\Users\\polo2\\oneground-assets\\arxiv-150k\\vectors.npy",
+      "path": "vectors.npy",
       "file_sha256": "141a9220703a03afa2451e4be3e0f034a787bc46a01a61ecd83c03f61529b8fa",
-      "array_sha256": "cb973a94ba305a9afe81c98bdc05e51ee3b91023281c33997bc5212fe6db5f5f"
+      "array_sha256": "cb973a94ba305a9afe81c98bdc05e51ee3b91023281c33997bc5212fe6db5f5f",
+      "path_note": "recorded relative to the repository root, or as a basename when outside it: a receipt does not name the filesystem it was produced on"
     },
     "queries": {
-      "path": "C:\\Users\\polo2\\oneground-assets\\arxiv-150k\\queries.npy",
+      "path": "queries.npy",
       "file_sha256": "dbed194a42c1e5273e9a5d5a7224074950ab38c54030739423b6c5714c625b9b",
-      "array_sha256": "16e0f4882b317bfad531f844230f76ad1ef90e62ac365fbe4b986ab2fdde5ebe"
+      "array_sha256": "16e0f4882b317bfad531f844230f76ad1ef90e62ac365fbe4b986ab2fdde5ebe",
+      "path_note": "recorded relative to the repository root, or as a basename when outside it: a receipt does not name the filesystem it was produced on"
     }
   },
   "constants": {
