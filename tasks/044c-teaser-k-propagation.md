@@ -84,7 +84,35 @@ true statement is about arXiv **cut 256 ways**, and giving them a second
 number from the same corpus is what makes the difference legible rather than
 merely disclosed.
 
-**If only one change is made, make this one.**
+---
+
+### 1(b) — status: **staged, waiting on task 044e**
+
+Core accepted 1(a) — the clause naming the count — and **refused the typed
+`0.053`**, correctly: it would be the first number on that page the page
+cannot check, on the caption whose whole purpose is to stop a figure
+travelling without what it depends on. The caption's own argument, turned on
+the caption.
+
+So the sentence is not dropped and it is not to be typed. It lands when
+`values.json` carries the sweep, as **`measured.k_sweep`** — task 044e — and
+reads:
+
+```js
+// measured.k_sweep, exported from the same vectors and the same seed as
+// every other number on this page. Read, not stated: see task 044e.
+const sw = values.measured.k_sweep;
+const hi = sw.rows.find((r) => r.k === 2048);
+… 'Both numbers are part of the reading: cut the same corpus into ' +
+  fmtInt(hi.k) + ' regions instead and the crisp fraction is ' +
+  hi.boundary_crispness.toFixed(3) + ' rather than ' + crisp.toFixed(3) + '.';
+```
+
+**Its source is `values.measured.k_sweep`, and the sentence does not ship
+before that key does.** Naming the source here so the two land as one change
+rather than as a caption waiting for a data file nobody connected to it.
+
+**Of the four changes, 1(a), 2 and 3 are landed; this one is staged.**
 
 ### 2. `app.js:928–931` — the verification panel rows
 
