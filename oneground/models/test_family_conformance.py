@@ -241,39 +241,72 @@ def test_a_knob_that_does_nothing_is_caught_synthetic(small):
         del table[added]
 
 
-# ------------------------------------------------------ the shipped findings
-def test_hash_sharded_still_accepts_more_shards_than_vectors_task_042():
-    """A FINDING, still open — and now only half of the one 042 recorded.
+# ------------------------------------------------- the shipped findings, closed
+def test_hash_sharded_refuses_more_shards_than_vectors_task_042d():
+    """The 042 finding, closed. Both halves, by two tasks.
 
     042 found two things in one build: the configuration was accepted at all,
-    and `fanout` then reported the shards that were *asked for* while
-    `shards` reported the ones that were *built*, so one footprint carried
-    two mutually inconsistent numbers.
+    and `fanout` then reported the shards that were *asked for* while `shards`
+    reported the ones that were *built*, so one footprint carried two mutually
+    inconsistent numbers.
 
-    **The fan-out half closed in 042c** and is asserted below as fixed. The
-    refusal half is open: `hash_sharded` still accepts a configuration asking
-    for more shards than there are vectors, so its label still names a
-    partition larger than the artifact. That is one `ParameterError` in
-    `build`, and it was not authorised by 042c's brief.
+    **042c closed the fan-out half. 042d closes the refusal half**, and the
+    finding test that asserted the defect was deleted rather than amended —
+    leaving it would have left a test asserting a defect.
 
-    When the refusal lands, this test fails and is deleted.
+    A `ParameterError` specifically: `simulate` catches it to drop one row and
+    report the drop, and anything else ends the run.
     """
-    x = np.ascontiguousarray(
-        C.synthetic_corpus(n=200, dim=16, n_q=5)[0])
+    x = np.ascontiguousarray(C.synthetic_corpus(n=200, dim=16, n_q=5)[0])
     cfg = Config.make("hash_sharded",
                       {"shards": 201, "M": 16, "efSearch": 64})
-    built = models.get("hash_sharded").build(x, cfg, seed=1)
-    fp = models.get("hash_sharded").footprint(built)
+    with pytest.raises(ParameterError) as caught:
+        models.get("hash_sharded").build(x, cfg, seed=1)
+    message = str(caught.value)
+    # names BOTH numbers and what to do, not just that something is wrong
+    assert "shards=201" in message, message
+    assert "200 vector(s)" in message, message
+    assert "Lower shards" in message, message
 
-    # the half still open: accepted, and the label names 201
-    assert fp.shards < 201, "the artifact holds fewer shards than requested"
-    assert "201" in cfg.label, cfg.label
 
-    # the half 042c closed: the fan-out follows the artifact
-    assert fp.fanout == float(fp.shards), (
-        "042c: fan-out must report the shards that were built, not the ones "
-        "requested (fan-out %.0f, shards %d)" % (fp.fanout, fp.shards))
-    assert fp.fanout < 201.0, "fanout still reports the requested count"
+def test_the_shards_refusal_is_raised_before_any_work_task_042d():
+    """A configuration incoherent on its face costs nothing to reject.
+
+    The mirror of 042b's rule for `semantic_sharded`: the refusal sits ahead
+    of the build so the same configuration cannot be refused from one caller
+    and accepted from another.
+    """
+    x = np.ascontiguousarray(C.synthetic_corpus(n=200, dim=16, n_q=5)[0])
+    cfg = Config.make("hash_sharded",
+                      {"shards": 500, "M": 16, "efSearch": 64})
+    with pytest.raises(ParameterError):
+        models.get("hash_sharded").build(
+            x, cfg, seed=1, context={"ids": list(range(200))})
+
+
+def test_both_partitioning_families_refuse_the_same_shape_task_042d():
+    """042b and 042d together: the two families are now consistent.
+
+    Neither introduced an idea — `indexes.build` already refused `nlist > n`
+    with this message shape, and both families now apply the same rule to
+    their own partition knob.
+    """
+    x = np.ascontiguousarray(C.synthetic_corpus(n=200, dim=16, n_q=5)[0])
+    for family, params in (
+            ("hash_sharded", {"shards": 201, "M": 16, "efSearch": 64}),
+            ("semantic_sharded", {"centroids": 201, "epsilon": 0.2,
+                                  "probe": 2, "M": 16, "efSearch": 64})):
+        cfg = Config.make(family, params)
+        with pytest.raises(ParameterError) as caught:
+            models.get(family).build(x, cfg, seed=1)
+        assert "200 vector(s)" in str(caught.value), family
+
+
+def test_hash_sharded_now_passes_every_check_synthetic():
+    """042d closes the only check this family failed."""
+    results = C.run_conformance("hash_sharded", verbose=False)
+    failed = [r.check for r in results if r.outcome == C.FAILS]
+    assert not failed, failed
 
 
 def test_semantic_sharded_refuses_too_many_centroids_task_042b():
