@@ -7,6 +7,11 @@ they are the same shape from two directions, and the pairing is the argument.*
   not see its subject. A survey for other instances of a defect returned a
   confident all-clear from a predicate that structurally excluded the case
   that prompted it.
+
+*Neither note writes a warning number in. Both were drafted against a §2 that
+ended at warning 7, and warning 8 landed on main while they were being
+written — a number in a document you do not own is §1's stale state with extra
+steps. The placement and the numbering are yours.*
 - **`practice-a-number-on-a-page-has-a-receipt.md`** — a number that could not
   be checked. The lab team's rule, which refused one of our proposals: a
   figure on a page has a receipt in the data the page ships.

@@ -1,13 +1,16 @@
 # For `docs/PRACTICE.md` §2 — a survey that excluded its own motivating case
 
 *From task 044d, for the interface stream to place. The developer's reading is
-that this is the sharpest instance of warning 3 so far and is worse than the
-canonical form; whether it becomes warning 9 or a sub-entry under 3 is yours.
-What it cost is at the bottom.*
+that this is the sharpest instance of §2 warning 3 so far and is worse than
+the canonical form; whether it becomes the next numbered warning or a
+sub-entry under 3 is yours. **No number is written in below** — §2 was at
+seven warnings when this was drafted and is at eight by the time it is sent,
+so numbering it here would be the stale-state defect §1 is about. What it cost
+is at the bottom.*
 
 ---
 
-**9. A survey gave a clean bill of health from a predicate that structurally
+**A survey gave a clean bill of health from a predicate that structurally
 excluded the case that prompted it.**
 
 ## The rule, and it is one line of work
