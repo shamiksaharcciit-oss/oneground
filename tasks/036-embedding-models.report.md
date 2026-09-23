@@ -38,7 +38,100 @@ three models, on a seeded subsample, with truncation counted per model on the
 same records.
 
 **Not done:** the full-size run. It is priced, specified and resolved as
-`sessions/036-models.yaml`, and it is a developer's `y`.
+`sessions/036-models.yaml`, and it is **not to be run** — see the last section
+for why the card stands unspent.
+
+---
+
+## The finding: the measure carries a constant calibrated to one embedding
+
+**This leads the report. The ordering result that the brief set out to get is
+subordinate to it, because it was obtained with an instrument that this run
+showed does not read under every embedding.**
+
+`boundary_crispness` counts the fraction of vectors whose second-nearest
+centroid is more than **1.20×** the first. That constant is
+`CRISP_RATIO = 1.20` in `oneground/measures/crispness.py`, under the comment:
+
+> `# Definitions, not parameters.`
+
+Measured, on identical records, seed and centroid count:
+
+| model | condition | crispness | median ratio | **p95 ratio** |
+|---|---|---|---|---|
+| bge-base-en-v1.5 | raw | **0.1487** | 1.1035 | **1.2631** |
+| e5-base-v2 | raw | 0.0063 | 1.0565 | **1.1475** |
+| e5-base-v2 | `passage: ` | 0.0063 | 1.0584 | **1.1505** |
+| e5-base-v2 | `query: ` | 0.0125 | 1.0644 | **1.1643** |
+
+**Under e5 the 95th percentile of the ratio is 1.15. The threshold is 1.20.**
+It sits above almost the entire distribution, so the measure returns a
+near-zero for every corpus regardless of what is in it. Under bge the p95 is
+1.2631 — just above the threshold, which is where a threshold has to sit to
+discriminate at all.
+
+So the five characterization measures are documented as **properties of the
+embedding**, and at least one of them carries a constant calibrated to one
+particular embedding's geometry.
+
+**This is not a fact about e5.** The ratio is scale-invariant — a quotient of
+two distances — so it is not a units artifact. e5 genuinely places these
+vectors more equidistantly between k-means centroids than bge does. That
+difference is real and measurable. What the fixed threshold does is convert it
+into `0.0000` instead of into a number.
+
+### Why this is the most serious thing in the run
+
+A user who brings an embedding whose ratio distribution is compressed relative
+to bge's gets **crispness ≈ 0 on every corpus they own**. The honest reading of
+that output, as the tool presents it today, is *"my corpus has no boundary
+structure"*. The true statement is *"this measure's threshold does not fit my
+embedding's scale"*.
+
+Those are different sentences, and **the tool currently offers only the first**.
+That is the product stating a confident falsehood about the user's own data,
+which is the single thing this project exists to refuse. It is the same defect
+class as an alignment rate quoted without its ceiling and a gap quoted without
+its scale: the number is true, the sentence it licenses is not, and nothing in
+the artifact tells a reader which they are holding.
+
+### How it was established, by elimination
+
+The collapse was found in the ordering run (e5: arxiv **0.0007**,
+stackexchange **0.0003** — two records against one at N=3000). Two candidate
+explanations were tested and both were ruled out before the instrument was
+suspected:
+
+- **Truncation: ruled out.** bge and e5 share a tokenizer family and both cap
+  at 512. They truncate *identically* on all three corpora — 1.1%, 0.0%,
+  86.2% for both — so they read exactly the same tokens and returned 0.0823
+  against 0.0007 on arxiv.
+- **Protocol: ruled out.** All three models declare *empty* prompts in their
+  sentence-transformers config, so raw text matches every config — but e5's
+  published usage requires `query: `/`passage: ` prefixes its config does not
+  encode, which would have made it off-protocol and its column void. Tested:
+  `passage: ` changes nothing, `query: ` doubles it to a twelfth of bge's.
+
+Only then does the threshold remain, and the p95 arithmetic above confirms it
+directly rather than by elimination alone.
+
+### Not fixed, deliberately
+
+Changing `CRISP_RATIO` would move every published fixture value, and CLAUDE.md
+rule 3 forbids changing a threshold so that something reads better. This is
+reported as a decomposition — which layer is responsible — and the remedy is
+scoped as **task 044**, which is a change to a published measure and therefore
+the developer's to approve with the migration in front of them.
+
+**Stated within its limits:** one sample size each (N=800 and N=3000), one
+centroid count each (16 and 32), three corpora, one model family exhibiting
+it. That e5's ratios are compressed on *these* corpora is measured; that this
+holds of e5 generally, or of other models, is not.
+
+`N_CENTROIDS = 256` sits under the same comment and **has not been examined at
+all**.
+
+---
 
 ## Measurements
 
@@ -154,83 +247,30 @@ This is the token-unit mismatch `docs/EMBEDDINGS.md` §3 warns about, measured.
 Re-chunking in subword tokens is what would let this column join the
 comparison, and it is named in "Observed, not done".
 
-### 3. e5's geometry collapsed, and truncation is ruled out
+### 3. e5's column measures the instrument, not the corpora
 
-Under e5, arxiv is **0.0007** and stackexchange **0.0003**. At N=3000 that is
-**2 records against 1 record**. The ordering between them holds by a single
-vector, which is not an ordering.
+Under e5, arxiv is **0.0007** and stackexchange **0.0003** — two records
+against one at N=3000. This is the confound that turned out not to be a
+confound at all but the leading finding above: the threshold sits outside e5's
+ratio distribution, so the column reports the measure failing to read rather
+than a property of the corpora. Truncation and protocol were both ruled out
+first; the elimination is recorded under **The finding**.
 
-**Truncation cannot explain it.** bge and e5 share a tokenizer family and both
-cap at 512, and they truncate *identically* on all three corpora — 1.1%, 0.0%,
-86.2% for both. They read exactly the same tokens and return 0.0823 against
-0.0007 on arxiv. Whatever collapsed e5's geometry, it is not what it read.
-
-**And the protocol is not the explanation either.** All three models declare
-*empty* prompts in their sentence-transformers config, so this project's
-raw-text embedding matches every model's config — but e5's published usage
-requires `query: ` / `passage: ` prefixes its config does not encode. If the
-missing prefix were the cause, e5 would have been run off its own protocol and
-its column would be void rather than informative. It was tested, on the same
-records, seed and centroid count:
-
-| model | condition | crispness | median ratio | p95 ratio |
-|---|---|---|---|---|
-| bge-base-en-v1.5 | raw, as the tool embeds | **0.1487** | 1.1035 | **1.2631** |
-| e5-base-v2 | raw, as the ordering run did | 0.0063 | 1.0565 | 1.1475 |
-| e5-base-v2 | with `passage: ` | 0.0063 | 1.0584 | 1.1505 |
-| e5-base-v2 | with `query: ` | 0.0125 | 1.0644 | 1.1643 |
-
-`passage: ` changes nothing at all. `query: ` doubles it, to a twelfth of
-bge's. **The prefix is not the explanation.**
-
-### The finding: the measure's threshold sits outside e5's distribution
-
-`boundary_crispness` counts vectors whose second-nearest centroid is more than
-**1.20×** the first. Under e5 the **95th percentile of that ratio is 1.15–1.16**
-— the threshold is *above* almost the entire distribution. Under bge the p95 is
-1.2631, just above it.
-
-So the measure is not reporting that e5 finds no structure in these corpora. It
-is reporting that **almost no vector clears a bar set where e5's distribution
-does not reach**, and it returns a near-zero for every corpus regardless of
-what is there. Under e5 the instrument does not discriminate, so it cannot
-order anything — the 0.0007-against-0.0003 "ordering" is two records against
-one, which is the measure failing to read rather than a corpus being ranked.
-
-`CRISP_RATIO = 1.20` sits in `oneground/measures/crispness.py` under the
-comment **"Definitions, not parameters."** That comment is the finding:
-
-> **The five characterization measures are documented as properties of the
-> embedding, and at least one of them carries a constant calibrated to one
-> particular embedding's geometry.**
-
-The ratio is scale-invariant — it is a quotient of two distances, so this is
-not a units artifact. e5 genuinely places these vectors more equidistantly
-between k-means centroids than bge does. That difference is real and
-measurable; what the fixed threshold does is convert it into `0.0000` instead
-of into a number.
-
-**The consequence has a user at the end of it.** Someone who brings an
-embedding whose ratio distribution is compressed relative to bge's gets
-crispness ≈ 0 on every corpus they own, and the honest reading of that output
-today is "my corpus has no boundary structure". The true statement is "this
-measure's threshold does not fit my embedding's scale". Those are different
-sentences and the tool currently only offers the first.
-
-**Not fixed, and deliberately.** Changing `CRISP_RATIO` would move every
-published fixture value, and CLAUDE.md's rule 3 forbids changing a threshold to
-make something read better. This is reported as a decomposition — which layer
-is responsible — not as a parameter change. What it needs is in "Observed, not
-done".
-
-**Stated within its limits:** one sample size (N=800 and N=3000), one centroid
-count each (16 and 32), three corpora, one model family showing it. That e5's
-ratios are compressed on *these* corpora is measured; that this is true of e5
-generally, or of other models, is not.
+Its consequence for this run is narrow and firm: **e5's column cannot
+participate in the ordering**, not because its numbers disagree but because
+they are not readings of the corpora.
 
 
 
-## The clean comparison this run can make
+## The ordering result, subordinate to the finding above
+
+The brief set out to learn whether the corpora's ordering by crispness is
+stable across models. It was obtained, and it is reported second because it
+was obtained with the instrument the previous section shows does not read
+under every embedding. An ordering is only as good as the measure that
+produced it, and one of the three columns turned out not to be a reading.
+
+### The clean comparison this run can make
 
 **`arxiv` against `stackexchange` under bge and MiniLM, and nothing else** —
 e5 is excluded not because its numbers disagree but because the instrument
@@ -288,7 +328,8 @@ suite competing for CPU; they were not, and that hedge was wrong.
 | Truncation reported per model; material difference flagged | **PASS** — MiniLM flagged on 2 of 3 corpora |
 | Cost stated before the first run | **PASS** — measured in tokens, `render_cost`, and in this report |
 | Published values and reference labels unchanged | **PASS** — `characterize.run` untouched; `model` and `models: [one]` resolve identically, asserted by test |
-| Three fixtures swept, findings written from the numbers | **PARTIAL** — three swept; the filings column is confounded by my own chunking and is not used |
+| Three fixtures swept, findings written from the numbers | **PARTIAL** — three swept; the filings column is confounded by my own chunking and is not used, and e5's column is not a reading of the corpora |
+| Whether the crispness ordering is stable across models | **PARTIAL, and the question changed** — stable for arxiv-vs-stackexchange under the two models where the measure reads; the third column showed the measure does not read under every embedding, which is the larger answer |
 | Full suite | **PASS** — 1305 passed, 2 skipped |
 
 **Couldn't check:**
@@ -302,15 +343,22 @@ suite competing for CPU; they were not, and that hedge was wrong.
 
 ## Observed, not done
 
-- **`CRISP_RATIO = 1.20` is not model-neutral and is declared as a
-  definition.** The measure cannot discriminate under an embedding whose
-  distance-ratio distribution is compressed relative to bge's. Two shapes are
-  worth considering and neither is taken here: report the ratio
-  *distribution* rather than a thresholded count, or set the threshold from
-  the corpus's own quantiles so the measure reads at the same place in every
-  model's distribution. Both change a published value's meaning, so both are a
-  decision rather than a fix. `N_CENTROIDS = 256` sits under the same comment
-  and has not been examined at all.
+- **`CRISP_RATIO = 1.20` is not model-neutral — scoped as task 044, and the
+  shape is ruled.** Two remedies were considered. Corpus-derived quantiles
+  were **refused**: a threshold derived from the corpus makes the measure
+  self-referential, and two corpora measured that way cannot be compared —
+  which is precisely the property crispness exists to provide. The ruling is
+  that **the distribution is the honest object and a thresholded count is a
+  reading of it**, and a reading can be labelled with what it assumes. So
+  crispness becomes the ratio distribution with its quantiles; the 1.20 count
+  is retained as a named reading with its threshold stated beside it; and
+  every published value keeps its meaning because the count remains computable
+  from the distribution. Specified in `tasks/044-crispness-distribution.md`,
+  not built — a change to a published measure is approved with its migration
+  in front of the developer.
+- **`N_CENTROIDS = 256` sits under the same comment and has not been examined
+  at all.** Whether the same class of defect applies to it is unknown, and
+  unknown is what this says rather than "probably fine".
 - **A model whose published protocol its own config does not encode is a class
   of confound**, and it should be checked for every model added later. e5
   declares empty prompts while its card requires `query: `/`passage: `; the
@@ -358,8 +406,23 @@ truncation counts, the e5 protocol control, the renderer, and their logs.
 
 ## Blocked on developer
 
-Nothing is blocked. One decision is ready:
+Nothing is blocked, and the one decision that was open has been ruled.
 
-**Whether to run `sessions/036-models.yaml`.** Resolved live onto RTX PRO 4500
-Blackwell in EU-RO-1, stock High, $0.34–$0.72/hr, cap 3 h / $4.00, cost cap
-$2.16. Nothing was created. The card is in the message this report accompanies.
+**The pod run is not happening, and the card stands unspent.**
+`sessions/036-models.yaml` resolved live onto RTX PRO 4500 Blackwell in
+EU-RO-1, stock High, $0.34–$0.72/hr, cap 3 h / $4.00, cost cap $2.16. Nothing
+was created and nothing was spent.
+
+It is held because **the threshold problem is not a sample-size problem**:
+re-running e5 at 150,000 records buys a better-measured zero. The order of
+work is therefore
+
+1. **task 044** fixes the measure,
+2. the filings corpus is **re-chunked in subword tokens**,
+3. *then* the full-size run settles the arxiv/stackexchange pair and lets
+   filings join the comparison.
+
+Running it now would spend $2.16 to measure two corpora with an instrument
+already known to be model-dependent and a third with chunks already known to
+be wrong. The session spec, the runner and the price stay where they are and
+need no rework when their turn comes.
