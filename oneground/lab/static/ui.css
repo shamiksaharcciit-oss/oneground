@@ -460,3 +460,43 @@ table.ingredients th { white-space: nowrap; font-size: .75rem;
 .runner-group { font-size: 12px; color: var(--ink-soft); margin: 14px 0 6px;
   font-weight: 600; }
 .cannot-run { margin-top: 10px; }
+
+
+/* ------------------------------------------------- legibility, task 046
+   84 of 580 elements on this page were below WCAG AA, from three colours.
+   None of them is a token this stylesheet declares.
+
+   `index.html` links `lab.css` and then this file, and `lab.css` is a DARK
+   theme: `--slate: #1B2432` behind `--muted`, `--ochre` and `--amber`.
+   Against that background those three are fine -- 5.21, 6.07 and 6.94. This
+   page redefines `--page` to white and `--ink` to near-black and then
+   inherits `lab.css`'s rules for every class it does not override, so
+   `.eyebrow`, `.run-name`, `.tabs a`, `.lede` and `.note` were painting a
+   dark theme's foregrounds onto a light theme's background: 2.57, 3.00,
+   3.00, 3.00 and 2.25.
+
+   So the repair is NOT to raise those three tokens. They are correct where
+   they were designed to be used, and raising them would fix this page by
+   breaking `oneground lab`, which is the dark one. What was wrong is which
+   palette this page's rules reach for.
+
+   Everything below is scoped to `body.mode-runs`, which `boot.js` sets only
+   for `oneground ui`, so the lab page is untouched. No token value changes.
+   This stylesheet's own `--ink-soft` (7.37) and `--warn` (5.93) already
+   pass; they were simply never applied to these five classes. */
+body.mode-runs .eyebrow { color: var(--warn); }
+body.mode-runs .run-name { color: var(--ink-soft); }
+body.mode-runs .tabs a { color: var(--ink-soft); }
+body.mode-runs .tabs a:hover,
+body.mode-runs .tabs a[aria-current="page"] { color: var(--ink); }
+body.mode-runs .lede { color: var(--ink-soft); }
+body.mode-runs .note { color: var(--ink-soft); }
+/* `label` too: lab.css colours every label `--muted`, and the form is made
+   of labels. Found by re-running the check after the five above, which is
+   the point of a check that reports what it measured rather than whether it
+   passed -- a pass/fail would have said "still failing" and left the
+   counting to me. */
+body.mode-runs label { color: var(--ink); }
+/* The one that has to stay a warning colour, and now at a readable one. */
+body.mode-runs .supervisor-note.absent .note,
+body.mode-runs .cannot-run { color: var(--warn); }
