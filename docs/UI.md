@@ -335,6 +335,57 @@ Alongside it, a source scan: exactly one module may open a file for writing,
 and everything else in the package is refused. `test_the_server_has_no_write
 _path` is the read half's precedent, inverted.
 
+#### The field table: what it can carry, and what it cannot
+
+Slice 2's form explains each field beside it and refuses what the CLI
+refuses. The shape that satisfies both from one place is a declaration per
+field, from which the explanation and the refusal are rendered. Three things
+about that, measured against the 25 refusals `oneground/intake/load()`
+actually raises.
+
+**It reuses `Param`, it does not invent a format.** `oneground/models/base.py`
+already declares a field as `type`, `minimum`, `maximum`, `choices`,
+`belongs_to` and a `note` — and `note` is already the human explanation while
+`belongs_to` is already the conditional. Task 026 built it and
+`_belonging_problem` enforces it generically, for every family, from one
+implementation. An implementer told to build a declaration format will build
+one; this says not to.
+
+**Six of the refusals are out of scope for the table, and they must be named
+as such.** `belongs_to` is *one key and one value set*. The refusals that
+matter most to a form are none of those:
+
+| refusal | shape |
+|---|---|
+| `vectors.path` or `text.path`, not both | exclusive-or |
+| `model` and `models` both set | exclusive-or |
+| `text` set but neither `model` nor `models` | implies one-of |
+| neither `sample` nor `declared` nor `documents` | one-of over three |
+| `documents` set but `extraction:` missing | implies |
+| `models` lists a duplicate | uniqueness within one field |
+
+Roughly eleven refusals are plain type, range, enum or required, and are
+derivable directly. Four more are value-conditional and fit `belongs_to`
+exactly. Four are not about a field at all — a missing file, a document that
+is not a mapping, a wrong schema version, an *unknown* stray key, which no
+per-field declaration can describe because the field is not declared.
+
+**These are the mistakes a user makes while filling a form**, so an
+implementer who does not know they are excluded will believe the table is
+finishable, stop at eleven, and leave the form re-expressing fourteen
+refusals it was ruled must execute.
+
+**An incomplete field table is a timing defect, not a correctness one, and
+that is what makes the piece safe to build incrementally.** The round-trip
+guard already refuses every relational violation at write time: a document
+with both paths set does not round-trip to an unequal document — `load()`
+**raises**. So no incomplete table can let a bad file be written. What an
+incomplete table costs is *when* the user learns: at save rather than while
+typing. The table can therefore be completed field by field while the guard
+holds the line, and the brief should say so, because the alternative reading
+— that the table must be complete before anything ships — makes the hardest
+piece of slice 2 a precondition rather than an increment.
+
 ### A candidate for slice 2: the crispness distribution
 
 Task 044 made `boundary_crispness` a **named reading of a distribution**
