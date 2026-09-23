@@ -8,25 +8,13 @@ diagnostic scripts live in `tasks/scratch/`.
 
 ## Correcting a brief or a report
 
-A brief is corrected in place rather than superseded by a second file: two
-documents sharing a number is how one gets built and the other forgotten. Fold
-and delete, and say in the commit what was kept.
-
-**When you correct one, correct its checklist in the same pass.** A correction
-updates the argument and leaves the acceptance behind, and **the acceptance is
-where an implementer looks last and trusts most** — so a stale line there
-outranks a corrected paragraph above it. Task 045 was corrected twice and both
-times kept an acceptance line the correction had invalidated: once a count
-that no longer matched the code, once the name of the one branch that could
-not demonstrate the fix.
-
-The same applies to any section of a document that states a current state
-rather than a rule. State-bearing sections go stale silently, because nothing
-fails when the world moves and the sentence does not.
+**The rule is [`docs/PRACTICE.md`](../docs/PRACTICE.md) §1.1**: correct a brief
+in place rather than superseding it with a second file, and correct its
+checklist in the same pass as its argument.
 
 ## Currently blocked
 
-Nothing. *(This section states a current state, so it goes stale silently —
-see above. It last named task 041 as blocked on an unmerged `task-039`; both
-merged, and 041 shipped. Emptied rather than deleted, because the next blocked
-task needs somewhere to say so.)*
+Nothing. *(A section stating a current state, which goes stale silently —
+[`docs/PRACTICE.md`](../docs/PRACTICE.md) §1, where this section is the
+instance. Emptied rather than deleted, because the next blocked task needs
+somewhere to say so.)*

@@ -362,24 +362,15 @@ something.
 
 ## Finding 6 — a gated commit is run in the foreground
 
-Not a defect in the product, and recorded because the next person will be
-tempted the same way.
+Not a defect in the product. Two suite-and-commit commands were backgrounded
+at once; the first had not reported when the second's `git add -A` swept up
+its still-staged files, so the second's message would have described a commit
+three steps wider than itself. The gate held — nothing was half-committed,
+because the commit could not run until pytest passed — and what failed was the
+sequencing around the gate, which no gate covers.
 
-Two suite-and-commit commands were backgrounded while each gated its commit
-on the suite passing. The first had not reported when the second started, so
-its files were still staged; the second's `git add -A` swept them up, and its
-commit message — which described only the comparability work — would have
-landed on a commit containing three steps' worth of changes.
-
-**The gate held.** Nothing half-committed, because the commit could not run
-until pytest passed, and stopping both left the tree exactly as it was. What
-failed was not the gate but the sequencing around it.
-
-The rule, for next time: **a gated commit runs in the foreground.** A second
-one started before the first reports will describe contents it does not
-contain, and a commit message that misdescribes its own diff is a receipt
-that lies — the same class of defect as a citation naming the wrong field,
-which is the thing this task exists to have found.
+**The rule and the full account are now
+[`docs/PRACTICE.md`](../docs/PRACTICE.md) §3.**
 
 ---
 
