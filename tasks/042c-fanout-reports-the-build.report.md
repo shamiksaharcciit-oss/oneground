@@ -129,6 +129,54 @@ the three outcomes exist to prevent. It passes, and its `meaning` states how
 strong the evidence is: whether any configuration exercised a skipped shard,
 and that the mutant is what requires the family to read the build.
 
+## Finding — a predicted fan-out is not a reported one, and cannot be fixed the same way
+
+`oneground/capacity.py:99`:
+
+```python
+fanout = float(cfg.get("probe", 1))
+```
+
+This is the same quantity 042c corrected in the two families, and **the same
+correction cannot be applied here.** Line 105 reads `fp.fanout, fp.shards`
+from a `Footprint` — a report about something that exists. Line 99 runs on the
+planning path, where no index has been built, so there is nothing to read the
+built shard count from. A capped figure would have to be capped against a
+*predicted* shard count, which is another estimate.
+
+**Why it matters rather than being a symmetry.** `capacity.plan` is what
+prices a configuration before anyone pays to build it, and a published price
+in `report.json:costs` is computed from it. An over-stated fan-out over-states
+the query cost, which is the safe direction for a budget verdict and the
+unsafe one for a `couldnt_check`: a configuration priced out of a budget it
+would in fact have met is a recommendation withheld on a number nobody
+measured.
+
+**The live question, stated and not answered here:** should a predicted
+fan-out be capped by a predicted shard count — and if it were, what would that
+mean for a published price?
+
+Three things a ruling would have to settle:
+
+- **Which prediction caps which.** The fan-out and the shard count on the
+  planning path are both derived from the same configuration, so capping one
+  by the other adds no information; it only removes a combination the build
+  would have refused. Whether that is a correction or a second guess depends
+  on whether the planner is entitled to assume the build's skip rule.
+- **Whether a predicted price may move.** `report.json:costs` is a published
+  figure in every Tier-1 report. A cap that bites would change prices already
+  written, and a price that changes without a measurement changing is exactly
+  the kind of movement this project makes reports carry digests for.
+- **Whether the two should be one function at all.** They answer different
+  questions — *what will this cost* and *what did this cost* — and 042c's
+  whole finding was that a family reported the first while claiming the
+  second. Merging them would reintroduce that confusion at the planning
+  layer; keeping them apart means the word `fanout` means two things in one
+  codebase, which is how this defect survived in the first place.
+
+**Not changed in this task.** It is a published-price question and the brief
+authorised a family fix.
+
 ## Observed, not done
 
 - **`hash_sharded` still accepts `shards > len(vectors)`.** This was the other
@@ -136,11 +184,12 @@ and that the mutant is what requires the family to read the build.
   test is rewritten rather than deleted: it now asserts the fan-out half as
   fixed and the refusal half as open, and says it fails and is deleted when
   the `ParameterError` lands.
-- **`capacity.py:99` computes `fanout = float(cfg.get("probe", 1))`** from a
-  configuration with no build in hand — the planning path, where the defect
-  cannot be fixed the same way because nothing has been built to read. It is a
-  prediction rather than a report, and whether it should be capped by a
-  predicted shard count is a question for whoever owns capacity planning.
+- **`docs/FAMILIES.md` §4.1 gained two warnings**, on the developer's
+  instruction: the hedge form of the couldn't-check error, and the rule that a
+  mutant must run the check rather than a restatement of it. Both were
+  mistakes made in this task by an author who had just read the three already
+  there, which is the reason the section now says knowing the list is not the
+  same as not making them.
 - **The faiss `WARNING clustering N points to M centroids` lines** during the
   conformance run are the synthetic corpus being smaller than faiss would
   like. Pre-existing, unrelated, and noisy enough to hide a real warning.
