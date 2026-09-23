@@ -603,6 +603,11 @@ class LabServer:
             "required": p.name in fields.REQUIRED,
             "required_when": list(fields.REQUIRED[p.name])
                              if fields.REQUIRED.get(p.name) else None,
+            # What is written when the box is left alone, so the empty
+            # option can say so instead of being blank. `NO_DEFAULT` means
+            # the key is simply absent, which is a different statement.
+            "default": (None if p.default is fields.NO_DEFAULT
+                        else p.default),
             "belongs_to": ([p.belongs_to[0], p.belongs_to[1]]
                            if p.belongs_to else None),
         } for p in fields.FIELDS],

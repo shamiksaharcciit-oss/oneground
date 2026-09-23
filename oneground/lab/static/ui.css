@@ -356,6 +356,10 @@ table.ingredients th { white-space: nowrap; font-size: .75rem;
 .field-head { display: flex; align-items: baseline; gap: 8px; }
 .field-head label { font-weight: 600; }
 .field .required { font-size: 11px; color: var(--ink-soft); }
+/* `now` means the condition actually holds for the file being
+   written, as against a requirement that would apply if the user
+   went another way. Both are shown; only one is emphasised. */
+.field .required.now { color: var(--warn); font-weight: 600; }
 .field input, .field select {
   width: 100%; box-sizing: border-box; padding: 6px 8px;
   border: 1px solid var(--rule); border-radius: 4px;
@@ -384,7 +388,8 @@ table.ingredients th { white-space: nowrap; font-size: .75rem;
 .saved { color: var(--ink-soft); font-size: 13px; }
 
 .outside { margin-top: 26px; }
-.outside summary { cursor: pointer; font-size: 13px; color: var(--ink-soft); }
+.outside h3 { font-size: 13px; color: var(--ink); margin-bottom: 6px;
+  border-bottom: 1px solid var(--rule); padding-bottom: 4px; }
 .outside-list { margin: 10px 0 0; padding-left: 18px; }
 .outside-list li { margin-bottom: 8px; font-size: 12.5px; line-height: 1.5; }
 .outside-list .kind { color: var(--ink-soft); margin: 0 8px; }

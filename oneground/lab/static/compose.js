@@ -77,6 +77,42 @@
     return conditionHolds(field.belongs_to);
   }
 
+  // Requiredness is stated whenever it is true of anything, and says what
+  // it is true OF. Two corrections got here and the second overshot the
+  // first, which is worth keeping in view:
+  //
+  //   * it first read `Param.default is NO_DEFAULT` and marked every field
+  //     required, including one whose explanation begins "Optional.";
+  //   * the repair moved it to `fields.REQUIRED` and rendered the badge only
+  //     while the condition held -- and since every condition is false on an
+  //     empty form, NOTHING was marked required at all. `run.seed`, whose
+  //     own explanation says an unseeded run cannot be reproduced, looked
+  //     exactly as optional as `languages`.
+  //
+  // Silence everywhere is not the repair for a label that claimed too much.
+  // So the badge is always shown where `REQUIRED` knows something, and it
+  // names the condition rather than hiding behind it: a reader deciding
+  // whether to fill in `seed` is told it is required for a sample run, which
+  // is true before they have typed anything.
+  function requiredBadge(field) {
+    if (!field.required) return null;
+    const when = field.required_when;
+    let text = 'required';
+    if (when) {
+      const [owner, wanted] = when;
+      const last = owner.split('.').pop();
+      if (wanted === PRESENT) text = 'required with ' + last;
+      else if (wanted === ABSENT) text = 'required without ' + last;
+      else text = 'required when ' + last + ' is '
+                  + (wanted || []).join(' or ');
+    }
+    // `now` when the condition actually holds, so the page distinguishes
+    // *this is required of the file you are writing* from *this would be
+    // required if you went that way*.
+    const cls = 'required' + (conditionHolds(when) ? ' now' : '');
+    return el('span', cls, text);
+  }
+
   // One helper, two callers. `belongs_to` decides whether a field is offered
   // at all; `REQUIRED` decides whether it must be filled. They are written
   // in the same vocabulary -- a value set, or PRESENT/ABSENT for the
@@ -113,18 +149,24 @@
 
   function control(field) {
     let input;
-    if (field.choices) {
+    if (field.choices || field.type === 'bool') {
+      // An empty select invites being left alone, and one of these sat
+      // directly above an explanation saying any other version is refused.
+      // The unselected option names itself, and where leaving it alone
+      // writes something anyway it says what.
       input = el('select');
-      input.appendChild(el('option', null, ''));
-      field.choices.forEach((c) => {
-        const o = el('option', null, String(c));
-        o.value = String(c);
-        input.appendChild(o);
-      });
-    } else if (field.type === 'bool') {
-      input = el('select');
-      ['', 'true', 'false'].forEach((v) => {
-        const o = el('option', null, v === '' ? '' : v);
+      // The value is set explicitly. An <option> with no `value` takes its
+      // own text, so this one answered to its label rather than to '' --
+      // `select.value = ''` then matched nothing, selectedIndex went to -1,
+      // and the control rendered blank again. The same empty select, from
+      // the opposite direction, inside the fix for it.
+      const unset = el('option', null, unsetLabel(field));
+      unset.value = '';
+      input.appendChild(unset);
+      const values = field.choices
+        ? field.choices.map(String) : ['true', 'false'];
+      values.forEach((v) => {
+        const o = el('option', null, v);
         o.value = v;
         input.appendChild(o);
       });
@@ -151,6 +193,17 @@
     return input;
   }
 
+  // What an untouched box means, said in the box. Three cases and they are
+  // different statements: the key is simply absent; the key is written from
+  // a declared default; or the file will be refused without it.
+  function unsetLabel(field) {
+    if (field.default !== null && field.default !== undefined) {
+      return '\u2014 not set (' + field.default + ' is written) \u2014';
+    }
+    if (field.required) return '\u2014 not set \u2014';
+    return '\u2014 not set (left out of the file) \u2014';
+  }
+
   function fieldRow(field) {
     const row = el('div', 'field');
     row.dataset.field = field.name;
@@ -158,14 +211,8 @@
     const lab = el('label', null, field.name.split('.').pop());
     lab.setAttribute('for', 'f-' + field.name);
     head.appendChild(lab);
-    // Required is conditional: `run.seed` is required of a Tier-1 file and
-    // meaningless in a Tier-2 one. The declaration carries the condition, so
-    // the badge appears when it actually applies rather than always, which
-    // is what it did until a browser showed `ids_path required` sitting
-    // directly above an explanation beginning "Optional."
-    if (field.required && conditionHolds(field.required_when)) {
-      head.appendChild(el('span', 'required', 'required'));
-    }
+    const req = requiredBadge(field);
+    if (req) head.appendChild(req);
     row.appendChild(head);
     row.appendChild(control(field));
     // The explanation, from the declaration. This is the same string the
@@ -219,8 +266,14 @@
   // write guard refuses all eleven at save, in the CLI's words -- and this
   // paragraph is what makes the timing honest rather than a surprise.
   function outsideTheTable() {
-    const box = el('details', 'outside');
-    box.appendChild(el('summary', null,
+    const box = el('section', 'outside');
+    // Not a <details>, and not closed. The list is the only thing standing
+    // between this form and "it did not stop me, so it is valid", and it was
+    // collapsed behind a triangle labelled with what the form cannot do --
+    // so the page's most important honesty was its least prominent element,
+    // and a reader who never opened it got the first half of that sentence
+    // without the second.
+    box.appendChild(el('h3', null,
       'Eleven things this form cannot check while you type'));
     box.appendChild(el('p', 'note',
       'They are checked when you save, by the same validator the command '
@@ -416,6 +469,12 @@
     left.id = 'compose-fields';
     const right = el('div', 'compose-right');
     right.appendChild(el('h3', null, 'The file this writes'));
+    // At rest this pane shows `oneground: 1` alone, which reads as broken
+    // rather than as empty. It is also the thing that proves the form
+    // writes what was typed, so it is worth one line of its own.
+    right.appendChild(el('p', 'note',
+      'The file as you type, and exactly what Save writes. A field you '
+      + 'leave empty is left out rather than written blank.'));
     const pre = el('pre', 'compose-file');
     pre.id = 'compose-file';
     right.appendChild(pre);
