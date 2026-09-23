@@ -57,10 +57,17 @@ hazardous form unavailable, or make it refuse*:
 | a page must not cite an uncommitted report | the exporter refuses the source |
 | historical receipts must not be bulk-added | staging by path, so `git add -A` is not typed |
 
-Each removes a decision rather than describing one. The last is the smallest
-and the most instructive: the warning against `git add -A` existed, in
-`.gitignore`, and was ignored twice by its author — the repair was not a
-louder warning but never typing the command.
+Each removes a decision rather than describing one.
+
+**The last is smallest and is last on purpose, because it makes the argument
+the other five cannot.** The other five fixes could all be read as a rule
+merely being enforced better — a warning turned into a refusal, which still
+leaves "write the warning well" on the table as an alternative. The
+`git add -A` case removes that reading. The warning existed, in `.gitignore`,
+written by the person who would need it, about that exact command, in the file
+the command consults. It was **maximally well placed** and it failed twice
+anyway. So it rules out the remedy a reader would otherwise reach for first,
+and leaves only the one that worked: never typing the command.
 
 > **When a rule is broken twice, stop editing the rule and look for the
 > decision to delete.**
