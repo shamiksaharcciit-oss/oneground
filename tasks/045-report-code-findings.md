@@ -309,13 +309,16 @@ sentence that restates their obstacle.
   a reviewer in the same way: the thing has the appearance of the thing. A
   check that asks *"is there a remedy?"* answers yes to both.
 
-- **Routing covers every constraint, not two of them.** The loop runs only
-  over `ENGINE_CONSTRAINTS = ("latency_p95", "qps")`, so a couldn't-check on
-  `recall_at_k`, `storage_amplification`, `memory_budget` or `monthly_budget`
-  **never enters routing at all** — it arrives with `couldnt_check_kind: None`,
-  `remedy: ""`, and the fall-through sentence. This is the larger half of the
-  finding: the two claims anyone looked at are inside the routed set and still
-  unrouted, and every constraint outside it was never in scope.
+- **Routing covers every constraint, not two of them.** *The two claims anyone
+  looked at were inside the routed set and still unrouted, so everything
+  outside it was never in scope at all* — which is the size of the problem in
+  one sentence.
+
+  The loop runs only over `ENGINE_CONSTRAINTS = ("latency_p95", "qps")`, so a
+  couldn't-check on `recall_at_k`, `storage_amplification`, `memory_budget` or
+  `monthly_budget` **never enters routing at all**: it arrives with
+  `couldnt_check_kind: None`, `remedy: ""`, and the fall-through sentence.
+  This is the larger half of the finding.
 
   Either every constraint's couldn't-check is routed, or the ones that are not
   carry a recorded reason why routing does not apply to them. "It was only
