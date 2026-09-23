@@ -301,7 +301,9 @@ def main():
     ap.add_argument("--spec", help="fixtures/<id>.fixture.yaml (full export only)")
     ap.add_argument("--dir", help="fixtures/arxiv-150k/ (full export only)")
     ap.add_argument("--assets", help="the release asset directory (full export only)")
-    ap.add_argument("--report", required=True, help="runs/<run>/report.json")
+    ap.add_argument("--report", help="runs/<run>/report.json; required for a "
+                                     "full export and for --report-only, and "
+                                     "deliberately NOT used by --cite-only")
     ap.add_argument("--verify", help="runs/<run>/verify.json; defaults to the "
                                      "file beside --report")
     ap.add_argument("--out", required=True, help="site/teaser/data/")
@@ -312,11 +314,26 @@ def main():
                          "leave the geometry alone. The 460 MB of vectors are "
                          "never opened and base.bin, queries.json and "
                          "centroids.json are asserted unchanged.")
+    ap.add_argument("--cite-only", action="store_true",
+                    help="refresh measured.k_sweep and NOTHING else. Carries "
+                         "every other block over and proves it: each is "
+                         "digested before and after and the run refuses if "
+                         "any moved. Needs no --report, because a citation "
+                         "needs no derivation.")
     args = ap.parse_args()
 
+    if args.cite_only:
+        return cite_only(args)
+
     if args.report_only:
+        if not args.report:
+            raise SystemExit("--report-only rebuilds verdict and verify from "
+                             "a report; pass --report. To add a citation "
+                             "without rebuilding anything, use --cite-only.")
         return report_only(args)
 
+    if not args.report:
+        raise SystemExit("a full export needs --report")
     missing = [f for f in ("spec", "dir", "assets") if not getattr(args, f)]
     if missing:
         raise SystemExit("a full export needs " +
@@ -753,6 +770,177 @@ def assert_published(spec, measured):
                         f"[{lo:.3f}, {hi:.3f}] derived from the spec's drift "
                         f"pair ({before} / {after}) +/- {tol}")
     return failures
+
+
+#: The one key `--cite-only` is allowed to change, plus the two stamps that
+#: record that a run happened at all.
+CITED_KEY = ("measured", "k_sweep")
+CITE_ONLY_STAMPS = ("generated_at", "generated_by", "cited_from")
+
+
+def _block_digests(values):
+    """A digest per top-level block, and per `measured` key.
+
+    Canonical JSON so key order cannot make an unchanged block look moved.
+    `measured` is opened one level down because that is where the one
+    permitted change lives; everything else is whole-block.
+    """
+    out = {}
+    for k, v in values.items():
+        if k == CITED_KEY[0] and isinstance(v, dict):
+            for mk, mv in v.items():
+                out["measured.%s" % mk] = hashlib.sha256(json.dumps(
+                    mv, sort_keys=True, ensure_ascii=False,
+                    default=str).encode()).hexdigest()
+            continue
+        out[k] = hashlib.sha256(json.dumps(
+            v, sort_keys=True, ensure_ascii=False,
+            default=str).encode()).hexdigest()
+    return out
+
+
+def cite_only(args):
+    """Refresh `measured.k_sweep` and nothing else.
+
+    **`--report-only` exists for a rebuild; this exists for a carry-over. Do
+    not fold them.** They look similar and are opposites: `--report-only`
+    takes a `--report` and *re-derives* `verdict` and `verify` from it, and
+    this one takes no report and derives nothing at all.
+
+    The distinction is not stylistic. Task 044e needed to add a cited sweep to
+    a page whose `verdict` came from a pod run that is **not in this
+    repository** -- `environment_id tf8sd2usxbblsm`, measured 2026-09-09 in a
+    checkout called `oneground-012`. `--report-only` would have happily
+    rebuilt that verdict from whatever report it was handed, replacing a
+    pod-measured decision with a laptop-measured one in order to land a
+    citation. That is the worst trade available here: a measurement destroyed
+    to add a reference to a measurement.
+
+    So a citation needs no derivation, and a mode that rebuilds a measurement
+    to add one is the wrong tool.
+
+    **The mode's own acceptance is the before/after digest.** Every block is
+    digested before and after and the run refuses if any moved, which makes
+    the claim *nothing else changed* checkable rather than asserted -- the
+    same shape `--report-only` uses for the three geometry files, applied to
+    every block because this mode claims more.
+
+    TWO PERMITTED CHANGES, WITH DIFFERENT JUSTIFICATIONS
+    ----------------------------------------------------
+    1. **The citation** -- `measured.k_sweep`. The mode's purpose.
+    2. **The sanitisation** -- `public_sources` over every block it carries.
+       Not a purpose but a **precondition**: `write_json` refuses to publish a
+       value shaped like a local path, and the carried `verdict` block holds
+       one (`calibration.engine_line.source`, an absolute path through a
+       checkout called `oneground-012`). Without this the mode cannot write at
+       all.
+
+       No measurement moves. The field becomes `verify.json`, and the block
+       still carries `dataset`, `date` and `environment_id`, so the run
+       remains fully identified -- **the path was never the identifier**,
+       which is the whole basis of the rule that it should not have been
+       recorded.
+
+    Every block a sanitisation touched is **named in the output**, so the
+    second permission cannot be used quietly. The acceptance still digests
+    everything else: the claim is narrowed, not weakened.
+
+    AND NOT A THIRD: carried-over content is not exempt
+    ---------------------------------------------------
+    The obvious alternative was to let the refusal skip anything this mode
+    merely carries rather than creates. **Refused.** It would let a file stay
+    publishable precisely because its defect is old, which is the
+    repair-on-read loophole inverted -- and repair-on-read is what let a
+    machine identifier sit unnoticed in three receipts for ten days. Do not
+    reach for it later.
+    """
+    out = args.out
+    t0 = time.time()
+    values_path = os.path.join(out, "values.json")
+    if not os.path.exists(values_path):
+        raise SystemExit("%s does not exist; --cite-only refreshes a citation "
+                         "in a file that is already there and has nothing to "
+                         "start from. Run a full export first." % values_path)
+
+    untouched_files = ["base.bin", "queries.json", "centroids.json"]
+    before_files = {n: sha256_file(os.path.join(out, n))
+                    for n in untouched_files}
+
+    prior = json.load(open(values_path, encoding="utf-8"))
+    before = _block_digests(prior)
+
+    # Permitted change 2, the precondition: sanitise the blocks being carried,
+    # or `write_json` refuses the whole file. Applied before the citation so
+    # the citation is not itself exempted from it.
+    values = public_sources(dict(prior))
+    sanitised = sorted(k for k, d in _block_digests(values).items()
+                       if _block_digests(prior).get(k) != d)
+
+    measured = dict(values.get("measured") or {})
+    measured[CITED_KEY[1]] = k_sweep_block()
+    values["measured"] = measured
+    values["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    values["generated_by"] = "corpora/export_teaser_data.py --cite-only"
+    values["cited_from"] = {
+        "generated_at": prior.get("generated_at"),
+        "generated_by": prior.get("generated_by"),
+        "note": ("every block but measured.k_sweep was carried over from the "
+                 "export named here, byte for byte; nothing was re-derived "
+                 "and no report was read"),
+    }
+
+    after = _block_digests(values)
+    allowed = ({"measured.%s" % CITED_KEY[1]} | set(CITE_ONLY_STAMPS)
+               | set(sanitised))
+    moved = sorted(k for k in set(before) | set(after)
+                   if k not in allowed and before.get(k) != after.get(k))
+    if moved:
+        raise SystemExit(
+            "--cite-only changed a block it must carry over: "
+            + ", ".join(moved))
+
+    write_json(values_path, values)
+    write_inline(out)
+    lines = []
+    for name in OUT_FILES + [INLINE_FILE]:
+        lines.append("%s  %s\n" % (sha256_file(os.path.join(out, name)), name))
+    io.open(os.path.join(out, "MANIFEST.sha256"), "w",
+            encoding="utf-8", newline="\n").writelines(lines)
+    stamp_page(out, args.page_dir)
+
+    after_files = {n: sha256_file(os.path.join(out, n))
+                   for n in untouched_files}
+    moved_files = [n for n in untouched_files
+                   if before_files[n] != after_files[n]]
+
+    print("\n================ cite-only export ================")
+    for k in sorted(before):
+        if k in allowed:
+            continue
+        print("  carried over  %-34s %s..." % (k, before[k][:12]))
+    print("  REFRESHED     %-34s %s...   (the citation)"
+          % ("measured.k_sweep", after["measured.k_sweep"][:12]))
+    for k in sanitised:
+        print("  SANITISED     %-34s %s...   (a path made publishable; no "
+              "measurement moved)" % (k, after.get(k, "")[:12]))
+    for n in untouched_files:
+        print("  unchanged     %-34s %s..." % (n, after_files[n][:12]))
+    for n in ("values.json", INLINE_FILE, "MANIFEST.sha256"):
+        print("  rewritten     %-34s %s...  %s bytes"
+              % (n, sha256_file(os.path.join(out, n))[:12],
+                 format(os.path.getsize(os.path.join(out, n)), ",")))
+    print("  restamped     ../app.js  (cache-bust digests)")
+    ks = values["measured"]["k_sweep"]
+    print("\n  cited         %s" % ks["source"])
+    print("  sha256        %s" % ks["source_sha256"])
+    print("  rows          %d, k=%d..%d"
+          % (len(ks["rows"]), ks["rows"][0]["k"], ks["rows"][-1]["k"]))
+    print("\nwritten to %s   (%.1f s)" % (out, time.time() - t0))
+
+    if moved_files:
+        raise SystemExit("--cite-only changed a geometry output: "
+                         + ", ".join(moved_files))
+    return 0
 
 
 def report_only(args):

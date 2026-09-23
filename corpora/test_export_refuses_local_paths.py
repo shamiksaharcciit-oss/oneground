@@ -31,10 +31,10 @@ _s.loader.exec_module(etd)
 
 # ------------------------------------------------------- the sabotage
 @pytest.mark.parametrize("planted", [
-    r"C:\Users\someone\projects\oneground\runs\x\verify.json",
-    "C:/Users/someone/projects/oneground/runs/x/verify.json",
-    "/home/someone/oneground/runs/x/verify.json",
-    "/Users/someone/oneground/runs/x/verify.json",
+    r"C:\Users\user\projects\oneground\runs\x\verify.json",
+    "C:/Users/user/projects/oneground/runs/x/verify.json",
+    "/home/user/oneground/runs/x/verify.json",
+    "/Users/user/oneground/runs/x/verify.json",
     "/workspace/oneground/requirements.pod.yaml",
     "~/oneground/runs/x/verify.json",
     r"~\oneground\runs\x\verify.json",
@@ -65,12 +65,12 @@ def test_the_refusal_names_the_key_and_does_not_repair(tmp_path):
     reader search; and not repaired, because a page datum quietly corrected on
     the way out leaves the exporter wrong and tells nobody."""
     out = tmp_path / "values.json"
-    payload = {"a": {"b": {"path": "/home/someone/x.yaml"}}}
+    payload = {"a": {"b": {"path": "/home/user/x.yaml"}}}
     with pytest.raises(SystemExit) as e:
         etd.write_json(str(out), payload)
     msg = str(e.value)
     assert "a.b.path" in msg
-    assert "/home/someone/x.yaml" in msg
+    assert "/home/user/x.yaml" in msg
     assert "public_path" in msg
     assert "Not repaired on purpose" in msg
 
