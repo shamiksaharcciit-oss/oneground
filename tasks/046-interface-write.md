@@ -121,7 +121,21 @@ why its guard was settled before the brief existed.
    explanation, which is what the table exists to prevent.
 
 3. **Jobs.** Each stage is a job — `characterize`, `simulate`, `verify`,
-   `report`, `chunk`, `propose` — with a state (queued, running, done,
+   `report`, `chunk`, `propose`, **and every pod operation except the
+   create**: `plan`, `status`, `watch` and the fetch are jobs in the job
+   list, with states, logs and receipts like any other. Only `up` is a
+   terminal.
+
+   **This is a correction, not a clarification.** The list above first
+   named six stages and omitted the pod entirely, which contradicted
+   `docs/INTERFACE.md` §4.2 — *"and a pod session"* — and §4.3, which
+   assigns `plan`, `status`, `watch`, the fetch, the comparison and the
+   receipts to the UI and leaves only the create at a terminal. The
+   documents win, as this brief's own setup section says they do. Step 5
+   is unchanged and still governs the create: the card is shown, the `up`
+   command is handed over, nothing is created.
+
+   Each job has a state (queued, running, done,
    failed, refused, cancelled), a log streamed from the CLI's own output,
    start and end times, and the receipt the CLI wrote. A job's record
    names the exact invocation, and a test replays that invocation from a

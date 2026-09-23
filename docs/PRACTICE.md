@@ -14,6 +14,22 @@ rule that cannot name the day it was learned and what it cost is a rule nobody
 has tested, and it will be followed exactly as far as it is convenient. If you
 want to add one, bring the instance.
 
+**Its first evidence arrived within hours of the page existing**, and it is
+worth stating plainly because it is the whole claim being made for writing
+these down. The day §2's warnings moved here, a test in
+`oneground/test_comparability.py` broke on `main` for exactly the reason
+warning 7 describes, and had stayed green in CI for exactly the reason warning
+6 describes.
+
+**Neither warning prevented it.** Both were written before this page existed
+and neither was in front of the person who wrote the test. What the page
+bought was the *diagnosis*: the failure was named, placed against two rules
+and ruled on in one pass, instead of being repaired as the one-line assertion
+change it superficially looked like — which would have left the coupling in
+place to break again on the next legitimate change. A catalogue of ways to be
+wrong does not stop you being wrong. It shortens the distance between the
+symptom and the decision.
+
 ---
 
 ## 1. A section that states a current state goes stale silently
@@ -199,12 +215,32 @@ that happens to hold that workdir.
 > helper that decides is usually three functions away and shared with tests
 > that have every right to skip.
 
+**A third instance, the day this moved onto the page**, and it is the
+permitted kind of skip rather than a violation, which is what makes it worth
+recording. Task 043 fixed `facts_of` to read the measuring machine; that made
+`machine` answerable and broke a test in `oneground/test_comparability.py`
+that had asserted otherwise — and the break **landed on `main` green**, because
+that test skips wherever `runs/` is absent, which is CI. The skip names what
+is missing and the workdirs are a local run, so the rule above allows it.
+
+> So the residue is the point: **even a permitted skip means the break lands
+> green, and the cost moves to whoever holds the data.** What the rule buys
+> there is not prevention but knowing where to look — when the suite is green
+> and a machine with the artifacts is red, **the difference is the skips**, and
+> that is the first place to look rather than the last.
+
 The shape warnings 3, 5 and 6 share: **a green result is a claim about the
 world, and the three ways to make one without evidence are to pass for the
 wrong reason, to check a copy of the rule, and to not run at all.**
 
-**7. A test that demonstrates a fix by building the defective case is coupled
-to that case remaining buildable.** Task 042c fixed `fanout` so that it
+**7. A test pinned to a current state breaks when a later task legitimately
+changes that state.** It has two halves — the setup and the assertion — and
+the second was found the day this moved onto the page, so the warning names
+both.
+
+**The setup half: a test that demonstrates a fix by building the defective
+case is coupled to that case remaining buildable.** Task 042c fixed `fanout`
+so that it
 reports the shards that were built rather than the ones requested, and proved
 it with a configuration asking for `len(x) + 1` shards over `len(x)` vectors.
 Task 042d then made that configuration a refusal — a partition cannot have
@@ -231,6 +267,28 @@ yesterday.
 should be refused, so every refusal it produces is a new boundary, and any
 test standing on one breaks when it lands. That is the suite working, and the
 repair is the input.
+
+**The assertion half: a test that asserts a whole collection breaks when any
+member of it legitimately changes.**
+`test_two_copies_of_the_same_run_are_still_only_couldnt_check` asserted
+`set(unknown) == {"code", "machine"}`. Task 043 made the measuring machine
+answerable, `machine` left the set, and the test failed — although the
+property it is named for, that two copies of one run are still
+couldn't-check, held exactly as it had before, with the verdict and the
+`differing` list unchanged.
+
+Nothing was standing on a boundary here; the setup was and remained legal.
+**The coupling was in the assertion: it pinned the whole of a set when it
+cared about two of its members**, so a legitimate change to a third broke it
+for a non-reason.
+
+> The rule: **assert the facts the test is about, not the collection they
+> happen to sit in**, and say in the docstring which facts and why. A set
+> equality over a result is a tally, and a tally is a current state — §1 of
+> this page, arriving inside an assertion. The repair here was two membership
+> assertions, `code` in and `machine` out, each carrying the reason it is
+> there, so that the next person to move an ingredient can tell in one reading
+> whether they have broken a property or a count.
 
 ---
 

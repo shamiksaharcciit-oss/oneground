@@ -136,8 +136,18 @@ def test_no_pair_of_local_runs_can_reach_comparable():
 def test_two_copies_of_the_same_run_are_still_only_couldnt_check():
     """The sharpest form of the finding. Everything knowable agrees -- same
     libraries, same settings digest, same sample digest, same platform -- and
-    the pair is still couldnt_check, because neither records the version and
-    environment_id is a class."""
+    the pair is still couldnt_check.
+
+    What this protects is the reason, which is two facts and not a tally:
+    `code` is unanswerable because neither workdir records a released version,
+    and `machine` IS answerable, because task 043 made `facts_of` read the
+    measuring machine rather than the reporting one.
+
+    It asserts those two and not the whole `unknown` set. The set is a current
+    state: an earlier version asserted it entire, and 043 broke this test by
+    making a third ingredient answerable -- a legitimate change, and the
+    property above never moved. See `docs/PRACTICE.md` section 2, warning 7.
+    """
     left = os.path.join(REPO, "runs", "arxiv-150k-via-characterize")
     right = os.path.join(LOCAL, "arxiv-150k-via-characterize")
     if not (os.path.isdir(left) and os.path.isdir(right)):
@@ -145,7 +155,10 @@ def test_two_copies_of_the_same_run_are_still_only_couldnt_check():
     v = C.compare_workdirs(left, right)
     assert v["verdict"] == C.COULDNT_CHECK
     assert v["differing"] == []
-    assert set(v["unknown"]) == {"code", "machine"}
+    assert "code" in v["unknown"], (
+        "code unanswerable is why this pair cannot reach comparable")
+    assert "machine" not in v["unknown"], (
+        "043 made the measuring machine answerable; docs/PRACTICE.md 4")
     states = {f["ingredient"]: f["state"] for f in v["findings"]}
     assert states["libraries"] == C.SAME
     assert states["settings"] == C.SAME
