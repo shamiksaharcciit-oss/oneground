@@ -10,19 +10,33 @@ What it cost is at the bottom.*
 **9. A survey gave a clean bill of health from a predicate that structurally
 excluded the case that prompted it.**
 
-Warning 3 is *a check that passed for the wrong reason, which is worse than
-one that fails*. This is that, at its worst setting, and the reason it is
-worse is about how the result is received rather than about the check:
+## The rule, and it is one line of work
+
+> **Run the audit against the tree *before* the fix, and require it to name
+> the known instance. A survey that cannot rediscover its own motivating case
+> is not evidence.**
+
+This is the whole entry and everything below it is why. It generalises past
+the particular mistake to **every audit anyone writes here** — every "are
+there others like this?" step in every brief — and it costs one run against a
+commit you already have. There is no excuse for skipping it.
+
+The asymmetry that makes it necessary:
 
 > **A check that cannot fail is suspicious. A check that passes convincingly,
 > while unable to see the one case that prompted it, is trusted.**
 
-An all-clear from a survey reads as evidence of absence. It had a plausible
+Warning 3 is *a check that passed for the wrong reason, which is worse than
+one that fails*. This is that at its worst setting, and what makes it worse is
+how the result is received rather than anything about the check. An all-clear
+from a survey reads as evidence of absence. This one had a plausible
 predicate, a real AST walk over the real tree, and nine named candidates with
-line numbers — the texture of a thorough negative result. Nothing about the
+line numbers — the texture of a thorough negative result. Nothing in the
 output suggested it had not looked where the defect was.
 
-**The instance.** Task 044d fixed two published fixtures reading outside the
+## The instance
+
+Task 044d fixed two published fixtures reading outside the
 band they were themselves the endpoints of, caused by a percentile stored to
 two decimals and compared against a full-precision recomputation under a
 strict inequality. The brief added a survey step: find any other stored
@@ -42,7 +56,10 @@ predicate was written from the memory of debugging it, which is the most
 natural way to write one and the most likely to encode the investigation
 instead of the fault.
 
-**The repair, and it is the rule.**
+## The repair for this particular audit
+
+Distinct from the rule above: the rule catches the mistake, this is what the
+survey should have selected on once it was caught.
 
 > **Select on provenance, not on locality.** The question is not *where is
 > this value used* but *where did this value come from*. A literal that is a
@@ -65,16 +82,16 @@ Selecting on provenance turned 36 literals into 31 obvious choices and 5 to
 judge by hand, of which none was this shape and two were an adjacent, milder
 one. That is a survey whose negative result means something.
 
-**The tell.** You have written a search for other instances of a bug you just
-fixed, and the search describes **how you found it**. Ask the search about the
-original: does the predicate match the case that prompted it? If it does not,
-every zero it returns is uninformative, and it will be believed anyway.
+## The tell
 
-Cheap to check, and the check is mechanical: run the survey against the tree
-*before* the fix and require it to name the known instance. A survey that
-cannot rediscover its own motivating case is not evidence.
+You have written a search for other instances of a bug you just fixed, and the
+search describes **how you found it**. A predicate written from the memory of
+debugging encodes the investigation rather than the fault, which is both the
+most natural way to write one and the most likely to be wrong in exactly this
+way. Ask the search about the original; if it cannot see it, every zero it
+returns is uninformative and will be believed anyway.
 
-**What it cost.** Nine candidates, a confident all-clear, and — had the
+## What it cost Nine candidates, a confident all-clear, and — had the
 mismatch not been noticed before the report was written — a sentence in a task
 report saying no other instance exists, resting on a search that could not
 have found one. The report would have been wrong in the direction reports are
