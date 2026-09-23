@@ -240,6 +240,82 @@ def read(runs_dir):
                        "list of jobs")
     return [Job.from_dict(d) for d in raw]
 
+# ============================================ THE EXIT-CODE CONTRACT
+#
+# > **A stage's exit code says whether the command ran. It never says what
+# > the command found.**
+# >
+# >   0  it ran. What it found is in the artifact.
+# >   2  it declined, with a reason, and printed it.
+# >   1  it did not finish. Whether anything survives is the workdir's to
+# >      say, not the code's.
+#
+# Written down in task 046 after measuring what was already true rather than
+# deciding something new. Exit 2 already meant *refused* in fifteen
+# assertions across three test files, and no document anywhere stated an exit
+# code -- a contract by every practical measure and not one by the only
+# measure a user has. So this is a promotion from undocumented to written,
+# not an invention.
+#
+# WHY THE RULE IS ABOUT *RAN* RATHER THAN ABOUT *REFUSED*
+# -------------------------------------------------------
+# "Exit 2 means refused" would be true of every stage and false of
+# `fixture verify`, which exits 2 when a fixture does not verify -- the tool
+# ran and the answer was no. That is a NEGATIVE RESULT: not a refusal, not a
+# failure, and the third of the three outcomes this project keeps apart
+# everywhere else.
+#
+# `fixture verify` is the named exception rather than a counter-example,
+# because it is **a checker whose whole output is the verdict**. It has
+# nothing else to say, so its exit code carries the answer. A stage has an
+# artifact to say it in.
+#
+# AND WHY NOTHING IS BROKEN TODAY, WHICH IS NOT LUCK
+# --------------------------------------------------
+# The stage that could most obviously have violated this does not:
+# `_cmd_verify` returns **0** when a real engine contradicts the simulation,
+# because the contradiction is written into `verify.json`.
+#
+# That is this project's own rule -- **the three outcomes live in the
+# artifact, not in the process** -- holding at the process boundary without
+# anyone having stated it there. A rule that has been silently obeyed is the
+# cheapest kind to write down, and the tell that it was real is that breaking
+# it would have broken fifteen tests nobody thought of as guarding it.
+#
+# The day a stage exits non-zero for a result, `classify` calls it `refused`
+# or `failed` and the page says *the tool declined* about an answer the tool
+# gave. `test_exit_contract.py` is what would report that.
+
+#: Non-zero returns a stage handler is permitted, and why. Anything not here
+#: is a stage reporting a finding through its exit code, which the rule above
+#: forbids. A reason per entry, so an addition costs a sentence (section 7.1).
+EXIT_CONTRACT = {
+    # `_cmd_simulate`, when configurations were planned and not measured.
+    #
+    # **This is the one entry that is a finding rather than a fate**, and it
+    # is listed rather than quietly permitted because the rule above says it
+    # should not exist. The run happened; `simulate.json` holds the rows that
+    # were measured and `simulate_info.json:dropped` names each one that was
+    # not, with its reason. Under the rule that is exit 0 with the finding in
+    # the artifact, exactly where the artifact already carries it.
+    #
+    # Its own comment gives the argument for the non-zero: "couldn't-check is
+    # never rounded up to success". That is right about the outcome and it is
+    # being asserted in the wrong channel -- the artifact already refuses to
+    # round it up, and the exit code is being asked to repeat a claim the
+    # receipt makes better.
+    #
+    # Left as it is, declared, and raised as the fifth contract change in
+    # `tasks/046-contract-changes-pending.md`: it is `simulate`'s contract,
+    # scripts may depend on it, and it is not a UI slice's to change unasked.
+    # Its cost is visible here: it is the sole reason `EXIT_MEANING[1]` has
+    # two meanings and `classify` has to consult the workdir at all.
+    ("simulate", 1): "configurations were planned and not measured; the rows "
+                     "that were are in simulate.json and each drop is named "
+                     "in simulate_info.json:dropped",
+}
+
+
 # ------------------------------------------ reading an exit code honestly
 # Task 046. A supervisor is given an exit code, a stream of output, and
 # whatever landed in the workdir. `tasks/finding-refusals-arrive-as-

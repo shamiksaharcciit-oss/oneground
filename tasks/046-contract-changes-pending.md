@@ -1,8 +1,12 @@
-# Task 046 — the four times this slice wanted to change one module's contract
+# Task 046 — the five times this slice wanted to change a contract
 
-*Collected rather than raised one at a time, because four of them is a
-finding about the module and not four findings about a UI slice. To be ruled
-on as a shape when 046 closes.*
+*Collected rather than raised one at a time, because five of them is a
+finding about the seam and not five findings about a UI slice. To be ruled on
+as a shape when 046 closes.*
+
+*The fifth arrived after this note was written, and it arrived the way the
+note predicts: from building the test for a rule, rather than from reading
+the code the rule is about.*
 
 **A consequence worth recording before the instances**, because it is the
 first place this slice's two halves meet without being wired together: the
@@ -60,6 +64,31 @@ than merely unhelpful, since the file is readable and simply is not a file.
 
 One line, written out in
 `tasks/finding-a-path-check-that-accepts-a-directory.md`. Not taken.
+
+## 5. `simulate` reports a finding through its exit code — **pending**
+
+Found by building the test for the exit-code rule, which is what the test was
+for. `_cmd_simulate` returns **1** when configurations were planned and not
+measured — and the run happened: the measured rows are in `simulate.json` and
+each drop is named with its reason in `simulate_info.json:dropped`.
+
+Its own comment gives the argument: *"couldn't-check is never rounded up to
+success."* That is right about the outcome and it is asserting it in the wrong
+channel. The artifact already refuses to round it up; the exit code is being
+asked to repeat a claim the receipt makes better, and by doing so it becomes
+a finding travelling in a process.
+
+**What it costs, visibly:** it is the sole reason `jobs.EXIT_MEANING[1]` means
+two things and `classify` has to consult the workdir at all. Remove it and
+that row collapses to *did not finish*, and the workdir check — the thing that
+needed its own mutant to prove it was read — becomes unnecessary.
+
+Declared in `jobs.EXIT_CONTRACT` with its reason rather than quietly
+permitted, so the rule is enforced with one stated exception rather than
+weakened. `oneground/test_exit_contract.py` holds it.
+
+Not taken: it is `simulate`'s contract, a script may depend on the code, and
+changing it is not a UI slice's to do unasked.
 
 ## What the four have in common, which is the thing to rule on
 

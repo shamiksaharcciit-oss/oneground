@@ -334,6 +334,72 @@ The shape warnings 3, 5 and 6 share: **a green result is a claim about the
 world, and the three ways to make one without evidence are to pass for the
 wrong reason, to check a copy of the rule, and to not run at all.**
 
+**10. A guard whose falsity is invisible at the call site.** The lab server's
+Host and token checks lived in a helper that ended:
+
+```python
+return self.send(req, 403, {"error": "refused: ... token is required"})
+```
+
+and every caller wrote:
+
+```python
+refusal = self._refuse_unless_addressed(req)
+if refusal is not None:
+    return refusal
+```
+
+`send` has no `return` statement. It returns `None`. So `refusal is not None`
+was **never true**, and the handler carried straight on: **a refused request
+was refused and then performed.** An unauthenticated caller received a 403
+*and* the action, on every verb.
+
+Nothing catches this. The helper's name says what it does. The call site
+reads exactly like a guard — `if refusal is not None: return refusal` is the
+shape a reviewer is scanning for. No type is violated; `None` is a perfectly
+good value for a variable named `refusal`; and the 403 really is sent, so
+every test asserting a status code passes.
+
+> The rule: **a guard answers a question, it does not perform an action and
+> hope the caller notices.** Return a bool and make the call site say what it
+> means — `if not self._addressed(req): return`. Then the failure mode is a
+> guard that returns the wrong bool, which is a thing a test can state.
+>
+> And the tell, because this arrived by a repair we make constantly: **it was
+> introduced by extracting a duplicated block into a helper.** In `answer`
+> the line had been `return self.send(...)`, which returned from the function
+> that mattered. Moved into a helper, the same expression returns from the
+> helper and means nothing. **When you lift a `return` into a function, you
+> have changed what it returns from** — and if what it returned was control
+> rather than a value, the lift silently drops it.
+
+**11. An intermittent failure is evidence, and a fix that does not make it
+stop is a different fix.** Warning 10 above was found only because one test
+kept failing about 40% of the time, and it was explained away twice.
+
+The first explanation was a plausible class — a connection reset, with a named
+cause. It was wrong. **The second was worse, and it is the one to learn
+from**: chasing it turned up a real, adjacent defect (a `os.replace` sitting
+outside the cleanup that removed a temp file), which was genuinely a bug,
+genuinely fixed, and genuinely in the same code path as the symptom.
+
+> **A plausible cause found and fixed is indistinguishable from the cause** —
+> until the symptom continues. The only thing that separated them was that
+> the test kept failing after the fix, and the only reason the real defect
+> was found is that nobody turned the test off.
+
+> The rule: **an intermittent failure is a claim that something is wrong
+> somewhere, and the two ways to be wrong about it are to ignore it and to
+> explain it.** The second feels like work. Neither is finished until the
+> failure stops, and *a fix that does not make it stop is a different fix* —
+> keep it, and keep looking.
+
+And how it was settled, after three rounds of theory: **instrumenting rather
+than reasoning.** Twenty lines that recorded a stack trace at the moment the
+forbidden thing happened, which named the authenticated endpoint running
+inside a request the client had been told was refused. Every round of
+plausible theory cost more than that.
+
 **7. A test pinned to a current state breaks when a later task legitimately
 changes that state.** It has two halves — the setup and the assertion — and
 the second was found the day this moved onto the page, so the warning names
@@ -439,6 +505,31 @@ the thing it is about, it is not weak evidence. **It is not evidence.**
 
 > The cheapest test of a wait condition: **would it still be true if the code
 > under test were deleted?** All three of these would.
+
+**And the mirror, which is the same error pointing the other way.** All three
+above sampled too **early** — they read a page before the thing they were
+about had happened. The fourth sampled too **late to be impossible**, which
+sounds like the opposite and is not:
+
+A browser pass clicked a button, waited for the panel it opens, found it, and
+passed. The panel was real. Four seconds later the page's own refresh timer
+rebuilt the section the panel lived in and deleted it — so a person who
+clicked and then *read* found nothing, and the check that had just verified
+it could not have seen that.
+
+> The rule: **a probe faster than a person cannot see a defect that needs a
+> person's amount of time to happen.** If the thing under test has a clock —
+> a refresh, a timeout, an animation, a retry, a session — the check has to
+> live on that clock, not beat it.
+>
+> The repair is to sample a time-dependent thing **over time**: the
+> verification now reads at 0.2s, 4.5s, 9.0s and 13.0s, and the defect is
+> visible as the answer changing between the first two.
+
+Warning 9 says a condition must be one the code under test produces. This
+says it must also be read **when a person would read it**. A check that is
+correct and instantaneous is still only a claim about the first 200
+milliseconds.
 
 **The assertion half: a test that asserts a whole collection breaks when any
 member of it legitimately changes.**
