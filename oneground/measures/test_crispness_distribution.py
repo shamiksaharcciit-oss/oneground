@@ -132,6 +132,37 @@ def test_a_tail_count_over_many_vectors_is_resolvable_synthetic():
     assert "outcome" not in got
 
 
+# ------------------------------------- a user's own run stores it (ruling 2)
+def test_a_users_own_run_stores_the_distribution_synthetic():
+    """The storage ruling protects PUBLISHED bytes; a fresh workdir has none.
+
+    And a user whose corpus ships no `ratio` column is exactly the person who
+    cannot recover the distribution afterwards, so their own run keeps it.
+    """
+    from oneground.characterize import MEASURED_FIELDS, characterize_arrays
+
+    rng = np.random.default_rng(3)
+    centres = rng.normal(0, 1, size=(6, 16))
+    x = np.vstack([c + rng.normal(0, 0.10, size=(200, 16)) for c in centres])
+    x = (x / np.linalg.norm(x, axis=1, keepdims=True)).astype(np.float32)
+    q = x[rng.choice(len(x), size=60, replace=False)].copy()
+
+    got = characterize_arrays(np.ascontiguousarray(x),
+                              np.ascontiguousarray(q), seed=3,
+                              log_fn=lambda m: None)
+
+    assert "crispness_reading" in got
+    r = got["crispness_reading"]
+    # the stored reading and the published field are the same number
+    assert r["value"] == pytest.approx(got["boundary_crispness"])
+    assert r["threshold"] == C.CRISP_RATIO
+    # the distribution is there and complete
+    assert len(r["distribution"]["quantiles"]) == len(C.RATIO_QUANTILES)
+    # and Tier 2 fills it like every other measured field, rather than
+    # omitting it -- an absent field reads as an oversight
+    assert "crispness_reading" in MEASURED_FIELDS
+
+
 # ------------------------------------------- against the published fixtures
 def _fixtures_with_ratio():
     out = []
