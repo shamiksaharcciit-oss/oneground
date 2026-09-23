@@ -5,6 +5,7 @@ entry, and every entry either resolves to a file and field or names which
 non-field kind it is — plus the one that makes it worth having: an entry
 whose cited figure and whose field disagree is named, not smoothed over.
 """
+import hashlib
 import json
 import os
 
@@ -18,15 +19,50 @@ from oneground.lab.views.evidence import (KINDS, NAVIGABLE, EvidenceDrawerView,
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TIER1 = os.path.join(REPO, "runs", "arxiv-150k-via-characterize")
 TIER2 = os.path.join(REPO, "runs", "041-ui", "support-tickets-2026q3")
-#: The report as it was published before this task fixed its citations, kept
-#: beside the runs rather than inside one: the browsing corpus should hold the
-#: corrected report, and this is a regression fixture, not a run.
-DEFECTIVE = os.path.join(REPO, "runs", "041-pre-fix-report.json")
+
+# ---------------------------------------------------------- the regression pair
+# Both sides are TRACKED, and the test that uses them fails rather than skips.
+#
+# The pre-fix report first lived at `runs/041-pre-fix-report.json`: gitignored,
+# inside a worktree, and the test skipped without it. That is evidence held in
+# a directory whose lifetime is shorter than the claim it supports — the shape
+# the proposals stream named after nearly losing two artifacts — and it is
+# worse here than usual, because the check that proves the drawer catches the
+# published citation defect would have gone *quiet* rather than red. A
+# regression fixture that can vanish is not a regression test.
+#
+# The workdir the citations resolve against is the published fixture's own
+# bundle, which is tracked and whose `verify.json` is byte-identical to the
+# run's. So the pair needs nothing outside the repository.
+
+#: The published arxiv-150k bundle: characterization, simulate, verify,
+#: verify_info and the CORRECTED report.
+FIXTURE = os.path.join(REPO, "fixtures", "arxiv-150k", "report")
+
+#: The same report as it was published BEFORE this task fixed its citations.
+#: One field is sanitised — `price_table.path`, which recorded the absolute
+#: path of the checkout that produced it and would fail the identifier scan.
+DEFECTIVE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "testdata", "041-pre-fix-report.json")
+DEFECTIVE_SHA256 = \
+    "d2a314524089049b55a21693f52af9476f23b59d8a9ab02a7a6bd9fa5d2b8ac0"
 
 
-def _draw(workdir, report_path=None):
+def _draw(workdir, report_path=None, required=False):
+    """`required=True` for anything tracked: it fails rather than skips.
+
+    A local run under `runs/` may legitimately be absent on another machine,
+    and a skip that names it is honest. A tracked fixture may not be, and a
+    skip there would let the check that proves this drawer works go quiet
+    instead of red — which is the whole reason the fixture is tracked.
+    """
     path = report_path or os.path.join(workdir, "report.json")
     if not os.path.isfile(path):
+        if required:
+            raise AssertionError(
+                f"{path} is tracked and is missing. This does not skip: "
+                "without it the defect the drawer was built to catch would "
+                "go unchecked.")
         pytest.skip(f"no local {path}")
     with open(path, encoding="utf-8") as f:
         report = json.load(f)
@@ -121,6 +157,22 @@ def test_a_source_naming_a_container_names_the_member_it_cited():
 
 
 # ---------------------------------------------------------------- the point
+def test_the_regression_fixture_is_present_and_unmodified():
+    """It fails rather than skips. A regression fixture that can vanish is
+    not a regression test, and a silent skip on the check that proves the
+    drawer works is worse than a failure: it goes quiet instead of red."""
+    assert os.path.isfile(DEFECTIVE), (
+        f"{DEFECTIVE} is missing. It is a tracked fixture, not a local "
+        "artifact, and without it the defect this drawer was built to catch "
+        "would go unchecked.")
+    with open(DEFECTIVE, "rb") as f:
+        got = hashlib.sha256(f.read()).hexdigest()
+    assert got == DEFECTIVE_SHA256, (
+        f"the pre-fix report has changed: {got} != {DEFECTIVE_SHA256}. It is "
+        "a frozen record of what was published, and editing it would make "
+        "the regression prove something else.")
+
+
 def test_the_drawer_flags_a_citation_whose_field_holds_another_value():
     """The regression this whole drawer earned its place by finding.
 
@@ -128,10 +180,10 @@ def test_the_drawer_flags_a_citation_whose_field_holds_another_value():
     `verify.json:load.completed` while carrying `load.achieved_qps`'s value.
     The drawer must say so rather than render 119.1 beside a field holding
     35731 without comment.
+
+    Both sides are tracked and this does not skip.
     """
-    if not os.path.isfile(DEFECTIVE):
-        pytest.skip("no copy of the pre-fix report on this machine")
-    d = _draw(TIER1, DEFECTIVE)
+    d = _draw(FIXTURE, DEFECTIVE, required=True)
     assert d.figures["disagreeing"], "the drawer missed the defect it found"
     assert set(d.figures["disagreeing"]) == {"verify.json:load.completed"}
     bad = [e for e in _entries(d) if e["agrees"] is False]
@@ -141,8 +193,10 @@ def test_the_drawer_flags_a_citation_whose_field_holds_another_value():
         assert e["navigable"] is True, "it resolves; it just disagrees"
 
 
-def test_the_fixed_report_has_no_disagreeing_citation():
-    assert _draw(TIER1).figures["disagreeing"] == []
+def test_the_published_fixture_has_no_disagreeing_citation():
+    """The other half of the pair, on the same tracked bundle: the rebuilt
+    report cites fields that hold the values it cites."""
+    assert _draw(FIXTURE, required=True).figures["disagreeing"] == []
 
 
 def test_agrees_is_none_when_there_is_nothing_to_compare_synthetic():
