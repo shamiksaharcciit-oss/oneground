@@ -118,6 +118,7 @@ ENDPOINTS = {
     # cancels: it has no write path and makes no request of its own, so the
     # page is told where the supervisor is and speaks to it directly.
     "/api/jobs": "job_list",
+    "/api/jobs/targets": "job_targets",
     "/api/jobs/log": "job_log",
     "/api/supervisor": "supervisor_address",
 }
@@ -626,6 +627,74 @@ class LabServer:
                 "stages": list(jobsmod.STAGES),
                 "not_a_job": [{"stage": k, "why": v}
                               for k, v in jobsmod.NOT_A_JOB.items()]}
+
+    #: What kind of thing each stage is run against. Read off the CLI's own
+    #: parsers rather than restated: five stages take a requirements file and
+    #: `propose` takes a workdir.
+    STAGE_TARGET = {
+        "characterize": "requirements", "simulate": "requirements",
+        "verify": "requirements", "report": "requirements",
+        "chunk": "requirements", "propose": "workdir",
+    }
+
+    def job_targets(self, params):
+        """What a stage could be run against, in this directory, named.
+
+        **The page asks; it never defaults.** A job's record says exactly
+        what ran, so a target nobody chose would make that record accurate
+        and meaningless -- which is the whole value of the record gone at the
+        first click. The previous version sent `.` and produced a traceback
+        from a directory nobody had named.
+
+        A stage whose target this cannot name is **not offered**, and the
+        reason is returned with it. The pod stages are that case today: their
+        arguments are a session's, not this directory's, and offering a
+        button that cannot be completed is the defect one step later.
+        """
+        del params
+        if self.runs_dir is None:
+            raise ValueError("a lab session over one run has no targets")
+
+        requirements = []
+        for name in sorted(os.listdir(self.runs_dir)):
+            if not name.endswith((".yaml", ".yml")):
+                continue
+            path = os.path.join(self.runs_dir, name)
+            if os.path.isfile(path):
+                requirements.append({"name": name, "arg": name})
+
+        # A workdir is whatever the run index already calls one. Calling the
+        # function the tool uses rather than re-deciding what a workdir is.
+        workdirs = []
+        index = self.index or runsmod.index_runs(self.runs_dir,
+                                                 verify_manifests)
+        for row in index.get("runs", []):
+            workdirs.append({"name": row["name"], "arg": row["name"]})
+
+        offered, withheld = {}, []
+        for stage in jobsmod.STAGES:
+            kind = self.STAGE_TARGET.get(stage)
+            if kind is None:
+                withheld.append({
+                    "stage": stage,
+                    "why": "its target is a pod session's, not this "
+                           "directory's, so this page cannot name one -- and "
+                           "a stage whose target cannot be named is a stage "
+                           "that should not be offered"})
+                continue
+            choices = requirements if kind == "requirements" else workdirs
+            if not choices:
+                withheld.append({
+                    "stage": stage,
+                    "why": "no %s in this directory to run it against"
+                           % ("requirements file" if kind == "requirements"
+                              else "run")})
+                continue
+            offered[stage] = {"kind": kind, "choices": choices}
+        return {"offered": offered, "withheld": withheld,
+                "kinds": {"requirements": "a requirements file in this "
+                                          "directory",
+                          "workdir": "a run in this directory"}}
 
     def job_log(self, params):
         """One job's log: the CLI's own output, unchanged.

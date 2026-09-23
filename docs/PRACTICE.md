@@ -551,6 +551,45 @@ further copies saying the same thing in different words went on being wrong.
 A search that fails through carelessness is advice. A search that fails
 through precision is evidence.
 
+### Three tools, each correct, each answering an adjacent question
+
+It happened three times in one slice, to three different kinds of tool, and
+the repetition is the result rather than the anecdote.
+
+| the tool | what it checked, correctly | what it could not see |
+|---|---|---|
+| a `var()` check over the stylesheet | every `var(--x)` names a declared token | three unreadable controls: two coloured by *another* stylesheet, one matching **no rule at all** — there was no `var()` to look at |
+| a grep for a stale claim | every copy containing that phrase | three further copies saying the same thing in different words |
+| a test searching a module for `atexit` | the string's presence | that the only occurrence was the docstring **saying there is none** |
+
+**Not one of these was a bad check.** Each was right every time it ran, and
+each would pass a review. They failed in the same place: **the question they
+could answer was adjacent to the question being asked.** *Does this rule name
+a real token* is not *is this readable*. *Which files contain this sentence*
+is not *where is this claim made*. *Does this source contain this word* is not
+*does this code do this thing*.
+
+> The repair is the same in all three, and it is the section's own rule
+> pointed at tools instead of at claims: **ask the rendered thing, not the
+> source.** Parse instead of matching text. Read computed styles instead of
+> the stylesheet. Run the product instead of inspecting it.
+>
+> The tell, before you write one: **say out loud what the check answers, then
+> say what you wanted to know, and see whether they are the same sentence.**
+> All three of these come apart at that question in under ten seconds.
+
+**And a check reports what it measured, not whether it passed.** The contrast
+check's first repair fixed five rules and left **32 failures, all of them
+`label`** — because the other stylesheet colours every label and the form is
+made of labels. A pass/fail check would have said *still failing* and left the
+counting to a person. One that prints every element, its ratio and the two
+colours said *thirty-two labels, this colour on that one*, which is the whole
+of the second repair.
+
+> A check that says *no* is a check somebody has to investigate. A check that
+> says *these 32, this colour on that one* has done the investigating, and it
+> is the same code either way.
+
 **The rule.** Before adding a field to a receipt, look at what that name
 already means in every other artifact that carries it — not at whether the
 name is free here.

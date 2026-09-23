@@ -500,3 +500,12 @@ body.mode-runs label { color: var(--ink); }
 /* The one that has to stay a warning colour, and now at a readable one. */
 body.mode-runs .supervisor-note.absent .note,
 body.mode-runs .cannot-run { color: var(--warn); }
+
+/* The chooser: the click asks, so this is what it asks with. */
+.chooser { margin-top: 14px; padding: 12px 14px; border-radius: 6px;
+  border: 1px solid var(--warn); background: var(--field); }
+.chooser h4 { margin: 0 0 4px; font-size: 13px; }
+.chooser-list { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.chooser-preview { margin: 8px 0; padding: 8px 10px; font-size: 12.5px;
+  background: var(--panel); border: 1px solid var(--rule);
+  border-radius: 4px; overflow-x: auto; white-space: pre; }

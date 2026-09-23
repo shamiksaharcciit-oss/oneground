@@ -156,33 +156,77 @@
     await refresh();
   }
 
-  // NOT WIRED, DELIBERATELY, AND THE REASON IS ON THE PAGE.
+  // THE CLICK ASKS. It does not default, and there is no pre-selected
+  // target anywhere on this page.
   //
-  // This sent `[stage, '.']` -- so clicking `characterize` enqueued
-  // `oneground characterize .`, against the runs directory itself, which
-  // nobody had named. Measured: the CLI exits 1 with
-  // `PermissionError: [Errno 13] Permission denied: '.'` and a traceback,
-  // because `intake.load` checks that a path exists and not that it is a
-  // file. The user would have got a stack trace for a job whose target
-  // they were never asked for.
+  // It used to send `[stage, '.']`, so clicking `characterize` enqueued
+  // `oneground characterize .` against the runs directory -- measured: exit
+  // 1, `PermissionError: [Errno 13] Permission denied: '.'`, a traceback,
+  // for a job whose target the user was never asked for.
   //
-  // **A job that runs against something the user did not name is what the
-  // job record exists to prevent.** The record's whole value is that it
-  // says exactly what ran; a default nobody chose makes it say exactly what
-  // ran and nothing about what was meant.
+  // **A job records exactly what ran, so a target nobody chose makes the
+  // record accurate and meaningless** -- the whole value of the record gone
+  // at the first click. A list with a default would have the same defect
+  // wearing a control: the default is the thing that just bit us.
   //
-  // So the buttons are inert until the page can name a target, and the page
-  // says so rather than looking broken. Whether the target is picked from a
-  // list or asked for at the click is a design decision, not a defect, and
-  // it is not being made here by whichever is easier to write.
-  const CANNOT_RUN_YET =
-    'Nothing can be started yet: this page cannot name what a stage would '
-    + 'run against. A job records exactly what ran, so starting one against '
-    + 'a directory nobody chose would produce a record that is accurate and '
-    + 'meaningless.';
+  // So the target is part of the request, which is what the record has to
+  // carry anyway, and **a stage whose target cannot be named is not
+  // offered** -- with the reason, because a missing button is otherwise
+  // indistinguishable from an oversight.
+  let targets = null;
 
-  async function run(stage) {
-    fail(CANNOT_RUN_YET);
+  function chooser(stage, spec_, anchor) {
+    const existing = document.getElementById('chooser');
+    if (existing) existing.remove();
+
+    const box = el('section', 'chooser');
+    box.id = 'chooser';
+    box.appendChild(el('h4', null, 'Run ' + stage + ' against'));
+    box.appendChild(el('p', 'note',
+      (targets.kinds || {})[spec_.kind] || spec_.kind));
+
+    const list = el('div', 'chooser-list');
+    spec_.choices.forEach((choice) => {
+      const b = el('button', 'door', choice.name);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        box.remove();
+        start(stage, choice.arg);
+      });
+      list.appendChild(b);
+    });
+    box.appendChild(list);
+
+    // The command this would run, before it runs. Nothing is enqueued from
+    // this page that the page has not already shown whole.
+    const shown = el('pre', 'chooser-preview',
+      'oneground ' + stage + ' <' + spec_.kind + '>');
+    box.appendChild(shown);
+    Array.prototype.forEach.call(list.querySelectorAll('.door'), (b, i) => {
+      b.addEventListener('mouseenter', () => {
+        shown.textContent = 'oneground ' + stage + ' '
+          + spec_.choices[i].arg;
+      });
+    });
+
+    const cancel_ = el('button', 'linkish', 'not now');
+    cancel_.type = 'button';
+    cancel_.addEventListener('click', () => { box.remove(); });
+    box.appendChild(cancel_);
+
+    anchor.appendChild(box);
+  }
+
+  async function start(stage, arg) {
+    clearFail();
+    try {
+      // The invocation is exactly what a terminal would run, which is what
+      // makes the record replayable.
+      await ask('/enqueue', { stage: stage, invocation: [stage, arg] });
+    } catch (e) {
+      fail(e.refusal || e.error || String(e));
+    }
+    await refresh();
   }
 
   function fail(message) {
@@ -228,35 +272,48 @@
     const box = el('section', 'runner');
     box.appendChild(el('h3', null, 'Start a stage'));
 
+    const offered = (targets && targets.offered) || {};
+    const names = Object.keys(offered);
+    if (!names.length) {
+      box.appendChild(el('p', 'note cannot-run',
+        'No stage can be offered here yet: nothing in this directory can be '
+        + 'named as a target for one.'));
+    }
+
     // Two groups, because `pod plan` and `characterize` are different kinds
-    // of thing and one undifferentiated row of ten invites reading them as
-    // equivalent. The pod group is named, which the sentence beneath about
-    // `pod up` then has something to be beneath.
+    // of thing and one undifferentiated row invites reading them as
+    // equivalent.
     const groups = [
-      ['The pipeline', (spec.stages || []).filter(
-        (s) => s.indexOf('pod ') !== 0)],
-      ['A pod session, prepared here and run at a terminal',
-       (spec.stages || []).filter((s) => s.indexOf('pod ') === 0)],
+      ['The pipeline', names.filter((s) => s.indexOf('pod ') !== 0)],
+      ['A pod session', names.filter((s) => s.indexOf('pod ') === 0)],
     ];
     groups.forEach(([title, stages]) => {
       if (!stages.length) return;
       box.appendChild(el('h4', 'runner-group', title));
       const row = el('div', 'runner-row');
       stages.forEach((stage) => {
-        const b = el('button', 'door', stage);
+        const b = el('button', 'door', stage + '…');
         b.type = 'button';
-        // Inert until the page can name a target -- see CANNOT_RUN_YET.
-        b.disabled = true;
-        b.title = CANNOT_RUN_YET;
-        b.addEventListener('click', () => { run(stage); });
+        b.disabled = !(sup && sup.running);
+        // The ellipsis is the promise: this asks before it does anything.
+        b.addEventListener('click', () => {
+          chooser(stage, offered[stage], box);
+        });
         row.appendChild(b);
       });
       box.appendChild(row);
     });
-    box.appendChild(el('p', 'note cannot-run', CANNOT_RUN_YET));
 
-    // What is never a job, named with the ruling rather than absent from
-    // the row. Someone who finds `pod up` missing assumes an omission.
+    // What is not offered, and why. A missing button is otherwise
+    // indistinguishable from an oversight.
+    ((targets && targets.withheld) || []).forEach((w) => {
+      const p = el('p', 'note');
+      p.appendChild(el('code', null, 'oneground ' + w.stage));
+      p.appendChild(document.createTextNode(' is not offered: ' + w.why));
+      box.appendChild(p);
+    });
+
+    // And what is never a job at all, which is a ruling rather than a gap.
     (spec.not_a_job || []).forEach((n) => {
       const p = el('p', 'note');
       p.appendChild(el('code', null, 'oneground ' + n.stage));
@@ -281,6 +338,13 @@
     }
     if (mine !== seq) return;
     spec = out;
+    try {
+      targets = await get('/api/jobs/targets');
+    } catch (e) {
+      targets = { offered: {}, withheld: [], kinds: {} };
+      fail(e.message);
+    }
+    if (mine !== seq) return;
     const list = document.getElementById('jobs-list');
     if (!list) return;
     list.textContent = '';
