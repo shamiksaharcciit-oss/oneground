@@ -386,16 +386,29 @@ It is the same defect as an alignment rate quoted without its ceiling: the
 number is true, the sentence it licenses is not, and nothing in the artifact
 tells a reader which one they are holding.
 
-**Status: written, not executable.** `claims.check` cannot enforce this today
-and the reason is structural — a gap is a *derived* quantity and a `Cite`
-carries a value with a `source` path into a run's artifacts, which a
-difference does not have. Measured in task 039b: a proposal card's `delta`
-mutated tenfold, sign-reversed, or silently replaced by a ratio passes
-`claims.check` unchanged, because a derived number is not cited and is
-therefore not checked. `oneground/proposals/verdict.py` computes that delta as
-a difference and judges it against a difference threshold, which is this rule's
-one live instance in code. What enforcement would need is in
-[`tasks/039b-both-scales-rule.report.md`](../tasks/039b-both-scales-rule.report.md).
+**Status: executable for claims, written for documents.**
+
+Task 039b measured that `claims.check` could not see a gap at all — a `Cite`
+carries a value with a `source` path into a run's artifacts, and a difference
+has no such path, so a proposal card's `delta` mutated tenfold, sign-reversed
+or silently replaced by a ratio all passed unchanged.
+
+Task 043 built the **derived cite**: a cite carrying an operation and its
+operands, which `check()` re-executes rather than believes. Its operands are
+ordinary cites checked against their sources, so a derived number is now
+checked **down to the artifacts**. The three dishonest mutants fail, each
+naming what was recomputed. And the ratio-for-a-difference mutant fails for
+the right reason — *the operation was wrong, not the number*: the same value
+declared as a ratio is a correct cite, which is exactly the distinction this
+rule exists to make.
+
+`oneground/proposals/verdict.py`'s `delta` — the one live instance in code, a
+difference judged against a difference threshold — is a derived cite as of
+043, so the card's arithmetic is checked.
+
+**Still only written, for hand-authored documents.** Nothing renders this page
+from a `Claim`, so the rule binds a human here and a checker in the report.
+That gap is the one task 039's own violations fell into, and it is not closed.
 
 ---
 

@@ -174,6 +174,116 @@ def environment_id():
     return str(eid) if eid else local_environment_id()
 
 
+# --------------------------------------------------------------------------
+# the installation digest (task 043)
+# --------------------------------------------------------------------------
+# `environment_id` is a CLASS -- `local:windows-amd64` -- so two unrelated
+# laptops share one and it can never be evidence that two runs happened in the
+# same place. Until this existed, the comparability verdict's `machine`
+# ingredient was `unknown` for every pair of local runs, and a verdict with an
+# unknown required ingredient is `couldnt_check`. So the feature answered
+# couldn't-check to every question a user without a pod could ask.
+#
+# Two alternatives were refused:
+#
+#   the platform class   asserts a sameness it cannot see. Two different
+#                        machines share `local:windows-amd64`, so `same` would
+#                        be wrong more often than useful.
+#   pod id only          makes a published feature a demonstration for anyone
+#                        not renting a machine.
+#
+# What is recorded is a **truncated one-way digest of a salt and a machine
+# identifier**. The salt is generated once, stored locally, and never leaves
+# the machine; the identifier is never written anywhere. Two runs from one
+# installation produce the same digest, two installations produce different
+# ones, and the digest says nothing about the machine to anyone who reads it.
+#
+# WHAT IT SUPPORTS, AND WHAT IT DOES NOT. The salt is per installation, so two
+# installations on one machine produce two digests. The field therefore
+# supports **"not the same installation"** and does **not** support "not the
+# same machine". Overstating it would be the platform class's defect one step
+# quieter.
+
+#: Where the salt lives. Home-scoped rather than relative to the working
+#: directory: a salt under `./.oneground` would be a different salt every time
+#: a command ran from a different folder, which would report one installation
+#: as many.
+INSTALLATION_DIR = os.path.join(os.path.expanduser("~"), ".oneground")
+INSTALLATION_FILE = os.path.join(INSTALLATION_DIR, "installation.json")
+
+#: Enough hex to distinguish installations, not enough to be a durable
+#: fingerprint if one ever escaped.
+INSTALLATION_DIGEST_CHARS = 16
+
+
+def _machine_identifier():
+    """What the digest is taken over. Never recorded, never printed.
+
+    The hostname is the point: it is precisely the thing that identifies a
+    machine and precisely the thing an artifact must not carry, which is why
+    it is hashed rather than omitted. Read defensively, for the reason
+    `local_environment_id` reads `platform.system()` defensively.
+    """
+    import platform
+    parts = []
+    for get in (lambda: platform.node(), lambda: platform.system(),
+                lambda: platform.machine()):
+        try:
+            parts.append(str(get() or ""))
+        except Exception:                             # pragma: no cover - env
+            parts.append("")
+    return "\x1f".join(parts)
+
+
+def _read_or_create_salt(path=None):
+    """The installation's salt, generated once and reused after.
+
+    Returns `None` when it cannot be stored -- a read-only home, a sandbox --
+    and the caller reports couldn't-check rather than inventing a salt per
+    run, which would make every run look like a different installation.
+    """
+    import json
+    import secrets
+    path = path or INSTALLATION_FILE
+    try:
+        with open(path, encoding="utf-8") as fh:
+            salt = (json.load(fh) or {}).get("salt")
+        if salt:
+            return str(salt)
+    except (OSError, ValueError):
+        pass
+    salt = secrets.token_hex(32)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({
+                "salt": salt,
+                "note": ("a local secret for oneground's installation digest. "
+                         "It never leaves this machine and is never written "
+                         "into an artifact; what artifacts carry is a "
+                         "truncated hash of it. Deleting this file makes this "
+                         "installation look like a new one."),
+            }, fh, indent=1)
+    except OSError:
+        return None
+    return salt
+
+
+def installation_digest(path=None):
+    """`sha256(salt + machine identifier)`, truncated. `None` if unavailable.
+
+    `None` is couldn't-check and is reported as such: it means the salt could
+    not be stored, so no stable digest exists for this installation.
+    """
+    import hashlib
+    salt = _read_or_create_salt(path)
+    if not salt:
+        return None
+    digest = hashlib.sha256(
+        (salt + "\x1e" + _machine_identifier()).encode("utf-8")).hexdigest()
+    return digest[:INSTALLATION_DIGEST_CHARS]
+
+
 def interpreter():
     """What an artifact records about the interpreter that produced it.
 
@@ -185,6 +295,9 @@ def interpreter():
     """
     return {
         "environment_id": environment_id(),
+        # Task 043. A class, above; an identity, here. Null when the salt
+        # could not be stored, which is couldn't-check and is read as such.
+        "installation": installation_digest(),
         "python_version": ".".join(str(v) for v in sys.version_info[:3]),
         "in_venv": in_venv(),
     }

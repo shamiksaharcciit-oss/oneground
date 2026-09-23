@@ -203,20 +203,26 @@ pattern:
 > all three match. A table that cannot be built cannot be rendered, and no
 > reviewer has to notice.
 
-**And there is nothing to build it on today.** `docs/LIBRARY.md` §2.2
-defines the three-valued comparability verdict — `comparable`,
-`not_comparable`, `couldnt_check` — and **it is written and implemented
-nowhere.** The only `comparable()` in the tree is
-`oneground/calibrate/history.py`, which compares
-`("check", "dataset", "engine", "engine_version", "config")`: engine
-identity, not ground-truth provenance. It is the right shape and the wrong
-subject.
+**The verdict now exists, and the structural refusal is still needed.**
+`docs/LIBRARY.md` §2.2's three-valued verdict is implemented in
+`oneground/comparability.py` — by task 041 at run level, extended by 043 to
+rows via `rows_may_share_a_table`, which carries exactly the two lists this
+section's rule turns on.
 
-Two position papers now rest on that verdict — this one's table rule and
-the interface position's side-by-side gate — so the verdict is a
-dependency of both rather than a principle either can assume. It is named
-here, and in `LIBRARY.md` beside the definition, so that neither paper
-reads as though the machinery exists.
+That does **not** retire the refusal above, and the distinction matters. The
+verdict answers *may these two rows share a table*; it cannot prevent a table
+being built from rows that may not. 019's invariant still cannot enforce it,
+for the reason given: a row's provenance is not one of its inputs. So the rule
+stays structural — **refused at construction, with the verdict as what the
+construction consults** rather than as a substitute for it.
+
+**One ingredient this paper needs is still absent.** `rows_may_share_a_table`
+declares `query_subset` and it is always `None`, because §3.3 above records
+that no receipt expresses it — no seed, no size, no selection. Declared rather
+than omitted, so a comparison over it is `couldnt_check` and visibly so. Until
+that receipt exists, **two rows can never be `comparable` under this rule**,
+only `couldnt_check` — which is the honest state and is worth knowing before
+anyone builds the exporter expecting a green verdict.
 
 ## 5. What this does not become
 
@@ -270,5 +276,19 @@ anything oneself. The first implementation is the **exporter and its
 verification**: write the three files, load them back, and assert the
 round trip preserves the vectors and the ground truth exactly. The
 importer follows.
+
+**Before starting the exporter, know that the table rule cannot pass yet.**
+`comparability.rows_may_share_a_table` is implemented (task 043) and today it
+can return `not_comparable` or `couldnt_check` and **never `comparable`** —
+because `query_subset` is one of the three things a row must agree about, no
+receipt expresses it (§3.3), and an ingredient that is always unknown makes
+the verdict couldn't-check however well everything else matches.
+
+That is not a defect in the rule and it is not a reason to weaken it. It means
+**§3.3's receipt is a prerequisite of the exporter, not a companion to it**:
+build the query-subset seed and selection receipt first, or the exporter will
+produce files whose rows the project's own rule cannot admit to a table. An
+implementer who discovers this from the code rather than from here will have
+written the exporter already.
 
 *The exam, before the code.*

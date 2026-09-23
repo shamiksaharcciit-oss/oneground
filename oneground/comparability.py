@@ -43,8 +43,17 @@ rows.
 
 **The same machine.** `environment_id` is `local:<os>-<arch>` by
 construction: a class, not an identity, so two different laptops share one.
-It is therefore never evidence of the same machine. A recorded pod id is,
-and is used when both runs carry one.
+It is therefore never evidence of the same machine. A recorded pod id is, and
+is used when both runs carry one.
+
+Since task 043 a local run records an **installation digest** as well — a
+truncated one-way hash of a salt held on the machine and never published — so
+two local runs from one installation are evidence of the same place. Before
+043 this ingredient was `unknown` for every pair of local runs, which made the
+whole verdict `couldnt_check` for anyone not renting a machine. The digest
+supports *"the same installation"*; it does not support *"the same machine"*,
+because the salt is per installation and two installations on one machine
+produce two digests.
 
 Nothing here measures anything. It reads receipts and compares recorded
 strings, which is why it can be imported by a lab transport module that is
@@ -53,6 +62,8 @@ forbidden every package that measures.
 
 import json
 import os
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
 
 COMPARABLE = "comparable"
 NOT_COMPARABLE = "not_comparable"
@@ -84,6 +95,116 @@ def _first(infos, key):
     return None, None
 
 
+# --------------------------------------------------------------------------
+# where each fact may be carried (task 043)
+# --------------------------------------------------------------------------
+# This function had failed the same way four times before this declaration
+# existed. Three were ABSENCES -- a fact reachable from several files, read
+# from one, reported as missing:
+#
+#   `oneground`          read from the receipts only; a run whose report
+#                        carried the commit reported `code: unknown` (041,
+#                        published as a finding about the artifacts before
+#                        anyone saw it was the reader)
+#   `library_versions`   read from the receipts only (043, caught by
+#                        `test_comparability_reader` on its first run, on a
+#                        fact nobody was investigating)
+#   `python_version`     the same, latent
+#
+# The fourth was a WRONG VALUE, which no exhaustive absence test can catch,
+# because the field was present:
+#
+#   `report.json` carries TWO environment blocks on purpose. `environment` is
+#   the machine that MEASURED; `run_environment` is the machine that WROTE THE
+#   REPORT. The reader took the second. On the published arXiv fixture that
+#   returned `environment_id: local:windows-amd64` and `pod: None` -- silently
+#   discarding the pod id -- in the same dict as `platform:
+#   Linux-6.8.0-...`. One facts dict describing a Linux pod and a Windows
+#   laptop as one run, landing on the only ingredient that can make `machine`
+#   knowable at all.
+#
+# So the carriers are DATA, and the order is the precedence rule written down
+# rather than implied by the order somebody happened to write `if` statements.
+# `facts_of` iterates this; nothing reads a receipt any other way; and
+# `test_comparability_reader` asserts against this declaration rather than
+# against a restatement of it, which is what makes both absence and
+# wrong-carrier checkable by one test.
+
+#: A carrier is `(file, dotted key path)`. `"*info"` means every file in
+#: `INFO_FILES`, in their declared order. The FIRST carrier that yields a
+#: value wins, so the list is the precedence.
+ANY_INFO = "*info"
+
+FACT_CARRIERS = {
+    "code": (
+        (ANY_INFO, "oneground"),
+        ("report.json", "oneground"),
+    ),
+    "libraries": (
+        (ANY_INFO, "library_versions"),
+        ("report.json", "library_versions"),
+        ("report.json", "environment.library_versions"),
+        ("report.json", "run_environment.library_versions"),
+    ),
+    "platform": (
+        (ANY_INFO, "platform"),
+        ("report.json", "platform"),
+        ("report.json", "environment.platform"),
+    ),
+    "python_version": (
+        (ANY_INFO, "python_version"),
+        ("report.json", "python_version"),
+        ("report.json", "environment.python_version"),
+        ("report.json", "run_environment.python_version"),
+    ),
+    "requirements_file": (
+        (ANY_INFO, "requirements_file"),
+        ("report.json", "requirements_file"),
+    ),
+    # THE MEASURING MACHINE FIRST, ALWAYS. `environment` is where it ran;
+    # `run_environment` is where the report was written, and for a pod run
+    # those are different machines. Reading the second is how a pod id was
+    # discarded and a Linux run reported as a Windows laptop.
+    "environment_id": (
+        ("report.json", "environment.environment_id"),
+        (ANY_INFO, "environment.environment_id"),
+        (ANY_INFO, "environment_id"),
+        ("report.json", "run_environment.environment_id"),
+    ),
+    "installation": (
+        ("report.json", "environment.installation"),
+        (ANY_INFO, "environment.installation"),
+        (ANY_INFO, "installation"),
+        ("report.json", "run_environment.installation"),
+    ),
+}
+
+
+def _dig(doc, path):
+    """A dotted key path into a nested dict, or None."""
+    cur = doc
+    for part in str(path).split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def _carried(infos, report, fact):
+    """`(value, where)` for `fact`, from the first carrier that has it."""
+    for where, path in FACT_CARRIERS[fact]:
+        if where == ANY_INFO:
+            for name in INFO_FILES:
+                got = _dig(infos.get(name) or {}, path)
+                if got:
+                    return got, name
+        else:
+            got = _dig(report if where == "report.json" else {}, path)
+            if got:
+                return got, where
+    return None, None
+
+
 def facts_of(workdir):
     """What one run records about how it was produced.
 
@@ -95,22 +216,17 @@ def facts_of(workdir):
     infos = {n: _read(os.path.join(workdir, n)) for n in INFO_FILES}
     report = _read(os.path.join(workdir, "report.json")) or {}
 
-    # Task 033's block. It is written into `report.json` as well as into the
-    # `_info.json` receipts, and reading only the latter reported `code:
-    # unknown` for runs whose report carries the commit -- a defect in this
-    # reader that task 041 first published as a finding about the artifacts.
-    code, code_from = _first(infos, "oneground")
-    if not code and isinstance(report.get("oneground"), dict):
-        code, code_from = report["oneground"], "report.json"
-    libs, libs_from = _first(infos, "library_versions")
-    plat, plat_from = _first(infos, "platform")
-    py, py_from = _first(infos, "python_version")
-    req, req_from = _first(infos, "requirements_file")
+    code, code_from = _carried(infos, report, "code")
+    libs, libs_from = _carried(infos, report, "libraries")
+    plat, plat_from = _carried(infos, report, "platform")
+    py, py_from = _carried(infos, report, "python_version")
+    req, req_from = _carried(infos, report, "requirements_file")
+    env, env_from = _carried(infos, report, "environment_id")
+    installation, _ = _carried(infos, report, "installation")
 
     inputs = report.get("inputs") or {}
     sample = (inputs.get("characterization.json") or {}).get("sha256")
 
-    env = (report.get("run_environment") or {}).get("environment_id")
     # A pod records an identity; `local:<os>-<arch>` records a class.
     pod = env if (env and not str(env).startswith("local:")) else None
 
@@ -143,6 +259,7 @@ def facts_of(workdir):
         "sample_from": "report.json:inputs" if sample else None,
         "environment_id": env,
         "pod": pod,
+        "installation": installation,
     }
 
 
@@ -175,10 +292,126 @@ INGREDIENTS = (
     ("python_version", False,
      "one of these runs records no python version"),
     ("machine", True,
-     "environment_id is `local:<os>-<arch>`, a class rather than an "
-     "identity, so two different machines share one; only a recorded pod id "
-     "identifies a machine"),
+     "neither run records a pod id or an installation digest, so there is "
+     "nothing that identifies where they ran. `environment_id` is "
+     "`local:<os>-<arch>`, a class rather than an identity, and two different "
+     "machines share one. An artifact produced before task 043 carries no "
+     "installation digest and nothing can add one to it honestly"),
 )
+
+
+# --------------------------------------------------------------------------
+# row-level provenance: two lists, and neither subsumes the other (task 043)
+# --------------------------------------------------------------------------
+# `facts_of` answers *may these two RUNS sit side by side*. A table places
+# ROWS beside each other, and the rows in one report may come from different
+# runs -- which is the whole of `docs/BRIDGE.md` section 4's table rule.
+#
+# A row carries TWO provenance lists because they answer different questions
+# and neither implies the other:
+#
+#   WHAT WAS MEASURED     the corpus digest, the ground truth, the query subset
+#   WHAT DID THE MEASURING  the code, the libraries, the settings, the machine
+#
+# Two rows can agree completely on one and differ on the other, in both
+# directions: the same corpus measured by two different builds, or two
+# different corpora measured by one build. Collapsing them into a single
+# "provenance" field makes those two cases indistinguishable, and they license
+# entirely different sentences -- the first is a question about the code, the
+# second is not a comparison at all.
+
+MEASURED_KEYS = ("sample", "ground_truth", "query_subset")
+MEASURING_KEYS = ("code", "libraries", "settings", "platform",
+                  "python_version", "machine")
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """A row's two provenance lists, and where each value was read."""
+
+    measured: Dict[str, Any] = field(default_factory=dict)
+    measuring: Dict[str, Any] = field(default_factory=dict)
+    run: Optional[str] = None
+    workdir: Optional[str] = None
+
+    def as_dict(self):
+        return {"run": self.run, "workdir": self.workdir,
+                "measured": dict(self.measured),
+                "measuring": dict(self.measuring)}
+
+
+def provenance_of(facts):
+    """Split one run's facts into the two lists a row carries.
+
+    `query_subset` is **absent by construction**: `docs/BRIDGE.md` section 3.3
+    records that no receipt expresses it -- no seed, no size, no selection,
+    because no command has ever taken one. It is declared here as a key that
+    is always `None` rather than omitted, so a comparison over it is
+    `couldnt_check` and visibly so, instead of the list quietly having two
+    members where the design says three.
+    """
+    measured = {
+        "sample": facts.get("sample"),
+        # The exact k-NN a row was scored against. Recorded per run today; a
+        # row-level ground truth is what BRIDGE section 4 will need.
+        "ground_truth": facts.get("sample"),
+        "query_subset": None,
+    }
+    measuring = {
+        "code": facts.get("code"),
+        "libraries": facts.get("libraries"),
+        "settings": facts.get("settings"),
+        "platform": facts.get("platform"),
+        "python_version": facts.get("python_version"),
+        # A pod id, else the installation digest, else nothing. The same
+        # precedence `verdict` uses, so run-level and row-level agree.
+        "machine": facts.get("pod") or facts.get("installation"),
+    }
+    return Provenance(measured=measured, measuring=measuring,
+                      run=facts.get("run"), workdir=facts.get("workdir"))
+
+
+def rows_may_share_a_table(left, right):
+    """May two ROWS sit in one table? `BRIDGE.md` section 4's rule, executable.
+
+    Returns the three-valued verdict with a finding per key, and reports the
+    two lists separately, because *the same corpus measured by two builds* and
+    *two corpora measured by one build* are different answers and a caller
+    needs to know which it has.
+    """
+    findings, states = [], []
+    for group, keys in (("measured", MEASURED_KEYS),
+                        ("measuring", MEASURING_KEYS)):
+        for key in keys:
+            a = getattr(left, group).get(key)
+            b = getattr(right, group).get(key)
+            state = _compare(a, b)
+            states.append((group, key, state))
+            findings.append({"list": group, "ingredient": key,
+                             "state": state, "left": a, "right": b})
+
+    measured_states = [s for g, _, s in states if g == "measured"]
+    if DIFFERS in measured_states:
+        # Different ground truth or different corpus: not a comparison at all,
+        # whatever the code did.
+        return {"verdict": NOT_COMPARABLE, "findings": findings,
+                "why": ("these rows were measured against different data, so "
+                        "they answer different questions and may not share a "
+                        "table however they were produced")}
+    if DIFFERS in [s for g, _, s in states if g == "measuring"]:
+        return {"verdict": NOT_COMPARABLE, "findings": findings,
+                "why": ("these rows were measured on the same data by "
+                        "different means, which is a question about the "
+                        "difference rather than a row to place beside "
+                        "another")}
+    if UNKNOWN in [s for _, _, s in states]:
+        return {"verdict": COULDNT_CHECK, "findings": findings,
+                "why": ("something these rows would have to agree about is "
+                        "not recorded by one of them, so whether they may "
+                        "share a table is not known -- which is not the same "
+                        "as their being comparable")}
+    return {"verdict": COMPARABLE, "findings": findings,
+            "why": "same data, same means"}
 
 
 def verdict(a, b):
@@ -190,7 +423,14 @@ def verdict(a, b):
     findings = []
     for key, required, unknown_note in INGREDIENTS:
         if key == "machine":
+            # A pod id first, because it names a rented machine outright.
+            # Failing that, the installation digest (task 043), which is an
+            # identity where `environment_id` is only a class. `environment_id`
+            # is still what is SHOWN, because the digest says nothing to a
+            # reader and the class says where the run happened.
             state = _compare(a.get("pod"), b.get("pod"))
+            if state == UNKNOWN:
+                state = _compare(a.get("installation"), b.get("installation"))
             left, right = a.get("environment_id"), b.get("environment_id")
         else:
             left, right = a.get(key), b.get(key)

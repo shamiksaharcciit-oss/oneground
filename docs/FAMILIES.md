@@ -393,6 +393,43 @@ should be refused, so every refusal it produces is a new boundary, and any
 test standing on one breaks when it lands. That is the suite working, and the
 repair is the input.
 
+**8. A reader with a special case is a defect that hides as an absence in the
+data.** This one is not about the suite, and it is here because this section
+is where the project keeps its taxonomy of checks that do not check.
+
+`comparability.facts_of` reads each provenance fact from whichever of several
+receipt files carries it. Three facts were special-cased to a single file, and
+each reported `None` for runs whose fact sat in one of the others:
+
+| fact | symptom | found by |
+|---|---|---|
+| `oneground` | `code: unknown` for runs whose report carried the commit | task 041, **published as a finding about the artifacts** before anyone saw it was the reader |
+| `run_environment` | every provenance field `None` for a characterize-only run | task 043's stop-and-show, after a writer fix changed nothing |
+| `library_versions` | `libraries: unknown` for report-only runs | the test below, **on its first run, on a fact nobody was investigating** |
+
+The first two were found by people noticing something. Only the third could
+have been found any other way, and it was found by asking the question
+exhaustively rather than by suspicion.
+
+> The rule: **a reader that consults one source reports an absence that is its
+> own, and it is indistinguishable from the data being absent.** That is why
+> the first two were each written up as findings about the artifacts: the
+> artifacts looked wrong and were fine.
+>
+> **The tell is that a fix to the writer changes nothing.** If you have just
+> made a producer record something and the consumer still reports it missing,
+> stop looking at the producer.
+>
+> The check is a property of the reader, not of any artifact: for each fact,
+> for each source that may carry it, write it in **only** that source and
+> assert the reader finds it. Parametrised over fact × source, so the fourth
+> instance names itself in the failure. And pair it with a mirror asserting a
+> genuinely empty input reports genuine absence, or the whole thing passes
+> against a reader that returns constants.
+
+`oneground/test_comparability_reader.py` is that test. It exists because three
+instances accumulated in one function, three lines apart, over three tasks.
+
 ---
 
 ## 5. The worked example

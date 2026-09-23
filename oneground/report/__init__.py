@@ -48,7 +48,7 @@ from .. import cost as costmod
 from .. import environment
 from .. import intake
 from ..receipts import (MANIFEST_NAME, library_versions,
-                        producing_version, round_floats,
+                        producing_version, public_paths_in, round_floats,
                         sha256_file, write_json_stable, write_manifest)
 from . import claims as cl
 from . import verdict as vd
@@ -1254,7 +1254,11 @@ def run(requirements_path, log_fn=log, env_stamp=None):
                                  "rows from different environments are never "
                                  "compared.")},
         "costs": costs,
-        "price_table": (prices.as_dict() if prices is not None
+        # Task 043 step 5. Sanitised HERE, where the field is written, rather
+        # than at each of the three boundaries that had to sanitise it on the
+        # way out. A receipt that never contains the absolute path has nothing
+        # to sanitise anywhere.
+        "price_table": (public_paths_in(prices.as_dict()) if prices is not None
                         and not isinstance(prices, str) else None),
         # Present only when a table was rejected. A reader who finds no costs
         # and no price_table would otherwise have to guess whether none were
