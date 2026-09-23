@@ -323,6 +323,43 @@ they are the argument for the one chosen:
 The salt is a receipt-writing change, so it belongs with 043's other
 provenance work and not in the interface.
 
+## Finding 6b — a check for a missing thing is tested by removing the thing
+
+The regression fixture that proves the evidence drawer catches the published
+citation defect first lived at `runs/041-pre-fix-report.json`: gitignored,
+inside a worktree, and the test *skipped* without it. Evidence in a directory
+whose lifetime is shorter than the claim it supports — and worse than usual
+here, because the check would have gone **quiet rather than red**. A
+regression fixture that can vanish is not a regression test.
+
+The repair was to track it. **The first repair was not enough, and the way
+that was found is the finding.**
+
+Tracking the fixture and adding a presence check made *that* test fail when
+the file was absent — and the regression test itself still skipped, because
+the helper every test in the module shares skipped on any missing path. So
+the check that proves the drawer works would still have gone silent, now with
+a second test failing beside it saying something else. Reading the code did
+not show this. Moving the file aside and running the suite did:
+
+    without the fixture:  2 failed, 15 passed
+    with it restored:    17 passed
+
+The helper now takes `required=True` for anything tracked and keeps skipping
+only for local runs under `runs/`, which may honestly be absent on another
+machine.
+
+**The general form:** a check that fires when something is missing is only
+tested by making it missing. Asserting that the check exists, or reading it
+and agreeing with it, tests the author's belief about the code. This is the
+same shape as task 042's finding that a check which passed for the wrong
+reason is worse than one that fails, and the same shape as the identifier
+scan's own `test_the_scan_actually_reads_the_tree`, which pins a floor
+because an empty finding list is only meaningful if the scan looked at
+something.
+
+---
+
 ## Finding 6 — a gated commit is run in the foreground
 
 Not a defect in the product, and recorded because the next person will be
