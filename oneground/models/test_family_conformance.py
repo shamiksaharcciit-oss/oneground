@@ -242,13 +242,21 @@ def test_a_knob_that_does_nothing_is_caught_synthetic(small):
 
 
 # ------------------------------------------------------ the shipped findings
-def test_hash_sharded_accepts_more_shards_than_vectors_task_042():
-    """A FINDING, not an accepted baseline (task 042).
+def test_hash_sharded_still_accepts_more_shards_than_vectors_task_042():
+    """A FINDING, still open — and now only half of the one 042 recorded.
 
-    `hash_sharded` builds a configuration asking for more shards than there
-    are vectors. Empty shards are skipped, so the label says one number and
-    the artifact holds another, while `fanout` reports the number that was
-    asked for. When this is fixed, this test fails and is deleted.
+    042 found two things in one build: the configuration was accepted at all,
+    and `fanout` then reported the shards that were *asked for* while
+    `shards` reported the ones that were *built*, so one footprint carried
+    two mutually inconsistent numbers.
+
+    **The fan-out half closed in 042c** and is asserted below as fixed. The
+    refusal half is open: `hash_sharded` still accepts a configuration asking
+    for more shards than there are vectors, so its label still names a
+    partition larger than the artifact. That is one `ParameterError` in
+    `build`, and it was not authorised by 042c's brief.
+
+    When the refusal lands, this test fails and is deleted.
     """
     x = np.ascontiguousarray(
         C.synthetic_corpus(n=200, dim=16, n_q=5)[0])
@@ -256,11 +264,16 @@ def test_hash_sharded_accepts_more_shards_than_vectors_task_042():
                       {"shards": 201, "M": 16, "efSearch": 64})
     built = models.get("hash_sharded").build(x, cfg, seed=1)
     fp = models.get("hash_sharded").footprint(built)
+
+    # the half still open: accepted, and the label names 201
     assert fp.shards < 201, "the artifact holds fewer shards than requested"
-    assert fp.fanout == 201.0, "fanout reports the requested count"
-    assert fp.shards != fp.fanout, (
-        "the finding: footprint reports %d shards and a fan-out of %.0f for "
-        "one build" % (fp.shards, fp.fanout))
+    assert "201" in cfg.label, cfg.label
+
+    # the half 042c closed: the fan-out follows the artifact
+    assert fp.fanout == float(fp.shards), (
+        "042c: fan-out must report the shards that were built, not the ones "
+        "requested (fan-out %.0f, shards %d)" % (fp.fanout, fp.shards))
+    assert fp.fanout < 201.0, "fanout still reports the requested count"
 
 
 def test_semantic_sharded_refuses_too_many_centroids_task_042b():
@@ -314,3 +327,50 @@ def test_single_node_hnsw_passes_every_check_synthetic():
     failed = [r.check for r in results if r.outcome == C.FAILS]
     assert not failed, failed
 
+
+
+def test_a_fanout_that_reports_the_request_is_caught_synthetic(small):
+    """The mutant for 042c's check, against the check's own code.
+
+    A family that reports its requested shard count -- exactly what
+    `hash_sharded` did before 042c -- must make `fanout matches the build`
+    fail. Without this the check would still report `passes` on a tree where
+    the defect had been reintroduced, which is task 042's own finding one
+    level up: a check that passes for the wrong reason is worse than one that
+    fails.
+    """
+    from oneground.models.base import Footprint
+    name, mutant, real = _mutant()
+
+    def inflated_footprint(built):
+        f = real.footprint(built)
+        return Footprint(**{**f.__dict__, "fanout": float(f.shards) + 1.0})
+
+    mutant.footprint = inflated_footprint
+    results = C.run_conformance(name, model=mutant, corpus=small,
+                                verbose=False)
+    result = _by_check(results)["fanout matches the build"]
+    assert result.outcome == C.FAILS, result
+    assert "shard" in result.measured, result.measured
+
+    # and the real family passes the same check on the same corpus, so the
+    # failure above is the mutation and not the corpus
+    clean = _by_check(C.run_conformance(name, model=real, corpus=small,
+                                        verbose=False))
+    assert clean["fanout matches the build"].outcome == C.PASSES, \
+        clean["fanout matches the build"]
+
+
+def test_a_fanout_below_one_is_caught_synthetic(small):
+    """The other end: a query touches at least one shard."""
+    from oneground.models.base import Footprint
+    name, mutant, real = _mutant()
+
+    def zero_footprint(built):
+        f = real.footprint(built)
+        return Footprint(**{**f.__dict__, "fanout": 0.0})
+
+    mutant.footprint = zero_footprint
+    results = C.run_conformance(name, model=mutant, corpus=small,
+                                verbose=False)
+    assert _outcome(results, "fanout matches the build") == C.FAILS
