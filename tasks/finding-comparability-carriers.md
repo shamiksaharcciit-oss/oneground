@@ -155,7 +155,12 @@ been used forward rather than as a post-mortem.
 
 ---
 
-## Status
+## Status when this was written
+
+*A section stating a current state, left as it stood —
+[`docs/PRACTICE.md`](../docs/PRACTICE.md) §1. What it describes has since
+happened; see "Closed by task 043" below. Everything above this line is the
+record of what was true when the audit was made, and is not updated.*
 
 - The two-blocks finding is **ruled into task 043's scope**: carriers declared
   as data, ordered, the order being the precedence rule. Folded there rather
@@ -164,3 +169,47 @@ been used forward rather than as a post-mortem.
   are the same repair.
 - Nothing in this audit was changed. The measurements are reproducible from
   the receipts in `runs/` and `fixtures/arxiv-150k/report/`.
+
+---
+
+## Closed by task 043
+
+**All four items fixed.** `oneground/comparability.py` declares
+`FACT_CARRIERS`: fact name to an ordered list of `(file, dotted key path)`,
+with `*info` expanding to every receipt in order. `facts_of` iterates it, and
+nothing reads a receipt any other way. The measuring machine precedes the
+reporting one for both `environment_id` and `installation`, so the precedence
+argued for above is now the order of a list rather than the order of an `if`.
+
+The published arXiv fixture now reads `pod: 1ombs4scr257a5` beside
+`platform: Linux-6.8.0…` — one machine, where the table above records two.
+
+**What the declaration made checkable.** `oneground/test_comparability_reader.py`
+is parametrised **from `FACT_CARRIERS`**, which is the design consequence this
+audit asked for: a carrier added is tested without anyone remembering to, and
+a carrier the reader claims but does not honour names itself. It carries a
+mirror test so it cannot pass against a reader returning constants, and it
+asserts the measuring-machine precedence **as an ordering in the declaration**
+rather than as a behaviour — a behaviour test passes when the order changes
+for the wrong reason.
+
+**Two things this write-up could not have known.**
+
+1. **The count of four is five.** A fifth instance was introduced while the
+   fourth was being fixed: `run_environment` added to `characterize`'s
+   `build_info.json`, where `environment` already sat three lines below and
+   where `run_environment` means the opposite of what it means in
+   `report.json`. Reverted. It is the strongest evidence for the ruling this
+   audit argued for — a declaration is what would have made the collision
+   visible at the point of choosing the name — and it is the instance behind
+   [`docs/PRACTICE.md`](../docs/PRACTICE.md) §4.
+2. **"Why an exhaustive presence test cannot reach the live one" is now
+   evidenced rather than argued.** That section above reasoned that a test for
+   absences is structurally unable to find a wrong value. The reader test's
+   first run found a *third* absence — `library_versions`, on a fact nobody
+   was investigating — while being unable to find the defect this audit was
+   about. Both halves of the claim, on one run.
+
+*The warnings this finding cites as `docs/FAMILIES.md` §4.1 now live in
+`docs/PRACTICE.md` §2 with their numbers unchanged; §4.1 keeps a pointer. The
+citations above are left as they were written.*

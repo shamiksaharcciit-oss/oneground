@@ -272,3 +272,80 @@ of defect as a citation naming the wrong field — which is the thing task 041
 existed to have found — and it is worse in one respect, because a citation can
 be re-derived from the artifact and a commit message cannot be re-derived from
 anything.
+
+---
+
+## 4. A key whose meaning differs by file
+
+**The rule.** Before adding a field to a receipt, look at what that name
+already means in every other artifact that carries it — not at whether the
+name is free here.
+
+The check people actually perform is *does this key already exist in this
+file?*, and it is the wrong question. It passes **exactly when the defect is
+about to be written**: the name being free here is what makes it available,
+and the name being taken elsewhere is what makes it wrong.
+
+The failure is invisible at the point of writing and invisible afterwards. The
+field is present, well-formed and plausible. Nothing is missing, so no absence
+check fires; the value has the right type and shape, so no schema check fires.
+It surfaces only when a reader that knows the *other* meaning reaches the new
+block, and then it surfaces as **a wrong value rather than as an error** —
+which is the worst way for anything here to surface, because a wrong value is
+evidence.
+
+**The instance.** `report.json` carries two environment blocks, deliberately:
+
+```
+environment       the machine that MEASURED
+run_environment   the machine that WROTE THE REPORT
+```
+
+For a pod run those are different machines, and telling them apart is the
+whole point of having both.
+
+Task 043 needed `characterize` to record where a run happened, believed the
+block was missing from `build_info.json`, and added `run_environment` to it.
+Two things were true and neither was visible from the edit:
+
+- `build_info.json` **already carried `environment`**, holding the same stamp,
+  **three lines below** where the new key went.
+- `build_info.json` has no separate reporting machine, so `run_environment`
+  there would mean *the measuring machine* — the opposite of what the same key
+  means in `report.json`.
+
+A second block reading as a different fact, in the function whose defect is
+that names mean different things in different files, in the task that existed
+to eliminate that defect.
+
+**What caught it, and what did not.** Not review. Not the suite — the writer
+change was correct in isolation and every test passed. Not the exhaustive
+reader test written in the same task, because that test finds **absences** and
+this was a **wrong value**: on its first run it found a third absence nobody
+was investigating, and it was structurally unable to find this one. What caught
+it was an instruction to look at the *blocks* rather than the fields, which
+meant reading `report.json`'s two environment blocks side by side — which is
+when a duplicate three lines away became visible.
+
+> **The tell: a fix to the writer changes nothing.** If you have just made a
+> producer record something and the consumer still reports it missing or
+> wrong, the problem is not in the producer. Either the reader consults the
+> wrong source, or you have written the right value under a name that means
+> something else.
+
+**The remedy is the one §2 warning 2 reaches for, one level down.** Warning 2
+says a second implementation of a rule is a second place for it to be wrong.
+This is a second *name* for a fact, which is worse, because an implementation
+can be diffed and a meaning cannot. `oneground/comparability.py` now declares
+`FACT_CARRIERS` — fact name to an ordered list of (file, key path), the order
+being the precedence rule — and the reader iterates the declaration rather
+than naming files itself. **A declaration is where a collision becomes visible
+at the moment the name is chosen**, which is the only moment it is cheap.
+
+**What it cost.** The fifth instance of this defect, written by the person
+eliminating the first four, in the task doing the eliminating, after three had
+already been diagnosed. One reverted commit, and it would have shipped had the
+ruling arrived an hour later. Full account:
+`tasks/043-provenance-foundation.report.md`, leading section. The audit that
+found the first four, and argued for the declaration before it existed, is
+`tasks/finding-comparability-carriers.md`.
