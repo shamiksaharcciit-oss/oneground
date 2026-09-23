@@ -351,13 +351,23 @@ def write(doc, path):
             raise WriteRefused(
                 "the file did not read back as the document that was built",
                 lost=_difference(doc, loaded.data))
+        # INSIDE the guard, not after it. This was the one step the cleanup
+        # did not cover: `os.replace` can fail -- a sharing violation on
+        # Windows is the ordinary way -- and when it did, the exception
+        # propagated and the temp file stayed in the runs directory.
+        #
+        # A guard that cleans up after every failure except its last step
+        # leaves its debris in exactly the case it was written for, and the
+        # case is rare enough to go unnoticed: it showed up as a stray
+        # `.oneground-write` beside a refused write, which is the one place
+        # nobody looks for a leftover.
+        os.replace(tmp, path)
     except BaseException:
         try:
             os.remove(tmp)
-        except OSError:                            # pragma: no cover
+        except OSError:
             pass
         raise
-    os.replace(tmp, path)
     return path
 
 

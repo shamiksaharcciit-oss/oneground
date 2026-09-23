@@ -591,3 +591,76 @@ def test_the_server_makes_no_request_of_its_own():
                                  f"{fn.value.id}.{fn.attr}()"))
     assert problems == [], (
         "a served module makes a request of its own: " + repr(problems))
+
+def test_a_failing_replace_leaves_no_temp_behind(tmp_path, monkeypatch):
+    """The last step was outside the cleanup.
+
+    Every failure in `write` removed the temp file except the one in
+    `os.replace` itself, which sat after the handler -- so a sharing
+    violation, the ordinary Windows failure there, left a stray
+    `.oneground-write` in the runs directory. Watched failing: the mutant
+    makes the replace raise and asserts the directory comes back empty.
+    """
+    target = str(tmp_path / "r.yaml")
+    real = os.replace
+
+    def refuses(a, b):
+        if str(a).endswith(compose.TEMP_SUFFIX):
+            raise OSError(32, "used by another process")
+        return real(a, b)
+
+    monkeypatch.setattr(os, "replace", refuses)
+    with pytest.raises(OSError):
+        compose.write(compose.document(TIER1), target)
+    assert os.listdir(tmp_path) == [], "the guard left its own temp behind"
+
+def test_a_refused_request_does_not_also_perform_the_action():
+    """The token check must STOP the request, not merely answer it.
+
+    `_refuse_unless_addressed` returned `self.send(...)`, `send` has no
+    return statement, so callers testing `if refusal is not None` never
+    stopped: **the 403 went out and the handler carried on and did the
+    work.** An unauthenticated caller got a refusal and the action.
+
+    It showed up only as an intermittent `os.listdir(tmp) == []` failure,
+    because the write raced the session teardown and lost most of the time.
+    That assertion was the single piece of evidence, and it was twice
+    explained away as a connection-reset flake before it was chased.
+
+    So this asserts the consequence rather than the status: refused and
+    nothing happened, over enough attempts that the race cannot hide it.
+    """
+    for _ in range(12):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = _ui(tmp)
+            try:
+                status, out = _post(lab, "/api/compose/write",
+                                    {"state": TIER1, "path": "r.yaml"},
+                                    token=None)
+                assert status == 403, out
+            finally:
+                lab.stop()
+            assert os.listdir(tmp) == [], (
+                "a refused request performed the action anyway")
+
+
+def test_a_wrong_host_also_stops_the_request():
+    """The other half of the same guard, which had the same defect."""
+    with tempfile.TemporaryDirectory() as tmp:
+        lab = _ui(tmp)
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", lab.port,
+                                              timeout=30)
+            conn.request("POST", "/api/compose/write",
+                         body=_json.dumps({"state": TIER1,
+                                           "path": "r.yaml"}).encode(),
+                         headers={"Host": "not-this-one.test",
+                                  "Content-Type": "application/json",
+                                  server.TOKEN_HEADER: TOKEN})
+            r = conn.getresponse()
+            assert r.status == 403, r.status
+            r.read()
+            conn.close()
+        finally:
+            lab.stop()
+        assert os.listdir(tmp) == []

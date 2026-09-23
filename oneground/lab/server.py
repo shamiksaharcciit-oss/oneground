@@ -449,9 +449,8 @@ class LabServer:
 
     # ------------------------------------------------------------ requests
     def answer(self, req):
-        refusal = self._refuse_unless_addressed(req)
-        if refusal is not None:
-            return refusal
+        if not self._addressed(req):
+            return
         split = urllib.parse.urlsplit(req.path)
         params = urllib.parse.parse_qs(split.query, keep_blank_values=True)
         if split.path in WRITE_ENDPOINTS:
@@ -525,9 +524,8 @@ class LabServer:
 
         # Only now. The body is bounded above, so draining it costs a known
         # amount and buys a refusal the client can actually read.
-        refusal = self._refuse_unless_addressed(req)
-        if refusal is not None:
-            return refusal
+        if not self._addressed(req):
+            return
 
         split = urllib.parse.urlsplit(req.path)
         endpoint = WRITE_ENDPOINTS.get(split.path)
@@ -575,19 +573,38 @@ class LabServer:
                 "raised": f"{type(e).__name__}: {e}"})
         return self.send(req, 200, out)
 
-    def _refuse_unless_addressed(self, req):
-        """The Host and token checks, in one place for both verbs."""
+    def _addressed(self, req):
+        """Whether this request is for this session. **Answers a bool.**
+
+        It used to be `_refuse_unless_addressed`, returning `self.send(...)`,
+        and callers wrote `if refusal is not None: return refusal`. `send`
+        has no return statement, so it returns `None`, so that condition was
+        never true -- **the 403 went out and the handler carried straight on
+        and did the work.** An unauthenticated caller got a refusal and the
+        action.
+
+        It was introduced here in task 046 by extracting this helper out of
+        `answer`, where the same line had been `return self.send(...)` and
+        returned from the function that mattered. A refactor that removed a
+        second implementation added a token bypass.
+
+        A bool, and the callers say `if not self._addressed(req): return`,
+        because the previous shape was only wrong in a way no type and no
+        reviewer catches: `None is not None` reads exactly like a guard.
+        """
         if (req.headers.get("Host") or "").lower() not in self._hosts:
-            return self.send(req, 403, {"error": "refused: unexpected Host"})
+            self.send(req, 403, {"error": "refused: unexpected Host"})
+            return False
         params = urllib.parse.parse_qs(
             urllib.parse.urlsplit(req.path).query, keep_blank_values=True)
         offered = req.headers.get(TOKEN_HEADER) or \
             (params.get(TOKEN_PARAM) or [""])[0]
         if not hmac.compare_digest(offered.encode("utf-8"),
                                    self.token.encode("utf-8")):
-            return self.send(req, 403, {
+            self.send(req, 403, {
                 "error": "refused: this lab session's token is required"})
-        return None
+            return False
+        return True
 
     @staticmethod
     def _refused(e):
@@ -677,10 +694,12 @@ class LabServer:
             if kind is None:
                 withheld.append({
                     "stage": stage,
-                    "why": "its target is a pod session's, not this "
-                           "directory's, so this page cannot name one -- and "
-                           "a stage whose target cannot be named is a stage "
-                           "that should not be offered"})
+                    # The reason, once. The clause about what this page
+                    # does with an unnameable target is a rule about the
+                    # page, not a fact about `pod watch`, and repeating it
+                    # per stage is one fact stated four times (task 045).
+                    "why": "their target is a pod session's rather than "
+                           "this directory's, so this page cannot name one"})
                 continue
             choices = requirements if kind == "requirements" else workdirs
             if not choices:

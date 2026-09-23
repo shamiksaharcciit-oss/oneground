@@ -271,6 +271,11 @@
   function runner() {
     const box = el('section', 'runner');
     box.appendChild(el('h3', null, 'Start a stage'));
+    // The rule, once, where it explains every withholding below rather than
+    // being repeated inside each of them.
+    box.appendChild(el('p', 'note',
+      'A stage is offered only when this page can name what it would run '
+      + 'against. One that cannot is not offered, and says why.'));
 
     const offered = (targets && targets.offered) || {};
     const names = Object.keys(offered);
@@ -304,14 +309,53 @@
       box.appendChild(row);
     });
 
-    // What is not offered, and why. A missing button is otherwise
-    // indistinguishable from an oversight.
-    ((targets && targets.withheld) || []).forEach((w) => {
+    // What is not offered, and why -- GROUPED BY THE REASON, because nine
+    // stages had five reasons between them and the page printed nine
+    // paragraphs. Five repeated one sentence verbatim, four repeated
+    // another, and the four carried a rule about this page ("a stage whose
+    // target cannot be named is a stage that should not be offered") once
+    // each, which is a fact about the page and not about `pod watch`.
+    //
+    // That is task 045's one fact stated fifteen times, arriving in a
+    // surface instead of a report, and the repair is the same: state the
+    // shared thing once and list what it applies to. A reader should meet
+    // one sentence about five stages and one about four, not nine
+    // paragraphs to find the single thing they can act on.
+    const withheld = (targets && targets.withheld) || [];
+    const byReason = [];
+    withheld.forEach((w) => {
+      const found = byReason.filter((g) => g.why === w.why)[0];
+      if (found) found.stages.push(w.stage);
+      else byReason.push({ why: w.why, stages: [w.stage] });
+    });
+    byReason.forEach((group) => {
       const p = el('p', 'note');
-      p.appendChild(el('code', null, 'oneground ' + w.stage));
-      p.appendChild(document.createTextNode(' is not offered: ' + w.why));
+      group.stages.forEach((stage, i) => {
+        if (i) p.appendChild(document.createTextNode(
+          i === group.stages.length - 1 ? ' and ' : ', '));
+        p.appendChild(el('code', null, stage));
+      });
+      p.appendChild(document.createTextNode(
+        (group.stages.length > 1 ? ' are not offered: '
+                                 : ' is not offered: ') + group.why));
       box.appendChild(p);
     });
+
+    // And the action, which was the thing a reader had to infer from nine
+    // paragraphs: if the pipeline is withheld for want of a requirements
+    // file, the way out is to write one, and the page that writes one is a
+    // click away.
+    if (withheld.some((w) => w.why.indexOf('requirements file') !== -1)) {
+      const act = el('p', 'note act');
+      act.appendChild(document.createTextNode('To run the pipeline here, '));
+      const link = el('a', null, 'write a requirements file');
+      link.href = '#/new';
+      act.appendChild(link);
+      act.appendChild(document.createTextNode(
+        ' — saving one into this directory is what makes these stages '
+        + 'offerable.'));
+      box.appendChild(act);
+    }
 
     // And what is never a job at all, which is a ruling rather than a gap.
     (spec.not_a_job || []).forEach((n) => {
@@ -355,8 +399,21 @@
     out.jobs.slice().reverse().forEach((job) => {
       list.appendChild(jobRow(job));
     });
+    // NOT WHILE SOMEONE IS USING IT. The runner is rebuilt on every
+    // refresh, and the chooser lives inside it -- so the four-second timer
+    // was deleting the chooser four seconds after it opened. Clicking a
+    // stage appeared to do nothing, because by the time a person had read
+    // the choices they were gone.
+    //
+    // It survived my own browser pass because that pass clicked the button
+    // and read the DOM 200ms later, and at 200ms the defect does not exist
+    // yet. A probe faster than a person cannot see a defect that needs a
+    // person's amount of time to happen.
     const host = document.getElementById('jobs-runner');
-    if (host) { host.textContent = ''; host.appendChild(runner()); }
+    if (host && !document.getElementById('chooser')) {
+      host.textContent = '';
+      host.appendChild(runner());
+    }
   }
 
   async function showJobs() {
