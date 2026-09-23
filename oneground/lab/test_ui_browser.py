@@ -106,16 +106,28 @@ def test_every_manifest_still_verifies_after_a_session():
 
 def test_the_server_has_no_write_path():
     """Asserted on the source, not only on behaviour: nothing in the modules
-    the UI serves from opens a file for writing."""
+    the UI serves from opens a file for writing.
+
+    Task 046 replaced this test's own string scan with `guard.check_write_path()`.
+    The rule has not moved -- the served modules still write nothing -- but
+    the tree now holds one module that *may* write, so the scan that decides
+    has to see a write however it is spelled.
+
+    Keeping the string scan beside the parsed one would have been a second
+    implementation of one rule (`docs/PRACTICE.md` section 2, warning 2), and
+    it did not survive the day it acquired a rival: the string scan looks for
+    a quoted `"w"` anywhere in a served module, and `guard.py` now declares
+    `WRITING_MODES = ("w", "a", "x", "+")` -- so the old test failed on the
+    constant that spells out the rule it was enforcing. It would also have
+    missed the inverse case, a module that renames a file into place, because
+    `os.replace` contains no quoted mode at all.
+
+    The scan's own mutants are in `test_compose.py`: ten spellings of a write
+    it must catch, six reads and string methods it must not.
+    """
     from oneground.lab import guard
-    for name in (guard.TRANSPORT_MODULES + guard.CONTRACT_MODULES):
-        path = os.path.join(os.path.dirname(os.path.abspath(
-            labserver.__file__)), name)
-        with open(path, encoding="utf-8") as f:
-            src = f.read()
-        for bad in ('"w"', "'w'", '"a"', "'a'", '"wb"', "'wb'"):
-            assert f"open({bad}" not in src and f", {bad})" not in src, \
-                (name, bad)
+    assert guard.check_write_path() == {}, "a served module writes"
+    assert guard.WRITE_MODULES == ("compose.py",)
 
 
 # ------------------------------------------------------- step 10: a browser

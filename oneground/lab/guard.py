@@ -338,7 +338,11 @@ def check_transport():
     that breaks the transport rules. Empty means the server computes
     nothing a view draws."""
     found = {}
-    for name in TRANSPORT_MODULES:
+    # The write path is held to these rules too. It is a separate kind
+    # because of what it may *do* -- open a file for writing -- not because
+    # of what it may import, and a writer that could measure would be a
+    # second implementation with a file handle.
+    for name in TRANSPORT_MODULES + WRITE_MODULES:
         path = os.path.join(LAB_DIR, name)
         with open(path, encoding="utf-8") as f:
             v = transport_violations(f.read(), path)
@@ -365,6 +369,44 @@ def check_transport():
 #: to refuse them to views.
 CONTRACT_MODULES = ("contract.py", "guard.py", "receipt.py")
 
+#: The write half (task 046). Exactly one module in this package may open a
+#: file for writing, and this names it. The read half proves the inverse --
+#: `test_the_server_has_no_write_path` scans every other served module -- so
+#: the two together say *exactly one module writes, and it is this one*,
+#: which is a stronger statement than either makes alone.
+#:
+#: This is a classification, not an exemption. `check_transport` holds these
+#: modules to the measuring rules exactly as it holds transport, because the
+#: thing that makes a writer special is what it may do, not what it may
+#: import.
+WRITE_MODULES = ("compose.py",)
+
+#: Writes that land by moving a file into place rather than by opening one.
+#: A scan that only looked for `open` would pass a module that renamed its
+#: way past it. **Qualified**, because the unqualified form of this set was
+#: wrong: `replace` and `move` are also string and list methods, and the
+#: first version of this scan reported `server.py`, `runs.py` and `guard.py`
+#: as writing when all four hits were `str.replace("\\", "/")` in a path.
+#: That is warning 1 of `docs/PRACTICE.md` -- a check reporting its own
+#: coverage gap as the subject's defect -- committed by a scan written to
+#: enforce the rule beneath it.
+QUALIFIED_WRITERS = frozenset({
+    ("os", "replace"), ("os", "rename"), ("os", "remove"), ("os", "unlink"),
+    ("os", "mkdir"), ("os", "makedirs"), ("os", "rmdir"),
+    ("os", "truncate"), ("os", "writev"),
+    ("shutil", "move"), ("shutil", "copy"), ("shutil", "copy2"),
+    ("shutil", "copyfile"), ("shutil", "copytree"), ("shutil", "rmtree"),
+})
+
+#: Methods that write whatever they are called on. These need no qualifier
+#: because no builtin type carries them: `str` has no `write_text`.
+UNQUALIFIED_WRITERS = frozenset({
+    "write_text", "write_bytes", "writelines", "touch",
+})
+
+#: Modes that make `open()` a write.
+WRITING_MODES = ("w", "a", "x", "+")
+
 #: Not part of the running server, so none of the three sets of rules apply:
 #: the package docstring, the browser client the tests drive, and the tests.
 NOT_SERVED = ("__init__.py", "cdp.py")
@@ -380,7 +422,8 @@ def package_modules(directory=None):
 def unclassified_modules(directory=None):
     """Modules in the package that no rule set holds. Empty is the only
     acceptable answer: a module nobody classified is a module nobody guards."""
-    known = set(TRANSPORT_MODULES) | set(CONTRACT_MODULES) | set(NOT_SERVED)
+    known = (set(TRANSPORT_MODULES) | set(CONTRACT_MODULES)
+             | set(WRITE_MODULES) | set(NOT_SERVED))
     return sorted(set(package_modules(directory)) - known)
 
 
@@ -403,6 +446,95 @@ def check_contract():
             v = [x for x in transport_violations(f.read(), path,
                                                  allow_numpy=True)
                  if x[1] not in allowed]
+        if v:
+            found[name] = v
+    return found
+
+# ------------------------------------------------- the write path, scanned
+def write_violations(source, filename="<module>"):
+    """[(line, rule, detail)] for anything in one module that writes.
+
+    Parsed rather than matched on text. The read half's scan looks for the
+    string `open("w"` and its spellings, which was enough when the answer was
+    *nothing writes anywhere*; it would miss `open(path, mode)` where mode is
+    a variable, and it would miss a rename. This slice makes writing a thing
+    one module is allowed to do, so the scan that finds it has to be able to
+    find it however it is spelled.
+
+    **What it cannot see, stated rather than implied.** A write through an
+    alias (`from os import replace`), or through a file handle opened
+    somewhere else and passed in. An `open()` whose mode this scan cannot
+    read is *reported* rather than skipped: a scan that cannot tell answers
+    couldn't-check, and a served module has no reason to open a file with a
+    computed mode.
+
+    The aliases are the honest gap, and they are why this is one of two
+    halves. The read half asserts the served tree's digests are unchanged
+    after a session, which catches a write however it was spelled; this half
+    says which module is allowed to spell one at all.
+    """
+    out = []
+    for node in ast.walk(ast.parse(source, filename)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            name = func.attr
+            owner = func.value.id if isinstance(func.value, ast.Name) else None
+        elif isinstance(func, ast.Name):
+            name, owner = func.id, None
+        else:
+            continue
+        # The order matters and two mutants found it. A method that writes
+        # whatever it is called on is checked before the qualified set,
+        # because `p.write_text(...)` has an owner (`p`) that no qualified
+        # pair will ever match -- the first version checked the pair first,
+        # hit `continue`, and never reached the method it was looking for.
+        if name in UNQUALIFIED_WRITERS:
+            out.append((node.lineno, "write", name + "()"))
+            continue
+        if owner is not None:
+            if (owner, name) in QUALIFIED_WRITERS:
+                out.append((node.lineno, "write", f"{owner}.{name}()"))
+            continue                          # someone else's method
+        if name != "open":
+            continue
+
+        # `open(p)` names no mode and is a read. `open(p, mode)` names one
+        # this scan cannot read, which is reported rather than skipped: a
+        # scan that cannot tell answers couldn't-check, and a served module
+        # has no reason to compute a mode. The first version conflated the
+        # two under `mode is None` and silently passed the second.
+        mode_node = node.args[1] if len(node.args) > 1 else None
+        for kw in node.keywords:
+            if kw.arg == "mode":
+                mode_node = kw.value
+        if mode_node is None:
+            continue                          # a read
+        if isinstance(mode_node, ast.Constant) and isinstance(
+                mode_node.value, str):
+            if any(m in mode_node.value for m in WRITING_MODES):
+                out.append((node.lineno, "write",
+                            f"open(..., {mode_node.value!r})"))
+        else:
+            out.append((node.lineno, "write",
+                        "open() with a mode this scan cannot read"))
+    return out
+
+
+def check_write_path():
+    """{module: [(line, rule, detail)]} for served modules that write and are
+    not the one module permitted to.
+
+    Empty is the only acceptable answer. The permitted module is not scanned
+    for writes -- it is the write path -- but it is scanned for everything
+    else, by `check_transport`.
+    """
+    found = {}
+    for name in TRANSPORT_MODULES + CONTRACT_MODULES:
+        path = os.path.join(LAB_DIR, name)
+        with open(path, encoding="utf-8") as f:
+            v = write_violations(f.read(), path)
         if v:
             found[name] = v
     return found
