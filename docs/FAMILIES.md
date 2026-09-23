@@ -244,13 +244,17 @@ one machine cannot answer it, and `docs/STATE.md` says what does.
 
 ### 4.1 If you extend the suite, read this first
 
-**The suite was wrong three times before it was right, and twice more when it
-was extended.** Not about the families — about itself. The first three each
-produced a confident, specific, false result on a shipped family; the last two
-were found while adding the tenth check, by an author who had read the first
-three. They are recorded here because the next person to add a check will make
-the same kind of mistake in a new place, and because knowing the list is not
-the same as not making them.
+**The suite was wrong three times before it was right, and three more
+mistakes have been recorded since.** Not about the families — about itself.
+The first three each produced a confident, specific, false result on a shipped
+family; warnings 4 and 5 were made while adding the tenth check, by an author
+who had read the first three; warning 6 is not about this suite at all and is
+kept here because this is where the project writes down what it has learned
+about checks.
+
+They are recorded because the next person to add a check will make the same
+kind of mistake in a new place, and because knowing the list is not the same
+as not making them.
 
 **1. It reported a knob that does nothing, and the knob works.** It said
 `candidates` was declared and never read, in all three families. `candidates`
@@ -326,6 +330,39 @@ passing if the check itself had been deleted, because it never called it.
 > same corpus, so a failure is the mutation and not the fixture. A rule and a
 > mutant that share no code drift apart, and the day they do, the mutant is
 > still green and proving nothing.
+
+**6. A check that skips where it would fail.** Neither instance of this is in
+this suite, and it is written here because this is where the project keeps
+what it has learned about checks. Both were found in one week, in different
+packages, and they are the same mistake.
+
+Task 041 tracked a regression fixture and added a presence check for it. The
+presence check failed correctly when the file was removed — and the
+*regression test itself* still skipped, because the helper it shared with
+every other test in the module skipped on any missing path. The check that
+proved the feature worked would still have gone silent, now with a second
+test failing beside it saying something else.
+
+Task 045 then found the general form. A test asserting that every
+couldn't-check claim carries a remedy reads a local workdir. In CI there is
+none, so it **skips**, and the suite is green. It is red only on a machine
+that happens to hold that workdir.
+
+> **A check that passes everywhere it runs, and only runs where nobody looks,
+> reported nothing for as long as it existed.**
+
+> The rule: **a skip is a claim, and it needs the same scrutiny as a pass.**
+> Decide per input: something that may honestly be absent elsewhere — a local
+> run, an optional binary — may skip, and the skip must name what was missing.
+> Anything tracked, or anything the check exists to protect, **fails**. And
+> test the skip the way warning 3 says to test the pass: remove the input and
+> watch which of the two you get. Reading the code will not tell you; the
+> helper that decides is usually three functions away and shared with tests
+> that have every right to skip.
+
+The shape warnings 3, 5 and 6 share: **a green result is a claim about the
+world, and the three ways to make one without evidence are to pass for the
+wrong reason, to check a copy of the rule, and to not run at all.**
 
 ---
 
