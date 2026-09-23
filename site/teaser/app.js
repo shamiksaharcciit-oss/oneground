@@ -435,7 +435,8 @@ function buildGround(values, D, Q, centroids, copies, catColours, cats) {
       return 'At ε = 0.00 every vector sits within ε of exactly one region — ' +
         'one copy each, 1.000× storage, and routing to that one region finds <b>' +
         fmtPct(values.measured.one_region_recall_at_10, 1) + '</b> of true ' +
-        'neighbours. The boundaries are still there: <b>' + fmtPct(1 - crisp) +
+        'neighbours. The boundaries are still there: cut into <b>' +
+        fmtInt(values.geometry.n_centroids) + '</b> regions, <b>' + fmtPct(1 - crisp) +
         '</b> of vectors have a second centroid inside 1.20× of the first.';
     }
     if (p4 >= 0.5) {
@@ -925,10 +926,14 @@ function buildReceipt(values, via) {
   const t3 = $('receipt-values');
   t3.appendChild(headRow(['value', 'published', 'recomputed here']));
   const ch = p.characterization, ref = p.reference_results.semantic_sharded;
+  // Three of the four are functions of the centroid count (task 044c: skew_top10_share holds over no
+  // range of k at all); the row says the count both numbers were computed at. storage_amplification is
+  // a function of ε and the copy cap, not of k, and keeps its bare name.
+  const atK = ' @ ' + fmtInt(values.geometry.n_centroids) + ' regions';
   const rows = [
-    ['boundary_crispness', ch.boundary_crispness.value, m.boundary_crispness, ch.boundary_crispness.tolerance],
-    ['ambiguous_query_rate', ch.ambiguous_query_rate.value, m.ambiguous_query_rate, ch.ambiguous_query_rate.tolerance],
-    ['skew_top10_share', ch.skew_top10_share.value, m.skew_top10_share, ch.skew_top10_share.tolerance],
+    ['boundary_crispness' + atK, ch.boundary_crispness.value, m.boundary_crispness, ch.boundary_crispness.tolerance],
+    ['ambiguous_query_rate' + atK, ch.ambiguous_query_rate.value, m.ambiguous_query_rate, ch.ambiguous_query_rate.tolerance],
+    ['skew_top10_share' + atK, ch.skew_top10_share.value, m.skew_top10_share, ch.skew_top10_share.tolerance],
     ['storage_amplification', ref.storage_amplification, m.storage_amplification_at_eps_0_20, ref.tolerance],
   ];
   for (const [k, pub, got, tol] of rows) {

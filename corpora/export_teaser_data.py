@@ -101,6 +101,14 @@ egv = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(egv)
 bf = egv.bf                      # build_fixture, re-exporting oneground.measures
 
+# Task 044e: the shared path transform, not a sixth private copy of it. This
+# file already carries one (`public_price_table`, below) written before
+# `receipts.public_path` existed; adding a second would be the defect task
+# 044h is about. Reached the way `egv` is, because this script runs as a file
+# rather than as part of the package.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from oneground.receipts import public_path                        # noqa: E402
+
 N_CENTROIDS = egv.N_CENTROIDS    # 256
 EPSILON = egv.EPSILON            # 0.20, the spec's reference closure band
 MAX_ASSIGN = egv.MAX_ASSIGN      # 4, the closure cap
@@ -518,6 +526,8 @@ def main():
         "empty_regions": int((sizes == 0).sum()),
         "eps_sweep": hist_at,
         "cross_check_vs_build3_tables": cross,
+        # Task 044e. Cited, not measured here -- see `k_sweep_block`.
+        "k_sweep": k_sweep_block(),
     }
 
     # ---- the published values, asserted ----
@@ -781,6 +791,16 @@ def report_only(args):
     values = dict(prior)
     values["verdict"] = build_verdict(report, args.report)
     values["verify"] = build_verify(args.report, args.verify)
+
+    # Task 044e. `k_sweep` is a CITATION, so it can be refreshed here without
+    # re-deriving anything: report-only carries `measured` over untouched
+    # because the geometry costs a k-means over 460 MB, and reading a file
+    # and its digest costs neither. This is the difference a cited receipt
+    # makes -- the page's newest number can land without the export having to
+    # re-measure the corpus to justify it.
+    measured = dict(values.get("measured") or {})
+    measured["k_sweep"] = k_sweep_block()
+    values["measured"] = measured
     values["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     values["generated_by"] = "corpora/export_teaser_data.py --report-only"
     values["geometry_from"] = {
@@ -934,6 +954,70 @@ def build_verify(report_path, verify_path):
 # The repository root, for turning absolute paths back into the repo-relative
 # ones every other source field on the page uses.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+#: The measured sweep this page cites. **A file with a digest, not a
+#: computation.** Task 044e's ruling: a sweep recomputed at export time would
+#: be a second derivation of a published number, and the whole point of the
+#: lab's rule -- *a number on the page has a receipt in the data the page
+#: ships* -- is that the page's number is answerable to a receipt. So the
+#: export cites this file and records its sha256; it does not re-derive it.
+#:
+#: Produced by task 044c on the published arXiv vectors, whose array digests
+#: were checked against `fixtures/arxiv-150k.fixture.yaml` before the sweep
+#: ran. Its k=256 row reproduces every published value to the last digit,
+#: which is what makes the other rows comparable to the published one.
+K_SWEEP_SOURCE = os.path.join(REPO_ROOT, "tasks",
+                              "044c-centroid-count.sweep",
+                              "arxiv-150k.default.json")
+
+#: The three measures the caption and the panel read. Everything else in the
+#: sweep file stays in the sweep file: the page ships what it uses.
+K_SWEEP_MEASURES = ("boundary_crispness", "ambiguous_query_rate",
+                    "skew_top10_share")
+
+
+def k_sweep_block(path=K_SWEEP_SOURCE):
+    """The centroid sweep, cited from its file, for `measured.k_sweep`.
+
+    Task 044e. Core refused a typed `0.053` in the epsilon caption because it
+    would have been the first number on the page the page could not check --
+    the caption's own argument turned on the caption, since its whole purpose
+    is to stop a figure travelling without what it depends on. This is what
+    lets the caption **read** the number instead of stating it.
+
+    Carries its source and that source's digest, so the page's number is
+    traceable to a file in the repository rather than to this export run.
+    """
+    with io.open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    rows = [r for r in doc["rows"] if r.get("arm") == "default"]
+    if not rows:
+        raise SystemExit("%s has no default-arm rows" % path)
+    return {
+        # public_path: this is a receipt field and the export is a write site.
+        "source": public_path(path),
+        "source_sha256": sha256_file(path),
+        "fixture": doc["fixture"],
+        "seed": doc["seed"],
+        "n_base": doc["n_base"],
+        "n_queries": doc["n_queries"],
+        "arm": "default",
+        "measured_by": "task 044c",
+        "constants": doc.get("constants", {}),
+        "rows": [
+            dict([("k", r["k"])]
+                 + [(m, round_to(r[m], 6)) for m in K_SWEEP_MEASURES])
+            for r in sorted(rows, key=lambda r: r["k"])],
+        "note": (
+            "boundary_crispness, ambiguous_query_rate and skew_top10_share "
+            "measured at each centroid count on this fixture's own published "
+            "vectors, seed and embedding -- everything held but k. The k=256 "
+            "row is the published one and reproduces it to the last digit, "
+            "which is what makes the others comparable to it. Cited from the "
+            "file named in `source`, not recomputed by this export: a second "
+            "derivation of a published number is not a receipt for it."),
+    }
 
 
 def public_price_table(table):
