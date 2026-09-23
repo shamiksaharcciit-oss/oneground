@@ -296,6 +296,42 @@ should be refused, so every refusal it produces is a new boundary, and any
 test standing on one breaks when it lands. That is the suite working, and the
 repair is the input.
 
+**8. Two checks that see different things are not redundant, and dropping
+either leaves a gap neither reports.** A scan over source and a check over a
+running process look like two ways of asking one question. They are two
+questions.
+
+- **A source scan cannot see a transitive import.** It reads the lines a
+  module wrote and nothing about what those lines drag in.
+- **A runtime check cannot say which line did it.** It reads the loaded
+  modules and has no idea which import, in which package, three hops away,
+  is responsible.
+
+The instance. The lab's guard refuses `oneground.models` to every served
+module, and `oneground/intake/fields.py` declares intake's fields with
+`models/base.py:Param`. The **static** scan passed: no module in the lab named
+a measuring package, and the import sat one package away in `intake`. The
+**runtime** check failed, because `oneground.models.__init__` registers all
+three families, so reaching a dataclass had loaded every family, every index
+type and numpy into a process whose whole rule is that it cannot measure.
+
+Each check was right and neither was sufficient. The scan could not have seen
+it; the runtime check said *ten measuring modules are loaded* and could not
+say which line to change.
+
+> The rule: **when a rule has a static half and a runtime half, keep both and
+> say what each cannot see.** The temptation, once one of them is written
+> well, is to treat the other as belt and braces and let it rot. The half you
+> drop is the half that catches the next defect, because the defects that are
+> easy to catch statically have already been caught statically.
+
+> And the repair was **a leaf module, not an exemption.** `Param` moved to
+> `oneground/param.py`, which imports only the standard library; `base.py`
+> re-exports it and no existing importer changed. An exemption would have
+> silenced the check and left the server loading three families. **A guard
+> that is hard to satisfy is sometimes describing a dependency that should
+> not exist** — see §5.
+
 **The assertion half: a test that asserts a whole collection breaks when any
 member of it legitimately changes.**
 `test_two_copies_of_the_same_run_are_still_only_couldnt_check` asserted
@@ -435,3 +471,58 @@ ruling arrived an hour later. Full account:
 `tasks/043-provenance-foundation.report.md`, leading section. The audit that
 found the first four, and argued for the declaration before it existed, is
 `tasks/finding-comparability-carriers.md`.
+
+---
+
+## 5. What a guard is telling you when it refuses you
+
+Every guard in this project eventually refuses something reasonable. The
+question at that moment is not *how do I get past this* but *what is it
+saying*, and there are two answers, which want opposite repairs. Getting the
+pair the wrong way round is how a guard turns into a formality.
+
+> **A guard firing on a name is a false positive, to be named and exempted.**
+> **A guard firing on a thing is usually telling you where the thing belongs.**
+
+The two are worth holding together, because either alone reads as a
+preference. Both happened in one afternoon of task 046, and the contrast is
+what makes it a rule rather than a judgement call.
+
+**A name, exempted.** The lab's guard refuses a served module that mentions
+`vectors` or `queries`, because a view that names a vector column is usually
+about to compute with one. `oneground/intake/__init__.py` mentions both: they
+are the names of two keys in a requirements file, `corpus.sample.vectors.path`
+and `corpus.sample.queries.path`, and they hold **file paths**. Intake never
+opens either — it validates the document and hands the paths on.
+
+The rule is a name rule and here the name is not the thing. So it took an
+entry in `TRANSPORT_ALLOWLIST`, which is per file and per rule and carries its
+reason in the table — the same shape as the two entries already there, one of
+which exists because `contract.py` has to name `partition.centroids` in order
+to refuse it to every view.
+
+**A thing, relocated.** The same guard refuses `oneground.models` to every
+served module. The new intake field table needed `Param`, which lives in
+`models/base.py`. An exemption was available and would have taken one line.
+
+Taking it would have put a field's **explanation** in one package and the
+**refusal** it must never diverge from in another — and the whole reason that
+table exists is that those two strings cannot be allowed to drift. The guard
+was not being obstructive about a name; it was objecting to a dependency, and
+the dependency was the design problem. `Param` moved to a leaf module, the
+table went to `intake` beside the refusals, and the served package stopped
+loading a simulator.
+
+> The test, when you cannot tell which case you are in: **would the exemption
+> still be right if the guard did not exist?** Intake would still name those
+> two keys, so the exemption describes something true. The lab would still
+> have no business importing a simulator, so the exemption would have
+> described only my convenience.
+
+**The cost of getting it backwards is asymmetric**, which is why the default
+should be suspicion. A wrongly-refused exemption costs a few minutes of
+rearranging. A wrongly-granted one costs the guard: it now has an entry saying
+this rule does not apply here, nobody re-reads it, and the next module to want
+the same exemption has a precedent. Every entry in an allowlist is a small
+permanent hole, so each one earns its place by being *true about the world*
+rather than *true about today's diff*.
