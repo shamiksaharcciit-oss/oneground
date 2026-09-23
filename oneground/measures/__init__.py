@@ -16,15 +16,21 @@ fixture values stop meaning what they say.
 """
 
 from .ambiguity import AMBIGUOUS_RATIO, ambiguous_query_rate
-from .crispness import (CRISP_RATIO, N_CENTROIDS, boundary_crispness,
-                        centroid_dists, kmeans)
+from .crispness import (CRISP_RATIO, MIN_VECTORS_ABOVE, N_CENTROIDS,
+                        RATIO_QUANTILES, boundary_crispness, centroid_dists,
+                        count_at, count_from_quantiles, kmeans,
+                        ratio_distribution, ratios, reading,
+                        threshold_percentile)
 from .drift import drift_pair, one_region_exact_recall
 from .lid import two_nn_lid
 from .skew import skew_top10_share
 
 __all__ = [
-    "AMBIGUOUS_RATIO", "CRISP_RATIO", "N_CENTROIDS",
+    "AMBIGUOUS_RATIO", "CRISP_RATIO", "MIN_VECTORS_ABOVE", "N_CENTROIDS",
+    "RATIO_QUANTILES",
     "ambiguous_query_rate", "boundary_crispness", "centroid_dists",
-    "drift_pair", "kmeans", "one_region_exact_recall", "skew_top10_share",
+    "count_at", "count_from_quantiles",
+    "drift_pair", "kmeans", "one_region_exact_recall", "ratio_distribution",
+    "ratios", "reading", "skew_top10_share", "threshold_percentile",
     "two_nn_lid",
 ]
