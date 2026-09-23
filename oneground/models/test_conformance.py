@@ -606,15 +606,22 @@ def _main():
 # ---- task 042c: a fan-out is a cost paid over shards that exist ------------
 
 def test_hash_sharded_fanout_follows_the_build_not_the_request_synthetic():
-    """The measured case: ask for more shards than there are vectors.
+    """The measured case: ask for enough shards that some come back empty.
 
     `build` skips empty shards, so the partition is smaller than its own
     label. Before 042c the footprint reported both numbers and they
     contradicted each other; now the fan-out follows what exists.
+
+    **`asked` is `len(x)`, not `len(x) + 1`, since task 042d.** The original
+    case asked for one more shard than there were vectors, which 042d now
+    refuses outright — so the scenario is built the legal way instead. A hash
+    partition over `n` vectors into `n` shards leaves plenty empty by
+    collision alone, which is the condition this test needs; the property
+    under test is unchanged and so is 042c's fix.
     """
     x, q = _corpus()
     model = models.get("hash_sharded")
-    asked = len(x) + 1
+    asked = len(x)
     cfg = Config.make("hash_sharded", {"shards": asked, "M": 16,
                                        "efSearch": 64})
     f = model.footprint(model.build(x, cfg, SEED))

@@ -154,9 +154,29 @@ class HashSharded:
         assignment was already seeded and deterministic; the graphs inside the
         shards were not.
         """
+        n_shards = int(config.get("shards", _d("shards")))
+
+        # Task 042d. More shards than vectors used to BUILD: empty shards are
+        # skipped below, so a configuration asking for 1,501 over 1,500
+        # vectors produced 960 shards while labelling itself 1501 -- a
+        # partition claiming something that cannot exist, with every row
+        # carrying that label describing an architecture nobody built.
+        #
+        # Refused before any work, as `semantic_sharded` refuses too many
+        # centroids (042b): a configuration incoherent on its face should cost
+        # nothing to reject. `ParameterError` specifically, because `simulate`
+        # catches it to drop one row and report the drop, and anything else
+        # ends the run.
+        if n_shards > len(vectors):
+            raise indexes.IndexTooSmall(
+                f"{NAME}: shards={n_shards} over {len(vectors)} vector(s); a "
+                f"partition cannot have more shards than there are vectors to "
+                f"put in them, and the empty ones are skipped -- so this would "
+                f"build fewer shards than its own label names. Lower shards to "
+                f"at most {len(vectors)}.")
+
         t0 = time.time()
         det = resolve_deterministic(config, deterministic)
-        n_shards = int(config.get("shards", _d("shards")))
         ids = (context or {}).get("ids")
         assign = assign_shards(len(vectors), n_shards, seed, ids)
 

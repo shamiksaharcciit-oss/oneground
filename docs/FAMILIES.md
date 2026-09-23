@@ -219,7 +219,7 @@ few seconds and checks the protocol's contract, not any published number.
 Outcomes are **passes**, **fails**, and **couldn't-check**, and the third is
 never rounded up to either of the others.
 
-Nine checks, and what a failure means:
+Ten checks, and what a failure means:
 
 | check | a failure means |
 |---|---|
@@ -364,6 +364,35 @@ The shape warnings 3, 5 and 6 share: **a green result is a claim about the
 world, and the three ways to make one without evidence are to pass for the
 wrong reason, to check a copy of the rule, and to not run at all.**
 
+**7. A test that demonstrates a fix by building the defective case is coupled
+to that case remaining buildable.** Task 042c fixed `fanout` so that it
+reports the shards that were built rather than the ones requested, and proved
+it with a configuration asking for `len(x) + 1` shards over `len(x)` vectors.
+Task 042d then made that configuration a refusal — a partition cannot have
+more shards than there are vectors — and 042c's test broke.
+
+**The fix was not broken. The test's setup had become illegal.** Those are
+different failures and they look identical from the failure message: an
+exception from the code under test, raised during setup, in a test that
+passed yesterday.
+
+> The rule: **when a test breaks because a refusal closed the boundary it was
+> standing on, change its input, never its assertion.** 042c's property — the
+> fan-out follows the artifact — is still true and still needs testing; a hash
+> partition leaves shards empty by collision well before it runs out of
+> vectors, so `len(x)` shards exercises it legally. Weakening the assertion, or
+> the new refusal, would discard a fix to keep a test.
+>
+> The tell, before it happens: **the test's setup is the thing a refusal would
+> forbid.** A test constructing an impossible configuration on purpose is
+> sitting on a boundary somebody will eventually close, and the two tasks are
+> usually weeks apart and written by different people.
+
+**This will recur.** The conformance suite exists to find configurations that
+should be refused, so every refusal it produces is a new boundary, and any
+test standing on one breaks when it lands. That is the suite working, and the
+repair is the input.
+
 ---
 
 ## 5. The worked example
@@ -448,4 +477,5 @@ fixture will be closed — including one that ranks yours first.
 *The protocol is `oneground/models/base.py`. The decomposition it exists to
 produce is [MODELS.md](MODELS.md#the-ceiling-rule). The state contract is
 [STATE.md](STATE.md).*
+
 
