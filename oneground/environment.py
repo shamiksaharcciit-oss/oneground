@@ -840,21 +840,10 @@ class GitUnavailable(RuntimeError):
     """
 
 
-def checkout_root(start=None):
-    """The nearest directory at or above `start` holding a `.git`, else None.
-
-    A `.git` is a directory in a checkout and a file in a worktree or a
-    submodule; either answers "there is a tree here that git could describe".
-    Walks upward because a command may run from a subdirectory.
-    """
-    d = os.path.abspath(start or ".")
-    while True:
-        if os.path.exists(os.path.join(d, ".git")):
-            return d
-        parent = os.path.dirname(d)
-        if parent == d:
-            return None
-        d = parent
+# Moved to `oneground/provenance.py` and re-exported, for the same reason
+# `producing_version` was: this module imports faiss and sklearn, and the
+# lab's server needs to know whether it is running from a checkout.
+from .provenance import checkout_root  # noqa: E402,F401
 
 
 def tracked_files(root=None):

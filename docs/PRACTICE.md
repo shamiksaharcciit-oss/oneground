@@ -501,6 +501,61 @@ being the precedence rule — and the reader iterates the declaration rather
 than naming files itself. **A declaration is where a collision becomes visible
 at the moment the name is chosen**, which is the only moment it is cheap.
 
+**The strongest instance, and the file is a table rather than a document.**
+Task 046 built a declaration of intake's fields, reusing `Param` from the
+family tables. `Param.default is NO_DEFAULT` means *the family has no default
+for this key, so a configuration must name it*. The form read it as **the user
+must supply this**. Same words, different fact — most intake fields have no
+default and are entirely optional.
+
+So every optional field was labelled **required**, and `ids_path` carried the
+badge directly above its own explanation, which begins *"Optional."* The
+document contradicted itself in adjacent lines and nothing fired, because —
+exactly as this section says — the value was **present, well-formed and
+plausible**. It took a browser and a person reading the page to see it.
+
+The repair was a separate declaration, `fields.REQUIRED`, rather than a second
+meaning for `default`. **A key that nearly fits is the dangerous kind**: the
+name is right, the type is right, the values line up in most rows, and the one
+row where the two meanings diverge is the row nobody checks.
+
+### A claim with four homes is corrected three times and still wrong
+
+The same defect in a sentence rather than a key, and it is the half worth
+taking away, because the first three repairs each looked like the end of it.
+
+`oneground ui` claimed *"read-only · nothing runs from this page"* in **four
+places**: the page's eyebrow, the CLI's startup line, the `writes` field of
+`/api/check`, and a module docstring. Task 046 gave the page a write half, and
+`read-only` became false in all four at the same instant.
+
+It was then corrected three times, days apart, each time by someone looking at
+exactly one copy — and **each correction was itself correct and complete for
+the copy in front of it**. The claim was still wrong after all three, and the
+fourth was found only because a developer read a raw `/api/check` response
+while diagnosing something else.
+
+> The rule: **the defect is not that a claim went stale, it is that the claim
+> had four homes.** Staleness is §1 and is caught by looking; this is not
+> caught by looking, because every place you look has just been fixed.
+>
+> And so **the repair is one derivation, not four edits.** `/api/check` now
+> answers `writes` and `runs` *from what the session is* — a `lab` session
+> writes nothing and says so, a `ui` session says what it writes. A fourth
+> edit would have restored the count to four correct copies, and the fifth
+> change would have broken it again. Deriving it leaves one place that can be
+> wrong, and it is the place a reader asks.
+
+The tell is the same as this section's: **before you fix the copy in front of
+you, search for the others.** Grep the distinctive phrase, not the file.
+
+> *A footnote, because ten minutes is still an instance.* While fixing the
+> above, `compose.js` grew a second copy of its condition evaluator —
+> `shown()` and `conditionHolds()` asking one question two ways — in a file
+> whose own header cites §2 warning 2. It lived about ten minutes. Duplication
+> does not arrive announced; it arrives as the shortest way to finish the
+> thing you are already doing.
+
 **What it cost.** The fifth instance of this defect, written by the person
 eliminating the first four, in the task doing the eliminating, after three had
 already been diagnosed. One reverted commit, and it would have shipped had the
@@ -563,3 +618,59 @@ this rule does not apply here, nobody re-reads it, and the next module to want
 the same exemption has a precedent. Every entry in an allowlist is a small
 permanent hole, so each one earns its place by being *true about the world*
 rather than *true about today's diff*.
+
+---
+
+## 6. A server that cannot say which build it serves
+
+> **A server that cannot say which build it serves is a URL nobody should be
+> handed.**
+
+**The instance, and it is the most expensive thing on this page.** A `oneground
+ui` session was started and handed to the developer to look at. It answered
+200, listed nine runs, rendered cleanly — and served a page with no write
+half, because the console script `oneground.exe` resolves the package by
+**install location**, and on that machine the install pointed at a third
+checkout that predated the work by weeks. The suite had passed against a
+different directory minutes earlier.
+
+Nothing was broken. Not the code, not the tests, not the server, not the
+browser. **The build being served was simply not the build anyone had in
+mind**, and no part of the system could notice, because no part of it had ever
+been asked to say which build it was.
+
+**What it cost is the part that matters.** Not the hour of diagnosis — a week
+of browser observations whose subject nobody could now name. Every visual
+finding made against that URL had to be treated as being about an unknown
+build. The developer's response was the right one: *I would rather wait than
+repeat an observation whose subject I cannot name.*
+
+**Why the gate did not catch it.** The gate proved the worktree; the URL
+proved nothing, and nothing connected the two. This is §2 warning 8 at the
+level of a whole workflow: a test run and a running server are two checks that
+see different things, and the assumption that they saw the same code was never
+written down anywhere it could be checked.
+
+> The rule: **anything you hand someone to look at states what it is, before
+> it is looked at.** Three parts, and the first is the one that discriminates:
+>
+> - **the package directory**, because in this incident the version and the
+>   commit were the same on both sides and only the path differed;
+> - the commit and whether the tree was dirty, or a stated reason they cannot
+>   be known;
+> - a **refusal**, not a warning, when the build is ambiguous — here, when the
+>   working directory holds a checkout of this project whose package is not
+>   the one that was imported. A warning at startup is a line in a scrollback
+>   nobody reads; the whole failure mode is that everything looked fine.
+
+`oneground/provenance.py` is the mechanism: `identity()` is printed at startup
+and answered on `/api/check`, and `conflicting_checkout()` refuses the bind.
+The refusal is watched firing on a constructed clash rather than observed not
+firing on a clean tree (§2 warning 3).
+
+**One note on where it had to live.** `producing_version` already existed — in
+`oneground.receipts`, which imports torch, behind a guard that refuses every
+served module. The choice was a second implementation of *what commit is this*
+or one more leaf module. It moved, and both old homes re-export it. That is
+the second time in one slice that a guard's refusal pointed at a dependency
+rather than a name, and the answer was the same both times: see §5.

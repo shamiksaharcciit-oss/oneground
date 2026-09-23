@@ -45,6 +45,7 @@ import threading
 import time
 import urllib.parse
 
+from oneground import provenance
 from oneground.intake import fields
 
 from . import compose, contract, guard
@@ -334,6 +335,30 @@ class LabServer:
         if (run is None) == (runs_dir is None):
             raise LabRefused("a lab session serves one run or one runs "
                              "directory, not both and not neither")
+        # Which build is this? Asked before anything binds, because a
+        # server that cannot answer it is a URL nobody should be handed.
+        #
+        # A session was started from this project and handed over to be
+        # looked at. It answered 200, listed nine runs and served a page with
+        # no write half -- the console script resolves the package by install
+        # location, and that install pointed at a third checkout weeks out of
+        # date. The suite had passed against a different directory minutes
+        # before. Nothing was broken; the build being served was simply not
+        # the one anyone had in mind, and no part of the system had ever been
+        # asked to say which build it was.
+        self.build = provenance.identity()
+        clash = provenance.conflicting_checkout()
+        if clash is not None:
+            raise LabRefused(
+                "this would serve a different build than the one you are "
+                "working on.\n"
+                f"  imported:          {clash['imported']}\n"
+                f"  working directory: {clash['working_directory']}\n"
+                "The console script resolves the package by install "
+                "location, not by working directory. Run the checkout you "
+                "mean -- `python -c \"from oneground.cli import main; "
+                "main()\"` from it, or reinstall it -- rather than reading "
+                "a page whose subject you cannot name.")
         self.warning = check_host(host, i_know)
         broken = {**guard.check_views(), **guard.check_transport(),
                   **guard.check_contract()}
@@ -697,6 +722,11 @@ class LabServer:
                      "created from this page"),
             "token": ("required on every request; see docs/UI.md for what "
                       "it protects against and what it does not"),
+            # Which build answered this request. The page shows it and a
+            # reader can check it, because the incident that produced this
+            # field was two checkouts with the same version and the same
+            # commit where only the path differed.
+            "build": self.build,
         }
         package = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if self.index is not None:
@@ -880,8 +910,23 @@ class LabServer:
         # (`docs/PRACTICE.md` 1.2).
         return (f"oneground ui: {len(rows)} run(s) under {shown_dir}{note} -- "
                 f"{self.url}  (served from this machine; "
-                f"reads runs, writes requirements files) "
+                f"reads runs, writes requirements files)\n"
+                f"  build: {self.build_line()} "
                 f"[{seconds:.1f}s]")
+
+    def build_line(self):
+        """Which build this is, in one line, for the terminal.
+
+        The package directory leads, because that is the field that would
+        have answered the question the incident asked: the version and the
+        commit were identical between the two checkouts involved and only
+        the path differed.
+        """
+        b = self.build
+        commit = (b.get("commit") or "no commit")[:12]
+        dirty = "" if b.get("dirty") is None else (
+            " dirty" if b["dirty"] else " clean")
+        return f"{b['package']} @ {commit}{dirty} ({b['source']})"
 
     def startup_line(self, seconds, shown_workdir):
         """The one line `oneground lab` prints: the URL, the render mode and

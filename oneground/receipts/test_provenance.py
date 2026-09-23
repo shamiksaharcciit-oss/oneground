@@ -25,6 +25,18 @@ sys.path.insert(0, ROOT)
 
 from oneground import __version__                               # noqa: E402
 from oneground import receipts as R                             # noqa: E402
+# Task 046 moved `producing_version` and its two helpers to
+# `oneground.provenance`, a leaf the lab's server can import -- `receipts`
+# imports torch, which every served module is refused. `receipts`
+# re-exports them, so the calls below are unchanged.
+#
+# The PATCHES are not. `producing_version` reads `_build_stamp` and
+# `_run_git` from the module that defines it, so patching the re-export
+# patches a name nothing looks at, and these four tests went red the moment
+# the function moved. They were right to: the assertions still hold and the
+# setup had stopped reaching the code under test, so the input changed and
+# the assertions did not (`docs/PRACTICE.md` section 2, warning 7).
+from oneground import provenance as P                           # noqa: E402
 
 KEYS = {"version", "commit", "dirty", "source", "note"}
 
@@ -50,14 +62,14 @@ def test_a_build_stamp_answers_for_a_wheel_synthetic(monkeypatch):
     """An installed wheel has no git; `setup.py` writes what it was built
     from, and this reads it back."""
     stamp = {"commit": "a" * 40, "dirty": False, "note": ""}
-    monkeypatch.setattr(R, "_build_stamp", lambda: stamp)
+    monkeypatch.setattr(P, "_build_stamp", lambda: stamp)
     got = R.producing_version()
     assert got == {"version": __version__, "commit": "a" * 40, "dirty": False,
                    "source": "wheel", "note": ""}
 
 
 def test_a_stamp_without_a_commit_says_why_synthetic(monkeypatch):
-    monkeypatch.setattr(R, "_build_stamp", lambda: {
+    monkeypatch.setattr(P, "_build_stamp", lambda: {
         "commit": None, "dirty": None,
         "note": "built from a tree with no readable git checkout"})
     got = R.producing_version()
@@ -66,8 +78,8 @@ def test_a_stamp_without_a_commit_says_why_synthetic(monkeypatch):
 
 
 def test_no_stamp_and_no_checkout_is_null_with_a_reason_synthetic(monkeypatch):
-    monkeypatch.setattr(R, "_build_stamp", lambda: None)
-    monkeypatch.setattr("oneground.environment.checkout_root",
+    monkeypatch.setattr(P, "_build_stamp", lambda: None)
+    monkeypatch.setattr("oneground.provenance.checkout_root",
                         lambda *a, **k: None)
     got = R.producing_version()
     assert got["commit"] is None and got["dirty"] is None
@@ -78,10 +90,10 @@ def test_no_stamp_and_no_checkout_is_null_with_a_reason_synthetic(monkeypatch):
 def test_a_checkout_whose_git_cannot_run_says_so_synthetic(monkeypatch):
     """022e's distinction, here too: a tree with a `.git` and no runnable git
     is a stated reason, not a silent null and not a refusal."""
-    monkeypatch.setattr(R, "_build_stamp", lambda: None)
-    monkeypatch.setattr("oneground.environment.checkout_root",
+    monkeypatch.setattr(P, "_build_stamp", lambda: None)
+    monkeypatch.setattr("oneground.provenance.checkout_root",
                         lambda *a, **k: ROOT)
-    monkeypatch.setattr(R, "_run_git",
+    monkeypatch.setattr(P, "_run_git",
                         lambda args: (None, "FileNotFoundError: no git"))
     got = R.producing_version()
     assert got["source"] == "checkout" and got["commit"] is None
