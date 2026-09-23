@@ -263,6 +263,71 @@ Stated plainly, because the position paper's slice 2 adds all of it:
 - **No measurement is computed.** A number on screen came from a file the CLI
   wrote, or it is not on screen.
 
+### Settled before slice 2: what holds the write path
+
+Slice 2 adds a form that writes `requirements.yaml`. **A form writing a file
+is the first thing in this interface that is not a drawing**, and the
+rendering contract has nothing to say about bytes leaving the page: its three
+clauses describe what a view may be handed, what it may read and what it must
+return, and none of them describes a write. The read half is held by a guard
+rather than by convention, and the write half must be too. This is the rule it
+lands on, ruled before the brief so the brief cannot fudge it.
+
+> **The bytes must round-trip to the *same document* the form validated —
+> `parse(write(D)) == D` — checked on every write, not in tests.**
+
+**The naive form of this does not work, and the measurement is why.** "The
+file must load through the CLI's parser without a refusal" is the obvious
+candidate and it is necessary and nowhere near sufficient: the string
+`constraints` does not appear in `oneground/intake/load()` at all. A file with
+one constraint dropped, with every constraint dropped, and with the
+`constraints` block removed entirely all load without a word. A form that
+silently lost a constraint would produce a file that parses cleanly.
+
+Identity is the checkable middle between *parses* and *says what the user
+meant*, and it draws the line where a guard can actually reach:
+
+- **The guard checks that nothing is lost between the form's document and the
+  file.** `D` in, bytes out, `load()` back, compare. Mechanical, so it runs on
+  every write — write to a temp path, read it back, compare, then move.
+- **Coverage and comment fidelity are acceptance, not the guard.** Whether the
+  form *offers* every field a requirements file can carry, and whether each
+  field's explanation in the written file is the same string the form showed,
+  are tested against a worked example. **No guard has access to intent**, so
+  nothing here can check that the user meant what they typed — only that what
+  they typed reached the file intact.
+
+**Byte-identity is not a stronger version of this rule. It is a different and
+incompatible one.** `write(D) == bytes` would forbid the comments the
+front-door ruling requires the form to write: the identity is over the
+*parsed document* precisely because comments are not data, which is the same
+ruling's own statement that they are never read back as such. A reader
+reaching to strengthen the rule would be trading one ruling for another
+without noticing, so the incompatibility is recorded here beside the rule and
+not beneath it.
+
+**The check is load-bearing, not a sanity check.** `D` is built from form
+state rather than by editing a loaded document — because upload-and-edit and
+fill-from-empty must produce the same file for the same inputs, and that is
+only true if both paths construct through one code path. So `D` is a **second
+construction of the schema**, and this identity is the only thing standing
+between that construction and drift from the one `load()` performs. A reader
+who meets it as a sanity check will run it in tests only, which is exactly
+where it stops being a guard.
+
+**And it does a second job, which is the strongest argument for the shape.**
+It is the executable form of *the form's refusal is the CLI's refusal
+executed, not re-expressed*. If `D` round-trips through `load()`, then `D` is
+in the set `load()` accepts — so **the form cannot construct a document the
+CLI would refuse without the guard saying so at write time.** The ruling stops
+being a convention the form is trusted to honour and becomes a property the
+guard checks. A validator in two places will disagree the first time one is
+fixed, and the place a user meets a refusal is the worst place to learn that.
+
+Alongside it, a source scan: exactly one module may open a file for writing,
+and everything else in the package is refused. `test_the_server_has_no_write
+_path` is the read half's precedent, inverted.
+
 ### A candidate for slice 2: the crispness distribution
 
 Task 044 made `boundary_crispness` a **named reading of a distribution**
