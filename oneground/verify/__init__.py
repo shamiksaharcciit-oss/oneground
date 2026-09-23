@@ -38,6 +38,7 @@ and calling it "Qdrant's latency" is exactly the error this guards.
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -692,7 +693,7 @@ def plan_index_families(cfg, engine_names, coverages):
 
 def run(requirements_path, up=False, down=False, on_pod=False,
         target_override=None, endpoint_override=None, engines_override=None,
-        log_fn=log):
+        replace_verify=False, log_fn=log):
     """`target_override` and `endpoint_override` exist for
     `oneground calibrate engine`, which has to run locally against a
     Docker or already-running Qdrant whatever the requirements file says
@@ -810,7 +811,7 @@ def run(requirements_path, up=False, down=False, on_pod=False,
                  "not a capability."),
     }
     _write(req, workdir, result, requirements_path, engine_names, target,
-           engine_params, log_fn)
+           engine_params, log_fn, replace_verify=replace_verify)
     _summary(req, result, workdir)
     return workdir
 
@@ -1296,8 +1297,95 @@ def _verify_existing(req, cfg, workdir, engine_name, endpoint, session_id, ks,
     return out
 
 
+#: Where a displaced verify pair is kept, under the workdir.
+DISPLACED_VERIFY_DIR = "verify"
+
+
+class VerifyOutputExists(Exception):
+    """A verify run would have written over another run's receipts."""
+
+
+def guard_verify_output(workdir, environment_id, replace=False, log_fn=print):
+    """Nothing overwrites another run's verify receipts. Task 044j.
+
+    **This is the guard whose absence cost the project two weeks.** On
+    2026-09-13 a pod run wrote `verify.json` into
+    `runs/arxiv-150k-via-characterize/`, where the 9 September run's receipts
+    already were. Nothing refused and nothing kept a copy, so the evidence for
+    a verdict the site was publishing simply stopped existing -- and the site
+    went on publishing it for thirteen days, because the only thing that could
+    have replaced it was separately broken.
+
+    The rule has two halves and the second is the one that matters:
+
+      **refuse**   an incoming run whose `environment_id` differs from the one
+                   already there. That is a *different measurement* landing on
+                   another's receipts, and it is never what anyone meant.
+      **archive**  the existing pair first, always, even when the ids match
+                   and nothing is refused. A retry of the same environment is
+                   legitimate and its predecessor is still evidence.
+
+    Archiving unconditionally is what makes the refusal cheap enough to keep.
+    A guard that only refuses makes every honest re-run an argument with a
+    flag, and a guard people argue with is a guard people disable.
+
+    **Why the live path does not move.** Core proposed writing each run into
+    `runs/<name>/verify/<environment_id>/`. That is the better shape in the
+    abstract and it is not the cheaper one here: `verify.json` at the workdir
+    root is read by `calibrate`, `lab/runs.py`, `lab/receipt.py`, the pod
+    extractor, `report` and the teaser exporter. Moving it is six modules and
+    their tests, for a safety property that archiving already provides. So the
+    *displaced* copy takes core's layout and the live one stays where six
+    readers expect it.
+    """
+    live = os.path.join(workdir, "verify.json")
+    if not os.path.exists(live):
+        return None
+    try:
+        with open(live, encoding="utf-8") as f:
+            existing = json.load(f).get("environment_id")
+    except Exception:                                        # noqa: BLE001
+        existing = None
+
+    if existing != environment_id and not replace:
+        raise VerifyOutputExists(
+            "%s already holds verify.json from environment %s, and this run "
+            "is environment %s.\n"
+            "  Refusing: a different measurement would land on another run's "
+            "receipts, and the last time that happened the evidence behind a "
+            "published verdict was destroyed (task 044i).\n"
+            "  The existing pair is untouched. To proceed and keep it, re-run "
+            "with replace_verify=True, which archives it under %s/<id>/ "
+            "first."
+            % (workdir, existing or "an unreadable file", environment_id,
+               DISPLACED_VERIFY_DIR))
+
+    dest = os.path.join(workdir, DISPLACED_VERIFY_DIR,
+                        str(existing or "unknown"))
+    os.makedirs(dest, exist_ok=True)
+    kept = []
+    for name in ("verify.json", "verify_info.json"):
+        src = os.path.join(workdir, name)
+        if not os.path.exists(src):
+            continue
+        # Never overwrite an archive either: that would be the same defect
+        # one directory down, which is exactly how it would come back.
+        target_path = os.path.join(dest, name)
+        n = 1
+        while os.path.exists(target_path):
+            target_path = os.path.join(dest, "%s.%d%s" % (
+                name[:-5], n, ".json"))
+            n += 1
+        shutil.copy2(src, target_path)
+        kept.append(os.path.relpath(target_path, workdir).replace(os.sep, "/"))
+    if kept:
+        log_fn("verify: kept the previous run's receipts at %s"
+               % ", ".join(kept))
+    return kept
+
+
 def _write(req, workdir, result, requirements_path, engine_names,
-           target, engine_params, log_fn):
+           target, engine_params, log_fn, replace_verify=False):
     """verify.json holds the measurements; verify_info.json the declarations.
 
     Both are per-engine now. `engine_facts` is stripped out of every block in
@@ -1311,6 +1399,8 @@ def _write(req, workdir, result, requirements_path, engine_names,
         for b in result.get("engines", [])]
     measurement["run"] = req.name
     measurement["schema"] = intake.SCHEMA_VERSION
+    guard_verify_output(workdir, result.get("environment_id"),
+                        replace=replace_verify, log_fn=log_fn)
     write_json_stable(os.path.join(workdir, "verify.json"),
                       round_floats(measurement))
 

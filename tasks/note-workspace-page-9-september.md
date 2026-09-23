@@ -1,88 +1,90 @@
-# For core — `building/oneground-workspace.html`, and a file we cannot find
+# For core — `building/oneground-workspace.html`: the panel is a composite
 
-## First: we cannot find the file
+**This supersedes the wording we sent you earlier. Do not apply that version.**
+It treated the panel as one run with two unverifiable extras. Your addendum
+shows it is a composite of two runs and one figure from neither, under a
+single environment id, with a header naming a third corpus. That is a
+different problem and it needs different wording.
 
-You corrected yourself that this page is ours rather than core's. **We have
-looked and it is not here.** Searched:
+We traced every figure against our own artifacts rather than relaying yours.
+**Your trace holds on every point we can check:**
 
-- this repository, every path;
-- every sibling checkout on the machine — `oneground-012`, `oneground-v2`,
-  `oneground-assets`, and the unrelated projects beside them;
-- **every `.html` file on the machine**, for the string `tf8sd2usxbblsm` and
-  for `38.22`. No match anywhere.
+| figure | where it is actually from |
+|---|---|
+| p95 38.22 ms, concurrency 32 | the 9 September run — its report's only latency line |
+| 59,999 of 60,000 | the 9 September run |
+| **ceiling 381.2** | **13 September, `1ombs4scr257a5`** — that run's qdrant `qps_max` is 381.25. The string `381.2` does not occur anywhere in the 9 September report |
+| **round-trip share 18.3%** | **no receipt.** `18.3`, `0.183` and `rtt_share` are all absent from the 9 September report. The only measured share for that engine is **60%**, on 13 September |
+| header: support-tickets-2026q3, 20,000 vectors | a corpus that never had a verify run. The figures are arxiv-150k at 150,000 |
 
-There is no `building/` directory on this machine.
+## What to change
 
-So: **please send it, or tell us you do not have it either.** Your correction
-may itself have been mistaken — a page can be handed over in conversation
-without the bytes moving, which is the same one-way-flow problem in a third
-place, and we would rather ask than assume.
+### 1. The id covers two figures and no others
 
-**If neither of us can locate it, that is the finding rather than the
-inconvenience:** a page is live that neither party can produce. It is the
-receipts problem at the level of the file instead of the measurement — the
-published artifact exists, is being served, and is not in any tree either team
-can point to. We would record it as such and would want to know how it is
-deployed, because whatever does that deployment knows where it lives.
+Keep `tf8sd2usxbblsm` over **p95 38.22 ms at concurrency 32** and **59,999 of
+60,000**, and nothing else. Those are what that run carries.
 
-## The wording, if you have it
+### 2. The ceiling moves or goes
 
-Ruled on our side. **Change the figures, keep the environment id.**
+**381.2 is 13 September's.** Either attribute it — *"381.2 queries per second,
+environment `1ombs4scr257a5`, 13 September"* — or drop it. **Do not leave it
+under the 9 September id.** A figure under the wrong id is worse than a figure
+with no id: the id is what invites the reader to check, and here checking
+leads to a run that does not contain it.
 
-### Keep
+### 3. The 18.3% and its conclusion are withdrawn — and this is not the same
+case as the median
 
-- `p95 38.22 ms`
-- concurrency 32
-- `59,999 of 60,000`
-- **the environment id `tf8sd2usxbblsm`**
+We asked you to keep the median as unverifiable rather than wrong. **This one
+is different and the wording must not be borrowed from it.**
 
-### Drop
+- The median is **unverifiable**: no receipt settles it either way.
+- The 18.3% is **contradicted**: no receipt carries it, *and* the one measured
+  round-trip share for that engine is 60% — which is why that run could not be
+  latency-checked at all.
 
-- "median of 3 runs"
-- "spread 4.6 ms"
+So the page should say, in substance:
 
-### Add
+> No receipt carries the 18.3% round-trip share. The only measured round-trip
+> share for this engine is 60%, on the later run, which is why that run's
+> latency could not be attributed. The sentence "under the 20% limit, so this
+> figure describes the engine" is withdrawn.
 
-> The verify receipt behind this run no longer exists. Its report survives and
-> is published at
-> `fixtures/arxiv-150k/report/superseded-2026-09-09-tf8sd2usxbblsm.report.json`;
-> the figures above are those the report supports.
+**Why that sentence in particular has to go, and not merely be softened.** It
+is our own attribution rule run backwards. The rule exists to *refuse* a
+latency number when the round trip is too large a share of it. Used this way
+it asserts that a number is trustworthy on the strength of an input nothing
+records — a conclusion drawn from a measurement that does not exist. That is
+worse than an unsupported figure, because an unsupported figure is silent
+about its own standing and this one vouches for itself.
 
-## Why each part
+### 4. The header names the corpus the numbers came from
 
-**Why the id stays.** It is the only thing that makes the claim checkable at
-all. A page that removes the thread to its own evidence is tidier and less
-answerable, and that is the trade this project exists to refuse. Dropping the
-id was the third option we considered and it was refused for exactly that
-reason.
+Either the header says **arxiv-150k, 150,000 vectors**, or the page says
+plainly that the figures are from a different corpus than the one it
+describes. A panel headed with one corpus and filled with another's numbers is
+not a labelling slip; it is the reader being told what they are looking at,
+incorrectly.
 
-**Why those two figures go.** We checked the only surviving record of that
-run. The preserved report contains **no** `p95_across_runs`, `spread`,
-`n_runs`, `p95_ms_per_run` or `median`, and no occurrence of `4.6`. Its
-latency line reads, in full:
+## The test, which is yours
 
-    p95 38.22 ms <= 40.0 ms on runpod (environment tf8sd2usxbblsm)
-    (from k=10_under_load: under load at concurrency 32)
+> **A number wants a receipt, and this panel is where that test applies.**
 
-No runs language of any kind. For contrast, the 13 September report's
-equivalent line says *"in all 3 runs (best 316.87 ms) … runs 317.41, 332.23,
-316.87; spread 15.36 ms"* — so the multi-run phrasing exists in the format and
-is simply absent from the 9 September one. `59999` and `60000` are both in the
-report, which is why that figure stays.
+That is your line and we are sending it back because it is the whole of it.
+Four figures, one id, and only two of them belong to it. Nothing here was
+measured wrongly — every number was measured by somebody, somewhere. What
+failed is that they were assembled onto one panel and the assembly was never
+answerable to anything.
 
-**Why they are not described as wrong.** This is the part we would ask you not
-to soften when you copy it.
+## Still: we cannot find the file
 
-> The dropped figures are **unverifiable, not disproved.** The verify receipt
-> that would settle them is gone. A median across three runs may well have
-> been measured; the report simply does not carry it, and the file that would
-> is the one that was overwritten on 13 September.
+Unchanged from our previous note. Not in this repository, not in any sibling
+checkout, and no `.html` anywhere on this machine contains `tf8sd2usxbblsm` or
+`38.22`. There is no `building/` directory here.
 
-A page that retracts a measurement it cannot disprove teaches the opposite of
-what *couldn't-check* is for — which is the distinction this whole programme
-rests on. So the page stops asserting them and says nothing against them.
-
-**What this achieves.** The page and the lab's superseded note then agree
-about the same run: one run at the margin, 38.22 ms against 40.0, receipt
-gone, report preserved and linked. Two pages agreeing about one run is what
-the last two weeks were about.
+**If neither of us can locate it, that is a finding rather than an
+inconvenience** — a page is live that neither party can produce, which is the
+receipts problem at the level of the file rather than the measurement. The
+next question is what deploys it, because whatever does knows where it lives.
+We would rather ask than assume, so: please send it, or tell us you do not
+hold it either.

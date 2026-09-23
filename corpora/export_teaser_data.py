@@ -77,6 +77,7 @@ Requires: pyarrow, faiss, zstandard, pyyaml, numpy (the fixture's own deps).
 """
 
 import argparse
+import glob
 import hashlib
 import importlib.util
 import io
@@ -84,6 +85,8 @@ import json
 import os
 import platform
 import re
+import shutil
+import subprocess
 import sys
 import time
 
@@ -1507,6 +1510,120 @@ def _verify_multi(v, info, report, vp, ip):
     }
 
 
+#: Where a run a page cites is kept, so the page can point at it.
+CITED_RUNS_DIR = "fixtures/%s/report"
+
+
+def cited_run_destination(fixture_id, name="report.json"):
+    """Where a run a page cites belongs. Task 044j, core's second option.
+
+    `runs/` is a working directory: files there are ignored, overwritten in
+    place and deleted with the worktree that made them. **A page may not cite
+    one**, and `committed_report` refuses it. So a run that a page is going to
+    cite is copied here first, and this function is the one place that decides
+    where "here" is.
+
+    It exists as a function rather than as a convention because the route has
+    now been walked twice by hand -- once for `1ombs4scr257a5` and once for
+    the superseded 9 September report -- and a path spelled out twice by hand
+    is a path that will be spelled a third way.
+    """
+    return os.path.join(REPO_ROOT, CITED_RUNS_DIR % fixture_id, name)
+
+
+def copy_cited_run(src, fixture_id, name="report.json", log_fn=log):
+    """Copy a run's receipt to where a page may cite it, and verify the copy.
+
+    Verified **by digest, not by the copy call returning**. Rule 9 of this
+    project's own house rules exists because an artifact a report cites was
+    twice lost between being produced and being cited, and the second time it
+    was unrecoverable.
+
+    Refuses to write over an existing file with different bytes: the
+    destination is the durable copy, and silently replacing one is the defect
+    that destroyed the 9 September receipts one directory over.
+    """
+    dest = cited_run_destination(fixture_id, name)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    digest = sha256_file(src)
+    if os.path.exists(dest):
+        there = sha256_file(dest)
+        if there == digest:
+            log_fn("cited run already kept at %s (%s)"
+                   % (public_path(dest), there[:12]))
+            return dest, there
+        raise SystemExit(
+            "refusing to overwrite %s: it holds different bytes (%s) from the "
+            "file being copied (%s).\n"
+            "  This is the durable copy a page cites. Replacing it silently "
+            "is what destroyed the 9 September receipts.\n"
+            "  Give the new one a name that says which run it is."
+            % (public_path(dest), there[:12], digest[:12]))
+    shutil.copy2(src, dest)
+    got = sha256_file(dest)
+    if got != digest:
+        raise SystemExit("copy of %s to %s did not verify: %s vs %s"
+                         % (src, dest, digest, got))
+    log_fn("cited run kept at %s (%s)" % (public_path(dest), got[:12]))
+    return dest, got
+
+
+def committed_report(report_path):
+    """The verdict's source must be a file a commit holds. Task 044j.
+
+    **The published verdict used to cite `runs/arxiv-150k-via-characterize/
+    report.json`, and `runs/` is ignored.** So the page named a report no
+    commit held, nobody could rebuild the decision from the tree that
+    published it, and when a newer report of the same fixture appeared in
+    `fixtures/` nothing noticed the page was still citing the old one. That is
+    how a verdict stayed on the site for thirteen days after its own receipts
+    had been destroyed.
+
+    Refuses three things, and the third is the one that would have caught it:
+
+      - a source under `runs/`, which is a working directory;
+      - a source git does not track, or tracks as ignored;
+      - **silence when more than one committed report exists for the fixture.**
+        The exporter must say which it used. Picking one quietly is the
+        failure mode, not picking the wrong one.
+    """
+    rel = os.path.relpath(os.path.abspath(report_path), REPO_ROOT)
+    rel_posix = rel.replace(os.sep, "/")
+    if rel_posix.startswith("runs/"):
+        raise SystemExit(
+            "refusing to build a verdict from %s: it is under runs/, which is "
+            "a working directory and is not committed.\n"
+            "  A published decision has to be rebuildable from this tree, and "
+            "a page that cites an untracked file is a page nobody can check.\n"
+            "  Copy the run into fixtures/<id>/report/ and export from there."
+            % rel_posix)
+
+    r = subprocess.run(["git", "ls-files", "--error-unmatch", rel_posix],
+                       cwd=REPO_ROOT, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit(
+            "refusing to build a verdict from %s: git does not track it.\n"
+            "  The page would cite a report that no commit holds, so the "
+            "decision could not be rebuilt by anyone who cloned this "
+            "repository -- which is exactly what happened in task 044i.\n"
+            "  Commit it, or export from a report that is committed."
+            % rel_posix)
+
+    siblings = sorted(
+        p for p in glob.glob(os.path.join(os.path.dirname(report_path),
+                                          "*report*.json"))
+        if os.path.isfile(p))
+    if len(siblings) > 1:
+        log("verdict source: %s" % rel_posix)
+        log("  %d committed reports sit beside it; this export used the one "
+            "named by --report and nothing was inferred:" % len(siblings))
+        for p in siblings:
+            log("    %s%s" % (public_path(p),
+                              "   <- used" if os.path.samefile(p, report_path)
+                              else ""))
+    return rel_posix
+
+
 def build_verdict(report, report_path):
     """Task 010's decision, copied out of report.json without re-deriving it.
 
@@ -1602,7 +1719,12 @@ def build_verdict(report, report_path):
     return {
         "run": report["run"],
         "generated_at": report["generated_at"],
-        "source": public_path(report_path),
+        "source": committed_report(report_path),
+        # Task 044j, core's addition: the verdict named its source path and
+        # not that file's digest, so the path could be right and the bytes
+        # anything. `measured.k_sweep` already did this; the verdict is the
+        # block where it matters most.
+        "source_sha256": sha256_file(report_path),
         "schema": report["schema"],
         # Task 044i. The run this page used to show, kept visible rather than
         # deleted: a page that silently replaces one decision with another
