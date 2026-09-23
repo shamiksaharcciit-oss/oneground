@@ -318,6 +318,72 @@ It is also why **a fixture is never a leaderboard**: its value is that it is
 an unmoving thing to be checked against, and a number under pressure to rank
 well is a number under pressure to move.
 
+### The third reason, arrived at from a different direction
+
+The two above are about catching errors in new code. This one is about what
+the tool can tell a user at all, and it was reached by trying to build
+something and finding it could not be built any other way.
+
+Task 044b asked whether a measurement has stopped meaning anything for a
+user's corpus. Two readings, both deep in the tail of their own distribution,
+both statistically sound:
+
+| reading | value | threshold percentile | σ from degenerate |
+|---|---|---|---|
+| `arxiv-150k` crispness — works | 0.0363 | 96.37 | 75.2 |
+| a second embedding's ambiguity — stopped transferring | 0.9780 | 97.74 | 6.7 |
+
+**No quantity measurable on one corpus separates them.** What differs is
+whether the reading discriminates *between* corpora, and that is not a
+property of one corpus. The tool measures one corpus at a time, so no
+single-corpus check can see it, and inventing a flag would be inventing a
+signal that is not there.
+
+What a single corpus *can* be compared against is **where the same threshold
+falls on corpora whose values are frozen**. That comparison is the only
+warning available, and the frozen fixtures are not an input to it — they are
+the whole of it. Without them the tool can report a number and cannot say
+whether the number means anything.
+
+### The limit: this reference is too thin to catch the next thing
+
+The three reasons above say what the fixtures have caught. This says what they
+currently cannot, because a stated limit is worth more than a wish.
+
+The comparison in the third reason needs a band: where a threshold sits across
+the published corpora. Measured on the full fixtures:
+
+| threshold | per-fixture percentile | band |
+|---|---|---|
+| crispness 1.20 | 89.25, 96.37, 98.83 | **89.25 – 98.83** |
+| ambiguity 1.10 | 65.44, 89.28, 90.87 | **65.44 – 90.87** |
+
+Two things follow, both measured in task 044b.
+
+**A smoke fixture cannot calibrate a measure.** `arxiv-smoke` places the
+crispness threshold at the 47.17th percentile, and including it widened the
+band to 47.2 – 98.8 — half the distribution, which barely discriminates
+anything. A 2,000-vector fixture exists to check that a command runs. Smoke
+fixtures are therefore excluded from the band, and that choice is recorded in
+the code beside the constant rather than left to be inferred from an absence.
+
+**Three full corpora is a thin reference.** Ambiguity's band still spans a
+quarter of the distribution. It is wide enough to say that a reading at the
+97.7th percentile is outside it, and not much finer than that — so it can
+catch a gross failure and would miss a subtle one.
+
+That is the concrete argument for a **fourth and fifth full fixture**: not
+more corpora for their own sake, but a tighter band, and therefore a warning
+that can distinguish a reading which has drifted from one which has failed.
+Until they exist, the limit stands as written here.
+
+**And a band needs a floor.** The threshold's position drifts with sample size
+and converges on the published value from below — `arxiv-150k` reads the
+87.46th percentile at 5,000 vectors against its own published 96.37th — so
+below 10,000 vectors the comparison is not made at all. A corpus measured too
+small would otherwise be flagged for its size rather than its geometry, and a
+false alarm degrades a warning faster than silence does.
+
 ## Getting the artifacts
 
 The small artifacts are in the repository. The large ones — `vectors.npy`,

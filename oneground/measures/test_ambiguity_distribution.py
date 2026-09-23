@@ -149,6 +149,97 @@ def test_every_published_ambiguity_reproduces_and_is_resolvable(name, parquet,
     assert A.reading(d)["resolvable"] is True, name
 
 
+def test_the_published_percentile_constants_still_match_the_fixtures():
+    """NOT synthetic. The reference is a published value and is checked like one.
+
+    Both constants were derived from the published ground views once. If a
+    fixture is ever rebuilt, they go stale silently and every `transfer` block
+    starts weighing a corpus against a band that no longer exists.
+    """
+    pq = pytest.importorskip("pyarrow.parquet")
+    for stem, table, threshold in (
+            ("ground_view_base", C.PUBLISHED_CRISP_PERCENTILES, C.CRISP_RATIO),
+            ("ground_view_queries", A.PUBLISHED_AMBIGUITY_PERCENTILES,
+             A.AMBIGUOUS_RATIO)):
+        for name, recorded in table.items():
+            path = os.path.join(REPO, "fixtures", name, stem + ".parquet")
+            if not os.path.exists(path):
+                pytest.skip("%s absent" % path)
+            r = pq.read_table(path, columns=["ratio"])["ratio"].to_numpy()
+            got = C.threshold_percentile(
+                C.ratio_distribution(_dists(r)), threshold)
+            assert got == pytest.approx(recorded, abs=0.05), (
+                "%s/%s: recorded %.2f, fixture says %.2f"
+                % (name, stem, recorded, got))
+
+
+def test_a_reading_outside_the_published_band_says_so_synthetic():
+    """The signal the block exists for, and it must not be a verdict.
+
+    Measured in 044b: e5's ambiguity threshold lands at the 97.74th percentile
+    against a published band of 65.4-93.9. The user meets 0.978 with something
+    to weigh it against, which is the whole point — and the note must stop
+    short of claiming the number is wrong, because no measurement of one
+    corpus could establish that.
+    """
+    got = C.against_published(97.74, A.PUBLISHED_AMBIGUITY_PERCENTILES,
+                              A.AMBIGUOUS_RATIO, "rate")
+    assert got["outside_published_range"] is True
+    assert "never been calibrated" in got["note"]
+    assert "not a demonstration that the number is wrong" in got["note"]
+    # and it carries what the comparison assumes, unasked
+    assert "sample size" in got["basis"]
+
+    inside = C.against_published(80.0, A.PUBLISHED_AMBIGUITY_PERCENTILES,
+                                 A.AMBIGUOUS_RATIO, "rate")
+    assert inside["outside_published_range"] is False
+    assert "has been calibrated" in inside["note"]
+
+
+def test_a_small_sample_is_not_compared_against_the_band():
+    """Measured in 044b: the threshold's position drifts upward with sample
+    size and converges on the published value. At 5,000 vectors `arxiv-150k`
+    reads the 87.46th percentile against its own published 96.37th — so a
+    small sample would be flagged as outside the band for reasons of sample
+    size, which is a false alarm on the one signal the block exists to give.
+    """
+    small = C.against_published(87.46, C.PUBLISHED_CRISP_PERCENTILES,
+                                C.CRISP_RATIO, "count", n=5000)
+    assert small["outside_published_range"] is None
+    assert small["outcome"] == "couldnt_check"
+    assert "false alarm" in small["note"]
+    # the percentile itself is still reported; only the comparison is withheld
+    assert small["threshold_percentile"] == 87.46
+
+    big = C.against_published(87.46, C.PUBLISHED_CRISP_PERCENTILES,
+                              C.CRISP_RATIO, "count", n=150000)
+    assert big["outside_published_range"] is True
+    assert "outcome" not in big
+
+
+def test_smoke_fixtures_are_excluded_from_the_reference_band():
+    """Ruled in 044b: a 2,000-vector fixture checks that a command runs, it
+    does not calibrate a measure, and a band over both kinds is dominated by
+    the looser one. Including `arxiv-smoke` widened crispness's band to
+    47.2-98.8 — half the distribution, which barely discriminates.
+    """
+    for table in (C.PUBLISHED_CRISP_PERCENTILES,
+                  A.PUBLISHED_AMBIGUITY_PERCENTILES):
+        assert "arxiv-smoke" not in table, table
+        assert len(table) == 3, table
+    lo, hi = C.published_range(C.PUBLISHED_CRISP_PERCENTILES)
+    assert lo > 80.0, (lo, hi)       # 89.25 with the smoke fixture excluded
+
+
+def test_every_reading_carries_its_transfer_block_synthetic():
+    rng = np.random.default_rng(13)
+    d = _dists(1.0 + rng.gamma(1.5, 0.05, size=3000))
+    for got in (A.reading(d), C.reading(d)):
+        assert "transfer" in got
+        assert "published_range" in got["transfer"]
+        assert "outside_published_range" in got["transfer"]
+
+
 def test_the_threshold_already_sits_high_in_every_fixture():
     """The finding this task exists to record, as a check rather than prose.
 

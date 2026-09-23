@@ -242,6 +242,128 @@ def distinguishable(value, n, degenerate=0.0):
     return bool(sigma >= DISTINGUISHABILITY_SIGMA), n_informative, sigma
 
 
+#: Where 1.20 sits in each published fixture's own base ratio distribution.
+#: Derived from the published `ground_view_base.parquet` files, recorded here
+#: with its provenance, and re-checked against them by a test.
+#:
+#: This is the reference a single corpus is weighed against, and it exists
+#: because **no single-corpus quantity can separate a working reading deep in
+#: a tail from a broken one** (task 044b). `arxiv-150k`'s published crispness
+#: sits at the 96.37th percentile and works; e5's ambiguity sits at the 97.74th
+#: and has stopped transferring. Both are statistically sound and both are deep
+#: in a tail. What differs is whether the reading discriminates BETWEEN
+#: corpora, which is not a property of one corpus -- so the only thing a single
+#: reading can be compared against is where the same threshold falls on corpora
+#: whose values are frozen.
+#: **Smoke fixtures are excluded, deliberately.** `arxiv-smoke` puts this
+#: threshold at the 47.17th percentile, and including it widened the band to
+#: 47.2-98.8 -- a range spanning half the distribution, which barely
+#: discriminates anything. A 2,000-vector smoke fixture exists to check that a
+#: command runs, not to calibrate a measure, and a band computed over both
+#: kinds is dominated by the looser one. So the reference is the full fixtures
+#: only, and this comment is where that choice is recorded rather than
+#: inferred from an absence.
+PUBLISHED_CRISP_PERCENTILES = {
+    "arxiv-150k": 96.37,
+    "sec-filings-10k": 89.25,
+    "stackexchange-150k": 98.83,
+}
+
+#: What the comparison assumes, and it is not nothing.
+#:
+#: These percentiles were measured at the published settings: 150,000 vectors
+#: and `N_CENTROIDS` regions. `characterize` always uses `N_CENTROIDS`, so the
+#: centroid count matches by construction -- but a user sampling fewer vectors
+#: is compared against a band measured on more, and how much the threshold's
+#: position moves with sample size **has not been measured**. That is task
+#: 044c's question and until it is answered this comparison carries the
+#: assumption rather than having discharged it.
+PUBLISHED_PERCENTILE_BASIS = (
+    "measured on the full published fixtures at 150,000 vectors and "
+    "N_CENTROIDS regions; smoke fixtures excluded. The threshold's position "
+    "drifts upward with sample size at a fixed centroid count and converges "
+    "on the published value, so the comparison is only made at or above "
+    "MIN_N_FOR_TRANSFER.")
+
+#: Below this many vectors the transfer comparison is not made at all.
+#:
+#: **Measured, not guessed** (task 044b), on the published vectors at the
+#: production centroid count, which isolates sample size:
+#:
+#:     arxiv-150k          n=5,000   87.46   OUTSIDE its own band
+#:                        n=10,000   93.40   inside
+#:                        n=20,000   95.79   inside
+#:                        n=50,000   96.42   inside   (published 96.37)
+#:     stackexchange-150k  n=5,000   91.45 .. n=50,000 98.64 (published 98.83)
+#:
+#: At 5,000 vectors **arxiv's own published corpus reads outside its own band
+#: under the anchor model** -- a false alarm on precisely the signal this
+#: comparison exists to give, and a false alarm degrades a warning faster than
+#: silence does. The position converges from below as n grows, so the floor is
+#: set where the measurement shows the drift has stopped mattering, which is
+#: also the sample size this project already recommends.
+MIN_N_FOR_TRANSFER = 10000
+
+
+def published_range(per_fixture):
+    return (min(per_fixture.values()), max(per_fixture.values()))
+
+
+def against_published(pct, per_fixture, threshold, what, n=None):
+    """How this corpus's threshold position compares with the published ones.
+
+    It is **not a verdict**: a position outside the published band is a reason
+    to weigh the reading, not a demonstration that it is wrong, and nothing
+    measurable on one corpus could demonstrate that.
+
+    Below `MIN_N_FOR_TRANSFER` the comparison is **not made** -- it is
+    couldn't-check, because the measured drift shows a small sample lands
+    outside the band for reasons of sample size.
+    """
+    lo, hi = published_range(per_fixture)
+    out = {
+        "threshold_percentile": pct,
+        "published_range": [lo, hi],
+        "published_per_fixture": dict(per_fixture),
+        "basis": PUBLISHED_PERCENTILE_BASIS,
+    }
+    if n is not None and int(n) < MIN_N_FOR_TRANSFER:
+        out["outside_published_range"] = None
+        out["outcome"] = "couldnt_check"
+        out["note"] = (
+            "not compared: %d vectors is below the %d this comparison needs. "
+            "The threshold's position drifts upward with sample size and "
+            "converges on the published value, so a smaller sample lands "
+            "below the band for reasons of sample size rather than of "
+            "embedding -- measured: arxiv-150k reads the 87.46th percentile "
+            "at 5,000 vectors against its own published 96.37th. Comparing "
+            "here would raise a false alarm on the one signal this block "
+            "exists to give. The threshold still sits at the %.2fth "
+            "percentile of this corpus, which is reported above."
+            % (int(n), MIN_N_FOR_TRANSFER, pct))
+        return out
+    outside = not (lo <= pct <= hi)
+    out["outside_published_range"] = outside
+    if outside:
+        out["note"] = (
+            "%.2f sits at the %.2fth percentile of this corpus's ratio "
+            "distribution. On the published corpora the same threshold sits "
+            "between the %.1fth and the %.1fth. This reading is being taken "
+            "somewhere the measure has never been calibrated, so a %s here "
+            "does not mean what the same number means on those corpora. It is "
+            "a reason to read the distribution rather than the number; it is "
+            "not a demonstration that the number is wrong, and no measurement "
+            "of one corpus could be."
+            % (threshold, pct, lo, hi, what))
+    else:
+        out["note"] = (
+            "%.2f sits at the %.2fth percentile here, inside the %.1fth to "
+            "%.1fth the published corpora span, so this reading is being "
+            "taken where the measure has been calibrated."
+            % (threshold, pct, lo, hi))
+    return out
+
+
 def threshold_percentile(distribution, threshold=CRISP_RATIO):
     """Where the threshold falls in the distribution, as a percentile.
 
@@ -278,6 +400,10 @@ def reading(d_base, threshold=CRISP_RATIO, with_distribution=False):
       `threshold_percentile`  where that sits in this corpus's distribution
       `resolvable`            whether enough vectors are above it to be a
                               proportion at all
+      `transfer`              where the same threshold sits on the published
+                              corpora, and whether this one is outside that
+                              band -- the only thing a single reading can be
+                              weighed against, and not a verdict
 
     `resolvable` is a **couldn't-check on the reading, not on the measure**:
     the distribution was measured fine and it is the count that cannot be
@@ -298,6 +424,8 @@ def reading(d_base, threshold=CRISP_RATIO, with_distribution=False):
         "sigma_from_zero": sigma,
         "threshold_percentile": pct,
         "resolvable": resolvable,
+        "transfer": against_published(pct, PUBLISHED_CRISP_PERCENTILES,
+                                      threshold, "count", n=n),
         "note": ("a count of the vectors above %.2f, which is the %.2fth "
                  "percentile of this corpus's ratio distribution under this "
                  "embedding. A different embedding places the same threshold "
@@ -318,3 +446,4 @@ def reading(d_base, threshold=CRISP_RATIO, with_distribution=False):
     if with_distribution:
         out["distribution"] = dist
     return out
+

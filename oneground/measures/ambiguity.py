@@ -42,14 +42,34 @@ computed before -- and what is added sits beside it.
 
 import numpy as np
 
-from .crispness import (DISTINGUISHABILITY_SIGMA, distinguishable,
-                        ratio_distribution, threshold_percentile)
+from .crispness import (DISTINGUISHABILITY_SIGMA, against_published,
+                        distinguishable, ratio_distribution,
+                        threshold_percentile)
 
 #: The threshold of the published reading. **Not a parameter.** Every
 #: published `ambiguous_query_rate` and the fixture specs' definition prose
 #: state it, so moving it moves them. What 044b added is the distribution the
 #: reading is a reading *of*.
 AMBIGUOUS_RATIO = 1.10
+
+#: Where 1.10 sits in each published fixture's own QUERY ratio distribution.
+#: Derived from the published `ground_view_queries.parquet` files and
+#: re-checked against them by a test.
+#:
+#: **Smoke fixtures excluded**, for the reason recorded beside
+#: `PUBLISHED_CRISP_PERCENTILES`: a 2,000-vector fixture exists to check that
+#: a command runs, not to calibrate a measure.
+#:
+#: **A reference is only as tight as the corpora in it, and three is a thin
+#: reference.** This band spans 65 to 91 — a quarter of the distribution — so
+#: it can say that e5's 97.7 is outside and it cannot say much finer than
+#: that. A fourth and fifth full fixture would tighten it; see
+#: `docs/FIXTURES.md`, which records this as a stated limit rather than a wish.
+PUBLISHED_AMBIGUITY_PERCENTILES = {
+    "arxiv-150k": 89.28,
+    "sec-filings-10k": 65.44,
+    "stackexchange-150k": 90.87,
+}
 
 
 def ambiguous_query_rate(d_queries):
@@ -96,6 +116,8 @@ def reading(d_queries, threshold=AMBIGUOUS_RATIO, with_distribution=False):
         "sigma_from_one": sigma,
         "threshold_percentile": pct,
         "resolvable": resolvable,
+        "transfer": against_published(pct, PUBLISHED_AMBIGUITY_PERCENTILES,
+                                      threshold, "rate", n=n),
         "note": ("a rate of the queries at or below %.2f, which is the %.2fth "
                  "percentile of this corpus's query ratio distribution under "
                  "this embedding. A different embedding places the same "
@@ -118,3 +140,4 @@ def reading(d_queries, threshold=AMBIGUOUS_RATIO, with_distribution=False):
     if with_distribution:
         out["distribution"] = dist
     return out
+
