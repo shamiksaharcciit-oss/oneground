@@ -849,8 +849,17 @@ class LabServer:
         bad = [r["name"] for r in rows if r["manifest"]["all_verified"]
                is not True]
         note = f", {len(bad)} unverified ({', '.join(bad)})" if bad else ""
+        # It said "(read-only; nothing runs from this page)" until this
+        # slice gave the page a write half, and the page's own eyebrow was
+        # corrected in the same commit while this line was not -- the claim
+        # lived in two places and only one was in front of me. Corrected the
+        # same way and for the same reason: say what is true and stop, since
+        # "nothing runs" is step 3 of this brief and a sentence that has to
+        # be edited again shortly is stale before it is written
+        # (`docs/PRACTICE.md` 1.2).
         return (f"oneground ui: {len(rows)} run(s) under {shown_dir}{note} -- "
-                f"{self.url}  (read-only; nothing runs from this page) "
+                f"{self.url}  (served from this machine; "
+                f"reads runs, writes requirements files) "
                 f"[{seconds:.1f}s]")
 
     def startup_line(self, seconds, shown_workdir):
