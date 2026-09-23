@@ -67,7 +67,9 @@ Definitions are in each spec and are identical across the three: crispness is th
 fraction of base vectors whose second-nearest centroid distance exceeds 1.20×
 the nearest under k-means with 256 centroids; ambiguity is the fraction of
 queries with `d2 <= 1.10 × d1` against the same centroids; skew is the share of
-base vectors in the 10 largest regions; drift trains centroids on records
+base vectors in the 10 largest **of those 256 regions** — the count is part of
+this definition, because task 044c measured that skew is the one of the five
+that holds no tolerance away from it; drift trains centroids on records
 before the cutoff and measures recall@10 at one-region routing separately on
 queries either side.
 
