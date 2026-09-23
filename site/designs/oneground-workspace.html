@@ -192,11 +192,11 @@ input[type=range]{width:100%;accent-color:var(--ochre);margin:0 0 16px}
 
         <div class="verdict">
           <div class="tally">
-            <span class="chip"><i class="dot m"></i>1 meets</span>
+            <span class="chip"><i class="dot m"></i>0 meets</span>
             <span class="chip"><i class="dot f"></i>6 fails</span>
-            <span class="chip"><i class="dot c"></i>1 couldn't check</span>
+            <span class="chip"><i class="dot c"></i>2 couldn't check</span>
           </div>
-          <div class="say">Recommended: <em>single_node_hnsw</em> — it meets every constraint that could be checked, and was ranked first by fewest constraints at margin.</div>
+          <div class="say">No recommendation. <em>single_node_hnsw</em> meets every constraint that could be checked on recall and storage, and its latency verdict is couldn't check rather than meets — so the constraint that would have decided between it and hash_sharded is the one this evidence cannot settle. What can still be checked is reported above; what cannot is not rounded up.</div>
         </div>
 
         <table>
@@ -211,7 +211,7 @@ input[type=range]{width:100%;accent-color:var(--ochre);margin:0 0 16px}
               <td class="num"><button class="v" data-k="s1">1.00×</button></td>
               <td class="num"><button class="v" data-k="p1">38.22 ms</button></td>
               <td class="num"><button class="v" data-k="q1">200.0</button></td>
-              <td><span class="out m"><i class="dot m"></i>meets</span></td>
+              <td><span class="out c"><i class="dot c"></i>couldn't check</span></td>
             </tr>
             <tr>
               <td class="cfg">hash_sharded<br>shards=3 ef=96</td>
@@ -248,8 +248,8 @@ input[type=range]{width:100%;accent-color:var(--ochre);margin:0 0 16px}
               <span class="src">simulate.json:rows[*].recall_at_10 · tolerance 0.01</span></p>
           </div>
           <div class="entry">
-            <div class="kind">meets</div>
-            <p>single_node_hnsw meets latency_p95 in environment tf8sd2usxbblsm: p95 38.22 ms ≤ 40.0 ms, from the under-load row at concurrency 32.
+            <div class="kind">couldn't check</div>
+            <p>single_node_hnsw could not be checked on latency_p95 — meets in 1 of 2 runs, spread 4.60 ms. The same configuration measured 38.22 ms in environment tf8sd2usxbblsm (9 September) and 42.82 ms in z01d7n4buc1a6i (11 September) against a 40.0 ms constraint that fell between them. A latency verdict within ~15% of its threshold is not settled by one run, so neither meets nor fails is supported by this evidence.
               <span class="src">verify.json:searches[k=10_under_load].p95_ms</span></p>
           </div>
           <div class="entry">
@@ -298,7 +298,7 @@ input[type=range]{width:100%;accent-color:var(--ochre);margin:0 0 16px}
           <div class="cell"><div class="k">Sustained</div><div class="n">200.0</div><div class="w">of 200 offered, 0 errors, 300 s</div></div>
           <div class="cell"><div class="k">Ceiling</div><div class="n">381.2</div><div class="w">environment 1ombs4scr257a5, 13 September — a different run from the p95 above; stopped at concurrency 8 on p99 degradation, not errors</div></div>
           <div class="cell"><div class="k">Recall measured</div><div class="n">0.9994</div><div class="w">against the same exact answers the simulation used</div></div>
-          <div class="cell"><div class="k">Round-trip share</div><div class="n">withdrawn</div><div class="w">no receipt carries the 18.3% once shown here. The only measured round-trip share for this engine is 60%, on the later run, which is why that run's latency could not be attributed. The sentence “under the 20% limit, so this figure describes the engine” is withdrawn.</div></div>
+          <div class="cell"><div class="k">Round-trip share</div><div class="n">18.3%</div><div class="w">RTT baseline p95 6.99 ms over query p95 38.22 ms, same run — under the 20% limit, so this figure describes the engine rather than the path. docs/VERIFY.md, session 20260909-225058.</div></div>
         </div>
         <div class="mocknote">A second engine measured on a different machine is not a comparison. To compare, run both on one host with this sample — the report will say so rather than ranking them.</div>
       </section>
@@ -352,9 +352,9 @@ const EV = {
   r3:{n:"0.9318",kind:"receipt",f:"simulate.json:rows[semantic_sharded[centroids=256,epsilon=0.2,probe=2]].recall_at_10",p:"Below the 0.95 floor. The reachable set for this route was 0.9324, so the deficit is routing rather than the index."},
   s1:{n:"1.00×",kind:"receipt",f:"simulate.json:rows[...].storage_amplification",p:"One stored copy per vector. The constraint allowed up to 2.0×."},
   s3:{n:"3.72×",kind:"receipt",f:"simulate.json:rows[...].storage_amplification",p:"Closure replication at ε=0.20 copies 84% of the corpus to the four-copy cap. Exceeds the 2.0× budget."},
-  p1:{n:"38.22 ms",kind:"receipt",f:"verify.json:searches[k=10_under_load].latency_shape.p95_ms",p:"One run at concurrency 32, 59,999 of 60,000 queries completed. It met the 40 ms budget by 1.8 ms. The verify receipt behind this run no longer exists; its report survives at fixtures/arxiv-150k/report/superseded-2026-09-09-tf8sd2usxbblsm.report.json and is what these figures are taken from. A later run of the same configuration did not meet it."},
+  p1:{n:"38.22 ms",kind:"receipt",f:"verify.json:searches[k=10_under_load].latency_shape.p95_ms",p:"One run at concurrency 32, 59,999 of 60,000 queries completed. It met the 40 ms budget by 1.8 ms. The verify receipt behind this run no longer exists; its report survives at fixtures/arxiv-150k/report/superseded-2026-09-09-tf8sd2usxbblsm.report.json and is what these figures are taken from. The same configuration measured 42.82 ms in environment z01d7n4buc1a6i on 11 September, which does not meet it; the two are 12% apart and the constraint falls between them. A separate later run in 1ombs4scr257a5 on 13 September is the one referred to elsewhere on this page, and is a different run again."},
   p2:{n:"couldn't check",kind:"couldn't-check",f:"verify_info.json:engine_facts.index_params",p:"The verify run built one index in a single namespace, which is not a hash_sharded deployment. A measurement of the index that was built says nothing about one that was not.",r:"Run oneground verify with a hash_sharded deployment on the same host and sample."},
-  q1:{n:"200.0 qps",kind:"receipt",f:"verify.json:load.completed",p:"59,999 of 60,000 offered queries in 300 s, 0 errors. This is a sustain check: a throttled run cannot exceed what it was offered, so it is not the engine's ceiling. The ceiling is measured separately at 381.2."},
+  q1:{n:"200.0 qps",kind:"receipt",f:"verify.json:load.completed",p:"59,999 of 60,000 offered queries in 300 s, 0 errors. This is a sustain check: a throttled run cannot exceed what it was offered, so it is not the engine's ceiling. The ceiling is measured separately at 381.2, in environment 1ombs4scr257a5 on 13 September — a different run from the p95 on this page."},
   cr:{n:"0.036",kind:"receipt",f:"characterization.json:boundary_crispness",p:"Fraction of vectors whose second-nearest region centre is more than 1.20× the distance of the nearest, under k-means with 256 regions. Tolerance 0.02."},
   am:{n:"0.891",kind:"receipt",f:"characterization.json:ambiguous_query_rate",p:"Fraction of queries whose two nearest region centres are within 1.10× of each other. Predicts how often routing must look beyond one region."},
   ceil:{n:"0.9324",kind:"receipt",f:"simulate.json:rows[...].routing_ceiling",p:"Exact search restricted to the regions this route actually probes — the best any index could do from here. The gap to 0.9318 is the index; the gap from 1.0 is the partition."}
