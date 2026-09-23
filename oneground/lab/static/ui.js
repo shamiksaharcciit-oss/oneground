@@ -544,7 +544,14 @@
     const h = window.location.hash || '#/runs';
     const parts = h.replace(/^#\//, '').split('/').map(decodeURIComponent);
     try {
-      if (parts[0] === 'run' && parts[2] === 'report') {
+      if (parts[0] === 'new') {
+        // The write half lives in compose.js and installs this hook. The
+        // seam is here so that the router stays in one file while the POSTs
+        // stay out of this one -- see that file's opening note.
+        if (!window.onegroundCompose) throw new Error(
+          'the write half did not load, so this page cannot write a file');
+        await window.onegroundCompose();
+      } else if (parts[0] === 'run' && parts[2] === 'report') {
         await showReport(parts[1]);
       } else if (parts[0] === 'run' && parts[1]) {
         await showRun(parts[1]);
@@ -562,11 +569,27 @@
     check = await api('/api/check');
     document.querySelector('.run-name').textContent =
       check.runs_dir + ' · ' + check.n_runs + ' run(s)';
+    // It said "read-only · nothing runs from this page" until this slice
+    // gave it a write half, and the first half of that became false the
+    // hour the form landed. The replacement says what is true and stops
+    // there: "nothing runs from this page" is also about to change, and a
+    // sentence that has to be edited in two commits' time is the liability
+    // docs/PRACTICE.md section 1 is about.
     document.querySelector('.eyebrow').textContent =
-      'oneground ui · served from this machine · read-only · '
-      + 'nothing runs from this page';
+      'oneground ui · served from this machine · reads runs, '
+      + 'writes requirements files';
     const tabs = document.querySelector('.tabs');
-    if (tabs) tabs.remove();
+    if (tabs) {
+      tabs.textContent = '';
+      const a = document.createElement('a');
+      a.href = '#/runs';
+      a.textContent = 'Runs';
+      const n = document.createElement('a');
+      n.href = '#/new';
+      n.textContent = 'New requirements file';
+      tabs.appendChild(a);
+      tabs.appendChild(n);
+    }
     const lab = document.getElementById('lab-panels');
     if (lab) lab.remove();
     window.addEventListener('hashchange', route);

@@ -37,6 +37,11 @@
       if (check.mode === 'runs') {
         document.body.classList.add('mode-runs');
         load('ui.js');
+        // The write half, and only here. A `oneground lab` session serves
+        // one run for reading and its server refuses every write, so
+        // loading the form there would put a page in front of a user that
+        // cannot do the thing it offers.
+        load('compose.js');
       } else {
         document.body.classList.add('mode-run');
         load('lab.js');

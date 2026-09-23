@@ -77,6 +77,7 @@ STATIC = {
     "/static/lab.js": ("lab.js", "text/javascript; charset=utf-8"),
     "/static/boot.js": ("boot.js", "text/javascript; charset=utf-8"),
     "/static/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/static/compose.js": ("compose.js", "text/javascript; charset=utf-8"),
     "/static/ui.css": ("ui.css", "text/css; charset=utf-8"),
 }
 ENDPOINTS = {
@@ -112,6 +113,11 @@ WRITE_ENDPOINTS = {
 #: than the largest example in the tree and it is here so that an unbounded
 #: body cannot be posted to a loopback server.
 MAX_BODY = 1 << 20
+
+#: How much of an over-sized body is drained so that the refusal can be read.
+#: Above this the connection is closed instead: a caller sending eight
+#: megabytes to a loopback form is not owed a readable answer.
+DRAIN_CEILING = 8 << 20
 SECURITY_HEADERS = (
     ("Content-Security-Policy",
      "default-src 'none'; script-src 'self'; style-src 'self'; "
@@ -446,10 +452,23 @@ class LabServer:
             req.close_connection = True
             return self.send(req, 400, {"error": "unreadable Content-Length"})
         if length > MAX_BODY:
-            # The one case the body is not drained: reading it is the thing
-            # being refused. So the connection is closed deliberately rather
-            # than left to reset.
-            req.close_connection = True
+            # Refusing without reading resets the connection, and the client
+            # then sees a transport error instead of the refusal -- the same
+            # defect as below, in the one place it is tempting to accept,
+            # because reading the body is the thing being refused.
+            #
+            # So it is drained and discarded in chunks up to a hard ceiling.
+            # Under the ceiling the client gets a clean 413 it can read; over
+            # it, nothing is owed to a caller sending eight megabytes to a
+            # loopback form, and the connection is closed.
+            remaining = min(length, DRAIN_CEILING)
+            while remaining > 0:
+                chunk = req.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+            if length > DRAIN_CEILING:
+                req.close_connection = True
             return self.send(req, 413, {
                 "error": f"a requirements document over {MAX_BODY} bytes is "
                          "not one this form wrote"})
