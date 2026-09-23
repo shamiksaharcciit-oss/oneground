@@ -39,7 +39,8 @@ from . import environment
 from . import intake
 from .measures import centroid_dists, kmeans, two_nn_lid
 from .measures.ambiguity import AMBIGUOUS_RATIO, ambiguous_query_rate
-from .measures.crispness import CRISP_RATIO, N_CENTROIDS, boundary_crispness
+from .measures.crispness import (CRISP_RATIO, N_CENTROIDS, boundary_crispness,
+                                 reading as crispness_reading)
 from .measures.drift import drift_pair
 from .measures.skew import skew_top10_share
 from .receipts import (MANIFEST_NAME, library_versions, producing_version,
@@ -62,6 +63,7 @@ DECLARED_FILES = ["characterization.json", "build_info.json"]
 # every consumer that already renders a couldnt_check string renders it with
 # no change.
 MEASURED_FIELDS = ("intrinsic_dimensionality", "boundary_crispness",
+                   "crispness_reading",
                    "skew_top10_share", "ambiguous_query_rate", "drift")
 
 DECLARED_NOT_MEASURED = f"{COULDNT_CHECK}: declared, not measured"
@@ -141,6 +143,24 @@ def _embedder(req, log_fn=log):
     return run, weights_sha, count
 
 
+def _say_reading(got, log_fn=log):
+    """Where the crispness threshold fell, and whether it could be read.
+
+    Printed rather than written, and always -- not only when it fails. A user
+    who never sees a warning learns nothing about where 1.20 sits in their own
+    corpus's distribution, and that position is what decides whether the count
+    means anything for their embedding (task 036).
+    """
+    log_fn("characterize: crispness %.4f at threshold %.2f, which is the "
+           "%.2fth percentile of this corpus's ratio distribution (%d of %d "
+           "vectors above it)"
+           % (got["value"], got["threshold"], got["threshold_percentile"],
+              got["n_above"], got["n"]))
+    if got.get("outcome") == COULDNT_CHECK:
+        log_fn("characterize: COULDN'T-CHECK on the crispness reading -- "
+               + got["why"])
+
+
 def characterize_arrays(base, queries, seed, timestamps=None,
                         query_timestamps=None, cutoff=None,
                         count_min=50, log_fn=log):
@@ -162,6 +182,21 @@ def characterize_arrays(base, queries, seed, timestamps=None,
     d_b, r_b = centroid_dists(base, cents, 2)
     out["boundary_crispness"] = boundary_crispness(d_b)
     out["skew_top10_share"] = skew_top10_share(r_b[:, 0], len(base))
+
+    # Task 044. The ratio distribution is the measurement and `boundary_
+    # crispness` above is a reading of it at 1.20, which is why the reading
+    # carries its threshold and where that threshold falls in this corpus's
+    # own distribution.
+    #
+    # Stored here, in a user's own workdir, and NOT added to the published
+    # fixtures. The storage ruling protects published bytes; a fresh workdir
+    # has none to protect, and a user whose corpus ships no `ratio` column is
+    # exactly the person who cannot recover the distribution afterwards. The
+    # published fixtures keep deriving it on demand: their ground views
+    # already carry the ratio for every base vector, and their digests are
+    # the thing the ruling exists to hold still.
+    out["crispness_reading"] = crispness_reading(d_b, with_distribution=True)
+    _say_reading(out["crispness_reading"], log_fn)
 
     if len(queries) >= count_min:
         d_q, _ = centroid_dists(queries, cents, 2)
