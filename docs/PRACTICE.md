@@ -369,6 +369,41 @@ say which line to change.
 > that is hard to satisfy is sometimes describing a dependency that should
 > not exist** — see §5.
 
+**9. A wait condition satisfied before the code under test has run.** Three
+instances in one slice, which is why it is here rather than in a task report.
+A browser check does something, waits for a condition, then reads the page.
+Every one of these waited for something **the static HTML already provided**:
+
+| waited for | why it was already true |
+|---|---|
+| `.tabs a` | `index.html` ships three tabs of its own |
+| the eyebrow having changed | `boot()` sets it *before* it awaits `route()` |
+| `.field` | `index.html` ships static lab panels that match |
+
+Each probe then read a page that had not finished loading and reported on it
+with complete confidence. The first said *no link to #/new* — and would have
+said that on a correct build. The second screenshotted an empty run list under
+a header saying "9 run(s)". The third reported the lab's own controls as the
+form's.
+
+> The rule: **a wait condition must name something the code under test
+> produces.** Not something the page has, not something that appears at about
+> the right time — something that exists *because* the thing you are testing
+> ran. `window.onegroundCompose` and `#compose-file` are created by
+> `compose.js` and by nothing else, and either is a condition that can fail.
+
+The general form, and it is the reason this sits beside warnings 3 and 7:
+**the probe's answer was independent of its subject.** It would have reported
+success on a correct build and failure on a broken one for reasons unrelated
+to either. That is the same defect as warning 1's — a check that could not
+reach its own motivating case and reported the gap as the subject's — and the
+same as the patch in warning 7 that landed on a name nothing looks at,
+arriving here in a third tool. Whenever a check's result does not depend on
+the thing it is about, it is not weak evidence. **It is not evidence.**
+
+> The cheapest test of a wait condition: **would it still be true if the code
+> under test were deleted?** All three of these would.
+
 **The assertion half: a test that asserts a whole collection breaks when any
 member of it legitimately changes.**
 `test_two_copies_of_the_same_run_are_still_only_couldnt_check` asserted
@@ -574,6 +609,16 @@ while diagnosing something else.
 
 The tell is the same as this section's: **before you fix the copy in front of
 you, search for the others.** Grep the distinctive phrase, not the file.
+
+> *A second footnote, one layer inside the fix for this very section.* The
+> form's selects rendered blank, so each gained an unselected option naming
+> itself. An `<option>` with no explicit `value` **answers to its own label**
+> — so the new option's value became the string "— not set —",
+> `select.value = ''` matched nothing, `selectedIndex` went to `-1`, and the
+> control rendered blank again. One name, two meanings depending on whether
+> an attribute is present: this section's defect in HTML rather than in a
+> receipt, committed inside the repair for it. The value is set explicitly
+> now.
 
 > *A footnote, because ten minutes is still an instance.* While fixing the
 > above, `compose.js` grew a second copy of its condition evaluator —
