@@ -39,6 +39,20 @@ rather than things a reader has to notice.
 `verdict.py:364` and `:524` — the same pair of couldn't-check verdicts carry
 an unreconstructable citation *and* no remedy. Do them together.
 
+**And one of them is being scheduled by its own recurrence.** The failing
+remedy test has now been recorded in two separate merge reports — task 044's
+and task 036's — each by a stream that did not cause it, did not own it, and
+merged onto it knowingly rather than hold a clean change hostage. That is a
+defect arriving on the schedule by repetition rather than because anyone
+decided it was next, and each recurrence costs a paragraph of someone else's
+report explaining why it is not theirs.
+
+It is also the argument for **finding 5's full scope rather than its visible
+one.** Two streams have now met the same two claims, because those two are
+the ones a local workdir happens to exercise. Fixing those two would stop the
+paragraphs and leave twenty-seven couldn't-check verdicts unrouted, waiting
+for whichever workdir exercises them next to start the cycle again.
+
 ---
 
 ## Do

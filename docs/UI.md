@@ -265,6 +265,13 @@ Stated plainly, because the position paper's slice 2 adds all of it:
 
 ### Settled before slice 2: what holds the write path
 
+> **On this section's home.** It describes a path this document says does not
+> exist, and it lives here because this is where whoever writes slice 2's
+> brief will look. When that brief gives it a better home, **move it rather
+> than copy it** — two statements of this rule in two documents is precisely
+> the failure the rule is about, and a ruling that contradicts itself across
+> documents is worse than one in a slightly wrong place.
+
 Slice 2 adds a form that writes `requirements.yaml`. **A form writing a file
 is the first thing in this interface that is not a drawing**, and the
 rendering contract has nothing to say about bytes leaving the page: its three
