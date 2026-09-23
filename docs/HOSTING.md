@@ -95,6 +95,30 @@ silently start being rebuilt.
 
 ---
 
+## Handing changed data to whoever copies it
+
+**Before sending changed files, compute the declaration. Do not write it.**
+
+```bash
+python corpora/declare_export_changes.py          # against HEAD
+```
+
+It prints every field of `values.json` that changed, was removed or was
+added, grouped by block. Every block it names goes in the hand-over,
+**including the ones that are obviously fine** — whether a change is benign is
+a judgement the recipient is entitled to make for themselves.
+
+This is a step because skipping it has a specific and repeatable failure. A
+hand-over in task 044e listed what had changed; the list was sincere, and it
+was short by three, all of which the recipient found by diffing. The fault was
+not inattention to those fields — it was a declaration with **no comparison
+behind it**. A list written from memory records what the author meant to
+change, and the changes that matter are the ones they did not mean. When the
+comparison was finally run, it found a fourth that nobody on either side had
+noticed.
+
+> A declaration of changes is only as good as the comparison behind it.
+
 ## Confirming the hosted copy is the repository's copy
 
 ```bash

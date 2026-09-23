@@ -1,0 +1,1046 @@
+{
+  "calibration": {
+    "engine": "qdrant",
+    "engine_line": {
+      "M": 32,
+      "check": "simulator_vs_engine",
+      "config": "single_node_hnsw[M=32,efConstruction=200,efSearch=128]",
+      "dataset": "arxiv-smoke",
+      "date": "2026-09-10",
+      "definition": "simulated recall@10 - measured recall@10 (measured=simulator, reference=engine)",
+      "deviation": 0.0,
+      "efConstruction": 200,
+      "efSearch": 128,
+      "efSearch_source": "verify_info.engine_params.hnsw_ef",
+      "engine": "qdrant",
+      "engine_version": "1.19.1",
+      "environment": "local:DESKTOP-HAGOPQC",
+      "k": 10,
+      "measured": 1.0,
+      "oneground_version": "0.1.0.dev0",
+      "outcome": "verified",
+      "outcome_scope": "blocking",
+      "pins_sha256": "95411c6bcf5322227f724bbd216e7101b33b250b371fac9f4a771acf58fe8f29",
+      "reference": 1.0,
+      "schema": 3,
+      "source": "C:\\Users\\polo2\\projects\\oneground-012\\runs\\arxiv-smoke\\verify.json",
+      "tolerance": 0.05
+    },
+    "family": "single_node_hnsw",
+    "family_line": {
+      "check": "glove_curve",
+      "config": "single_node_hnsw[M=16,efConstruction=200,efSearch=400]",
+      "dataset": "glove-100-angular",
+      "date": "2026-09-10",
+      "definition": "measured - reference; reference is the published ANN-Benchmarks hnswlib recall@10 at the same (M, efConstruction, efSearch)",
+      "deviation": null,
+      "engine": "oneground/single_node_hnsw",
+      "engine_version": "faiss-cpu 1.15.0",
+      "environment": "local:DESKTOP-HAGOPQC",
+      "k": 10,
+      "measured": 0.90922,
+      "note": "The configuration task 012's brief asked for. ANN-Benchmarks has no hnswlib run at efConstruction=200 -- all nine of its run groups use 500 -- so there is no published point to compare any efSearch against, and every point of this curve is couldnt_check. Kept because the brief named it and because the measured column is still worth having beside the M=12 curve.\n",
+      "oneground_version": "0.1.0.dev0",
+      "outcome": "couldnt_check",
+      "outcome_scope": "blocking",
+      "pins_sha256": "95411c6bcf5322227f724bbd216e7101b33b250b371fac9f4a771acf58fe8f29",
+      "reference": null,
+      "reference_algorithm": "hnswlib",
+      "reference_sha256": "00967aecd518cb6172be4a29f11c85cd16d30d58ae5a6b7462dad73e15566ca5",
+      "schema": 2,
+      "source": "fixtures\\glove-100-angular.fixture.yaml",
+      "tolerance": 0.02
+    },
+    "history_path": "calibration\\history.jsonl",
+    "note": "two options whose recall differs by less than the tolerance are reported as indistinguishable on recall",
+    "statements": [
+      "engine qdrant: last calibrated 2026-09-10 on arxiv-smoke as single_node_hnsw[M=32,efConstruction=200,efSearch=128] -- verified, deviation +0.00000 against tolerance 0.05",
+      "family single_node_hnsw: last calibrated 2026-09-10 on glove-100-angular as single_node_hnsw[M=16,efConstruction=200,efSearch=400] -- couldnt_check, no reference to compare against"
+    ],
+    "tolerance": 0.01
+  },
+  "constraints": {
+    "kind": "declared",
+    "latency": {
+      "at_qps": 200,
+      "concurrency": 32,
+      "p95_ms": 40
+    },
+    "monthly_budget": {
+      "amount": 1200,
+      "currency": "EUR"
+    },
+    "recall_at_k": {
+      "k": 10,
+      "min": 0.95
+    },
+    "storage_amplification_max": 2.0
+  },
+  "costs": {
+    "hash_sharded[M=32,efSearch=96,shards=3]": {
+      "basis": "1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11",
+      "currency": "EUR",
+      "error_band": 0.25,
+      "eur_per_hour": 0.192,
+      "headroom": 0.7,
+      "hours_per_month": 730,
+      "index_memory_gb": 0.4992,
+      "kind": "estimate (declared prices, estimated sizing)",
+      "monthly": 140.16,
+      "monthly_high": 175.2,
+      "monthly_low": 105.12,
+      "node_id": "eu-generic-4vcpu-16gb",
+      "node_memory_gb": 16.0,
+      "nodes": 1,
+      "note": "compute only: no storage, egress, load balancers, backups or operators. Budget verdicts use monthly_high.",
+      "rendered": "EUR 140 +/- 35"
+    },
+    "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]": {
+      "basis": "1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11",
+      "currency": "EUR",
+      "error_band": 0.25,
+      "eur_per_hour": 0.192,
+      "headroom": 0.7,
+      "hours_per_month": 730,
+      "index_memory_gb": 0.4992,
+      "kind": "estimate (declared prices, estimated sizing)",
+      "monthly": 140.16,
+      "monthly_high": 175.2,
+      "monthly_low": 105.12,
+      "node_id": "eu-generic-4vcpu-16gb",
+      "node_memory_gb": 16.0,
+      "nodes": 1,
+      "note": "compute only: no storage, egress, load balancers, backups or operators. Budget verdicts use monthly_high.",
+      "rendered": "EUR 140 +/- 35"
+    },
+    "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]": {
+      "basis": "1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11",
+      "currency": "EUR",
+      "error_band": 0.25,
+      "eur_per_hour": 0.192,
+      "headroom": 0.7,
+      "hours_per_month": 730,
+      "index_memory_gb": 0.4992,
+      "kind": "estimate (declared prices, estimated sizing)",
+      "monthly": 140.16,
+      "monthly_high": 175.2,
+      "monthly_low": 105.12,
+      "node_id": "eu-generic-4vcpu-16gb",
+      "node_memory_gb": 16.0,
+      "nodes": 1,
+      "note": "compute only: no storage, egress, load balancers, backups or operators. Budget verdicts use monthly_high.",
+      "rendered": "EUR 140 +/- 35"
+    },
+    "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]": {
+      "basis": "1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.33 GB at 70% headroom; prices declared, as_of 2026-09-11",
+      "currency": "EUR",
+      "error_band": 0.25,
+      "eur_per_hour": 0.192,
+      "headroom": 0.7,
+      "hours_per_month": 730,
+      "index_memory_gb": 1.3314,
+      "kind": "estimate (declared prices, estimated sizing)",
+      "monthly": 140.16,
+      "monthly_high": 175.2,
+      "monthly_low": 105.12,
+      "node_id": "eu-generic-4vcpu-16gb",
+      "node_memory_gb": 16.0,
+      "nodes": 1,
+      "note": "compute only: no storage, egress, load balancers, backups or operators. Budget verdicts use monthly_high.",
+      "rendered": "EUR 140 +/- 35"
+    },
+    "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]": {
+      "basis": "1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.33 GB at 70% headroom; prices declared, as_of 2026-09-11",
+      "currency": "EUR",
+      "error_band": 0.25,
+      "eur_per_hour": 0.192,
+      "headroom": 0.7,
+      "hours_per_month": 730,
+      "index_memory_gb": 1.3314,
+      "kind": "estimate (declared prices, estimated sizing)",
+      "monthly": 140.16,
+      "monthly_high": 175.2,
+      "monthly_low": 105.12,
+      "node_id": "eu-generic-4vcpu-16gb",
+      "node_memory_gb": 16.0,
+      "nodes": 1,
+      "note": "compute only: no storage, egress, load balancers, backups or operators. Budget verdicts use monthly_high.",
+      "rendered": "EUR 140 +/- 35"
+    },
+    "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]": {
+      "basis": "1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.85 GB at 70% headroom; prices declared, as_of 2026-09-11",
+      "currency": "EUR",
+      "error_band": 0.25,
+      "eur_per_hour": 0.192,
+      "headroom": 0.7,
+      "hours_per_month": 730,
+      "index_memory_gb": 1.8546,
+      "kind": "estimate (declared prices, estimated sizing)",
+      "monthly": 140.16,
+      "monthly_high": 175.2,
+      "monthly_low": 105.12,
+      "node_id": "eu-generic-4vcpu-16gb",
+      "node_memory_gb": 16.0,
+      "nodes": 1,
+      "note": "compute only: no storage, egress, load balancers, backups or operators. Budget verdicts use monthly_high.",
+      "rendered": "EUR 140 +/- 35"
+    },
+    "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]": {
+      "basis": "1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.85 GB at 70% headroom; prices declared, as_of 2026-09-11",
+      "currency": "EUR",
+      "error_band": 0.25,
+      "eur_per_hour": 0.192,
+      "headroom": 0.7,
+      "hours_per_month": 730,
+      "index_memory_gb": 1.8546,
+      "kind": "estimate (declared prices, estimated sizing)",
+      "monthly": 140.16,
+      "monthly_high": 175.2,
+      "monthly_low": 105.12,
+      "node_id": "eu-generic-4vcpu-16gb",
+      "node_memory_gb": 16.0,
+      "nodes": 1,
+      "note": "compute only: no storage, egress, load balancers, backups or operators. Budget verdicts use monthly_high.",
+      "rendered": "EUR 140 +/- 35"
+    },
+    "single_node_hnsw[M=32,efConstruction=200,efSearch=128]": {
+      "basis": "1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11",
+      "currency": "EUR",
+      "error_band": 0.25,
+      "eur_per_hour": 0.192,
+      "headroom": 0.7,
+      "hours_per_month": 730,
+      "index_memory_gb": 0.4992,
+      "kind": "estimate (declared prices, estimated sizing)",
+      "monthly": 140.16,
+      "monthly_high": 175.2,
+      "monthly_low": 105.12,
+      "node_id": "eu-generic-4vcpu-16gb",
+      "node_memory_gb": 16.0,
+      "nodes": 1,
+      "note": "compute only: no storage, egress, load balancers, backups or operators. Budget verdicts use monthly_high.",
+      "rendered": "EUR 140 +/- 35"
+    }
+  },
+  "decision_log": [
+    {
+      "kind": "scope",
+      "source": "requirements:constraints",
+      "text": "8 configuration(s) were measured and judged against 5 constraint(s): recall_at_k, storage_amplification, latency_p95, qps, monthly_budget."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].recall_at_10",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2] fails recall_at_k: recall@10 0.9318 < 0.95."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].storage_amplification",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2] fails storage_amplification: 3.72x stored copies per vector > 2.0x."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].recall_at_10",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2] fails recall_at_k: recall@10 0.8952 < 0.95."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].storage_amplification",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2] fails storage_amplification: 2.67x stored copies per vector > 2.0x."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].recall_at_10",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1] fails recall_at_k: recall@10 0.8378 < 0.95."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].storage_amplification",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1] fails storage_amplification: 3.72x stored copies per vector > 2.0x."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].recall_at_10",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1] fails recall_at_k: recall@10 0.7755 < 0.95."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].storage_amplification",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1] fails storage_amplification: 2.67x stored copies per vector > 2.0x."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]].recall_at_10",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2] fails recall_at_k: recall@10 0.7205 < 0.95."
+    },
+    {
+      "kind": "fails",
+      "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]].recall_at_10",
+      "text": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1] fails recall_at_k: recall@10 0.5472 < 0.95."
+    },
+    {
+      "kind": "meets_environment",
+      "source": "verify.json:searches[k=10_under_load].latency_shape_single_client.p95_ms",
+      "text": "single_node_hnsw[M=32,efConstruction=200,efSearch=128] meets latency_p95 in environment tf8sd2usxbblsm: p95 38.22 ms <= 40.0 ms on runpod (environment tf8sd2usxbblsm) (from k=10_under_load: under load at concurrency 32)."
+    },
+    {
+      "kind": "meets_environment",
+      "source": "verify.json:load.completed",
+      "text": "single_node_hnsw[M=32,efConstruction=200,efSearch=128] meets qps in environment tf8sd2usxbblsm: sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment tf8sd2usxbblsm). Achieved 199.99 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max."
+    },
+    {
+      "kind": "meets",
+      "source": "simulate.json:rows[single_node_hnsw[M=32,efConstruction=200,efSearch=128]]",
+      "text": "single_node_hnsw[M=32,efConstruction=200,efSearch=128] meets every constraint that could be checked: recall_at_k recall@10 0.9976 >= 0.95; storage_amplification 1.00x stored copies per vector <= 2.0x; latency_p95 p95 38.22 ms <= 40.0 ms on runpod (environment tf8sd2usxbblsm) (from k=10_under_load: under load at concurrency 32); qps sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment tf8sd2usxbblsm). Achieved 199.99 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max; monthly_budget EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)."
+    },
+    {
+      "kind": "indistinguishable",
+      "source": "simulate.json:rows[*].recall_at_10",
+      "text": "These options are indistinguishable on recall: hash_sharded[M=32,efSearch=96,shards=3] 0.9984; single_node_hnsw[M=32,efConstruction=200,efSearch=128] 0.9976. Their recall differs by less than the calibration tolerance (0.01), which is what this project can currently defend, so choosing between them on recall would be reading noise. They are separated only where they differ measurably. Overall: hash_sharded[M=32,efSearch=96,shards=3] couldnt_check; single_node_hnsw[M=32,efConstruction=200,efSearch=128] meets -- indistinguishable on recall is not indistinguishable overall."
+    },
+    {
+      "kind": "recommendation",
+      "source": "simulate.json:rows[single_node_hnsw[M=32,efConstruction=200,efSearch=128]]",
+      "text": "Recommended: single_node_hnsw[M=32,efConstruction=200,efSearch=128]. It meets every constraint that could be checked, and was ranked first by: fewest constraints at margin (3: recall_at_k, latency_p95, qps), then lowest storage amplification (1.00x), then lowest fan-out (1)."
+    },
+    {
+      "kind": "to_resolve",
+      "source": "verify_info.json:engine_facts.index_params",
+      "text": "To decide latency_p95: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it."
+    },
+    {
+      "kind": "to_resolve",
+      "source": "verify_info.json:engine_facts.index_params",
+      "text": "To decide qps: this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it."
+    }
+  ],
+  "environment": {
+    "environment_id": "tf8sd2usxbblsm",
+    "note": "latency and throughput verdicts are only made from a verify run in the environment the constraint targets. environment_id is the pod id for a matched-environment run; rows from different environments are never compared.",
+    "verify_platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+    "verify_target": "runpod"
+  },
+  "generated_at": "2026-09-10T15:49:20Z",
+  "inputs": {
+    "MANIFEST.sha256": {
+      "kind": "receipt",
+      "sha256": "20b76bfb2268504431b95b69c4cb513dae6442a6c6a7652018130e879995f351"
+    },
+    "build_info.json": {
+      "kind": "declared",
+      "sha256": "efa0ee1504aba706bd4b8c3214a3a33ac8e2bbce09fc966e3298744d95251294"
+    },
+    "characterization.json": {
+      "kind": "receipt",
+      "sha256": "da41fb73897f52f845541931fb1005f9caef3cd59c285912faf9c2d902267199"
+    },
+    "queries_ids.json": {
+      "kind": "receipt",
+      "sha256": "3690bdf2e6b09197f51b2ea6ce8666b6ba5bdb8622116e2b15accf02f5fcf100"
+    },
+    "sample_ids.json": {
+      "kind": "receipt",
+      "sha256": "ea580b430fe7a72ce95dc4600883aa8ea2fa9b4fc3b7faf0f77fd53d0646d1b6"
+    },
+    "simulate.json": {
+      "kind": "receipt",
+      "sha256": "e084bb68a4d325de05b3643b5e9ae4f267549d2e1abefac787c210f6ff8eb250"
+    },
+    "simulate_info.json": {
+      "kind": "declared",
+      "sha256": "da041af2697685dfe1b9892c77ba0cbc329125635405d01b8188b34b03f40418"
+    },
+    "verify.json": {
+      "kind": "receipt (measurements)",
+      "sha256": "c73142cb860acf66a1629d294b5bf1fe79c9e8cbfe6f56616b30f743d6978ada"
+    },
+    "verify_info.json": {
+      "kind": "declared",
+      "sha256": "260916c6143cc38b508a931eb846cc358a0a44a0558ad073f3ce1261dfdba98b"
+    }
+  },
+  "not_run": [],
+  "options": [
+    {
+      "config": "hash_sharded[M=32,efSearch=96,shards=3]",
+      "family": "hash_sharded",
+      "judgement": {
+        "constraints": [
+          {
+            "constraint": "recall_at_k",
+            "kind": "receipt",
+            "outcome": "meets",
+            "reason": "recall@10 0.9984 >= 0.95",
+            "source": "simulate.json:rows[hash_sharded[M=32,efSearch=96,shards=3]].recall_at_10",
+            "threshold": 0.95,
+            "value": 0.9984
+          },
+          {
+            "constraint": "storage_amplification",
+            "kind": "receipt",
+            "outcome": "meets",
+            "reason": "1.00x stored copies per vector <= 2.0x",
+            "source": "simulate.json:rows[hash_sharded[M=32,efSearch=96,shards=3]].storage_amplification",
+            "threshold": 2.0,
+            "value": 1.0
+          },
+          {
+            "constraint": "latency_p95",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 40.0,
+            "value": null
+          },
+          {
+            "constraint": "qps",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a hash_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 200.0,
+            "value": null
+          },
+          {
+            "constraint": "monthly_budget",
+            "kind": "estimate (declared prices)",
+            "outcome": "meets",
+            "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)",
+            "source": "report.json:costs[config].monthly_high",
+            "threshold": 1200.0,
+            "value": 175.2
+          }
+        ],
+        "indistinguishable_from": [
+          "single_node_hnsw[M=32,efConstruction=200,efSearch=128]"
+        ],
+        "outcome": "couldnt_check"
+      },
+      "measurement": {
+        "build_seconds": 98.702576,
+        "ceiling_at_10": 1.0,
+        "est_memory_bytes": 499200000,
+        "fanout": 3.0,
+        "index_loss": 0.0016,
+        "inv_ratio_at_10": 0.999959,
+        "p50_copies": 1,
+        "p95_copies": 1,
+        "p99_copies_per_vector": 1,
+        "query_seconds": 6.976583,
+        "recall_at_1": 0.9985,
+        "recall_at_10": 0.9984,
+        "recall_at_100": 0.994135,
+        "routing_loss": 0.0,
+        "shards": 3,
+        "storage_amplification": 1.0,
+        "stored_vectors": 150000
+      },
+      "params": {
+        "M": 32,
+        "efSearch": 96,
+        "shards": 3
+      }
+    },
+    {
+      "config": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]",
+      "family": "semantic_sharded",
+      "judgement": {
+        "constraints": [
+          {
+            "constraint": "recall_at_k",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "recall@10 0.9318 < 0.95",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].recall_at_10",
+            "threshold": 0.95,
+            "value": 0.93185
+          },
+          {
+            "constraint": "storage_amplification",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "3.72x stored copies per vector > 2.0x",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=2]].storage_amplification",
+            "threshold": 2.0,
+            "value": 3.71516
+          },
+          {
+            "constraint": "latency_p95",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 40.0,
+            "value": null
+          },
+          {
+            "constraint": "qps",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 200.0,
+            "value": null
+          },
+          {
+            "constraint": "monthly_budget",
+            "kind": "estimate (declared prices)",
+            "outcome": "meets",
+            "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.85 GB at 70% headroom; prices declared, as_of 2026-09-11)",
+            "source": "report.json:costs[config].monthly_high",
+            "threshold": 1200.0,
+            "value": 175.2
+          }
+        ],
+        "indistinguishable_from": [],
+        "outcome": "fails"
+      },
+      "measurement": {
+        "build_seconds": 315.516815,
+        "ceiling_at_10": 0.9323,
+        "est_memory_bytes": 1854607872,
+        "fanout": 2.0,
+        "index_loss": 0.00045,
+        "inv_ratio_at_10": 0.997595,
+        "p50_copies": 4,
+        "p95_copies": 4,
+        "p99_copies_per_vector": 4,
+        "query_seconds": 386.76761,
+        "recall_at_1": 0.9505,
+        "recall_at_10": 0.93185,
+        "recall_at_100": 0.42098,
+        "routing_loss": 0.0677,
+        "shards": 256,
+        "storage_amplification": 3.71516,
+        "stored_vectors": 557274
+      },
+      "params": {
+        "M": 32,
+        "centroids": 256,
+        "efSearch": 96,
+        "epsilon": 0.2,
+        "probe": 2
+      }
+    },
+    {
+      "config": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]",
+      "family": "semantic_sharded",
+      "judgement": {
+        "constraints": [
+          {
+            "constraint": "recall_at_k",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "recall@10 0.8952 < 0.95",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].recall_at_10",
+            "threshold": 0.95,
+            "value": 0.8952
+          },
+          {
+            "constraint": "storage_amplification",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "2.67x stored copies per vector > 2.0x",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=2]].storage_amplification",
+            "threshold": 2.0,
+            "value": 2.667153
+          },
+          {
+            "constraint": "latency_p95",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 40.0,
+            "value": null
+          },
+          {
+            "constraint": "qps",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 200.0,
+            "value": null
+          },
+          {
+            "constraint": "monthly_budget",
+            "kind": "estimate (declared prices)",
+            "outcome": "meets",
+            "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.33 GB at 70% headroom; prices declared, as_of 2026-09-11)",
+            "source": "report.json:costs[config].monthly_high",
+            "threshold": 1200.0,
+            "value": 175.2
+          }
+        ],
+        "indistinguishable_from": [],
+        "outcome": "fails"
+      },
+      "measurement": {
+        "build_seconds": 292.516471,
+        "ceiling_at_10": 0.89525,
+        "est_memory_bytes": 1331442944,
+        "fanout": 2.0,
+        "index_loss": 5e-05,
+        "inv_ratio_at_10": 0.996254,
+        "p50_copies": 3,
+        "p95_copies": 4,
+        "p99_copies_per_vector": 4,
+        "query_seconds": 36.1064,
+        "recall_at_1": 0.9225,
+        "recall_at_10": 0.8952,
+        "recall_at_100": 0.452695,
+        "routing_loss": 0.10475,
+        "shards": 256,
+        "storage_amplification": 2.667153,
+        "stored_vectors": 400073
+      },
+      "params": {
+        "M": 32,
+        "centroids": 256,
+        "efSearch": 96,
+        "epsilon": 0.1,
+        "probe": 2
+      }
+    },
+    {
+      "config": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]",
+      "family": "semantic_sharded",
+      "judgement": {
+        "constraints": [
+          {
+            "constraint": "recall_at_k",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "recall@10 0.8378 < 0.95",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].recall_at_10",
+            "threshold": 0.95,
+            "value": 0.83785
+          },
+          {
+            "constraint": "storage_amplification",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "3.72x stored copies per vector > 2.0x",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.2,probe=1]].storage_amplification",
+            "threshold": 2.0,
+            "value": 3.71516
+          },
+          {
+            "constraint": "latency_p95",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 40.0,
+            "value": null
+          },
+          {
+            "constraint": "qps",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 200.0,
+            "value": null
+          },
+          {
+            "constraint": "monthly_budget",
+            "kind": "estimate (declared prices)",
+            "outcome": "meets",
+            "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.85 GB at 70% headroom; prices declared, as_of 2026-09-11)",
+            "source": "report.json:costs[config].monthly_high",
+            "threshold": 1200.0,
+            "value": 175.2
+          }
+        ],
+        "indistinguishable_from": [],
+        "outcome": "fails"
+      },
+      "measurement": {
+        "build_seconds": 375.785683,
+        "ceiling_at_10": 0.8382,
+        "est_memory_bytes": 1854607872,
+        "fanout": 1.0,
+        "index_loss": 0.00035,
+        "inv_ratio_at_10": 0.993513,
+        "p50_copies": 4,
+        "p95_copies": 4,
+        "p99_copies_per_vector": 4,
+        "query_seconds": 129.798086,
+        "recall_at_1": 0.875,
+        "recall_at_10": 0.83785,
+        "recall_at_100": 0.2978,
+        "routing_loss": 0.1618,
+        "shards": 256,
+        "storage_amplification": 3.71516,
+        "stored_vectors": 557274
+      },
+      "params": {
+        "M": 32,
+        "centroids": 256,
+        "efSearch": 96,
+        "epsilon": 0.2,
+        "probe": 1
+      }
+    },
+    {
+      "config": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]",
+      "family": "semantic_sharded",
+      "judgement": {
+        "constraints": [
+          {
+            "constraint": "recall_at_k",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "recall@10 0.7755 < 0.95",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].recall_at_10",
+            "threshold": 0.95,
+            "value": 0.7755
+          },
+          {
+            "constraint": "storage_amplification",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "2.67x stored copies per vector > 2.0x",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.1,probe=1]].storage_amplification",
+            "threshold": 2.0,
+            "value": 2.667153
+          },
+          {
+            "constraint": "latency_p95",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 40.0,
+            "value": null
+          },
+          {
+            "constraint": "qps",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 200.0,
+            "value": null
+          },
+          {
+            "constraint": "monthly_budget",
+            "kind": "estimate (declared prices)",
+            "outcome": "meets",
+            "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 1.33 GB at 70% headroom; prices declared, as_of 2026-09-11)",
+            "source": "report.json:costs[config].monthly_high",
+            "threshold": 1200.0,
+            "value": 175.2
+          }
+        ],
+        "indistinguishable_from": [],
+        "outcome": "fails"
+      },
+      "measurement": {
+        "build_seconds": 125.522304,
+        "ceiling_at_10": 0.77565,
+        "est_memory_bytes": 1331442944,
+        "fanout": 1.0,
+        "index_loss": 0.00015,
+        "inv_ratio_at_10": 0.990641,
+        "p50_copies": 3,
+        "p95_copies": 4,
+        "p99_copies_per_vector": 4,
+        "query_seconds": 24.836681,
+        "recall_at_1": 0.8255,
+        "recall_at_10": 0.7755,
+        "recall_at_100": 0.29618,
+        "routing_loss": 0.22435,
+        "shards": 256,
+        "storage_amplification": 2.667153,
+        "stored_vectors": 400073
+      },
+      "params": {
+        "M": 32,
+        "centroids": 256,
+        "efSearch": 96,
+        "epsilon": 0.1,
+        "probe": 1
+      }
+    },
+    {
+      "config": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]",
+      "family": "semantic_sharded",
+      "judgement": {
+        "constraints": [
+          {
+            "constraint": "recall_at_k",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "recall@10 0.7205 < 0.95",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]].recall_at_10",
+            "threshold": 0.95,
+            "value": 0.72045
+          },
+          {
+            "constraint": "storage_amplification",
+            "kind": "receipt",
+            "outcome": "meets",
+            "reason": "1.00x stored copies per vector <= 2.0x",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=2]].storage_amplification",
+            "threshold": 2.0,
+            "value": 1.0
+          },
+          {
+            "constraint": "latency_p95",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 40.0,
+            "value": null
+          },
+          {
+            "constraint": "qps",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 200.0,
+            "value": null
+          },
+          {
+            "constraint": "monthly_budget",
+            "kind": "estimate (declared prices)",
+            "outcome": "meets",
+            "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)",
+            "source": "report.json:costs[config].monthly_high",
+            "threshold": 1200.0,
+            "value": 175.2
+          }
+        ],
+        "indistinguishable_from": [],
+        "outcome": "fails"
+      },
+      "measurement": {
+        "build_seconds": 24.074394,
+        "ceiling_at_10": 0.7205,
+        "est_memory_bytes": 499200000,
+        "fanout": 2.0,
+        "index_loss": 5e-05,
+        "inv_ratio_at_10": 0.987966,
+        "p50_copies": 1,
+        "p95_copies": 1,
+        "p99_copies_per_vector": 1,
+        "query_seconds": 4.277824,
+        "recall_at_1": 0.7625,
+        "recall_at_10": 0.72045,
+        "recall_at_100": 0.432445,
+        "routing_loss": 0.2795,
+        "shards": 256,
+        "storage_amplification": 1.0,
+        "stored_vectors": 150000
+      },
+      "params": {
+        "M": 32,
+        "centroids": 256,
+        "efSearch": 96,
+        "epsilon": 0.0,
+        "probe": 2
+      }
+    },
+    {
+      "config": "semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]",
+      "family": "semantic_sharded",
+      "judgement": {
+        "constraints": [
+          {
+            "constraint": "recall_at_k",
+            "kind": "receipt",
+            "outcome": "fails",
+            "reason": "recall@10 0.5472 < 0.95",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]].recall_at_10",
+            "threshold": 0.95,
+            "value": 0.5472
+          },
+          {
+            "constraint": "storage_amplification",
+            "kind": "receipt",
+            "outcome": "meets",
+            "reason": "1.00x stored copies per vector <= 2.0x",
+            "source": "simulate.json:rows[semantic_sharded[M=32,centroids=256,efSearch=96,epsilon=0.0,probe=1]].storage_amplification",
+            "threshold": 2.0,
+            "value": 1.0
+          },
+          {
+            "constraint": "latency_p95",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 40.0,
+            "value": null
+          },
+          {
+            "constraint": "qps",
+            "kind": "declared",
+            "outcome": "couldnt_check",
+            "reason": "this configuration was not the one verified -- the verify run built hnsw in a single namespace, which is not a semantic_sharded deployment. This row's architecture was simulated and never built, so a measurement of the built index says nothing about it",
+            "source": "verify_info.json:engine_facts.index_params",
+            "threshold": 200.0,
+            "value": null
+          },
+          {
+            "constraint": "monthly_budget",
+            "kind": "estimate (declared prices)",
+            "outcome": "meets",
+            "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)",
+            "source": "report.json:costs[config].monthly_high",
+            "threshold": 1200.0,
+            "value": 175.2
+          }
+        ],
+        "indistinguishable_from": [],
+        "outcome": "fails"
+      },
+      "measurement": {
+        "build_seconds": 26.446486,
+        "ceiling_at_10": 0.54725,
+        "est_memory_bytes": 499200000,
+        "fanout": 1.0,
+        "index_loss": 5e-05,
+        "inv_ratio_at_10": 0.97671,
+        "p50_copies": 1,
+        "p95_copies": 1,
+        "p99_copies_per_vector": 1,
+        "query_seconds": 1.296002,
+        "recall_at_1": 0.5925,
+        "recall_at_10": 0.5472,
+        "recall_at_100": 0.27199,
+        "routing_loss": 0.45275,
+        "shards": 256,
+        "storage_amplification": 1.0,
+        "stored_vectors": 150000
+      },
+      "params": {
+        "M": 32,
+        "centroids": 256,
+        "efSearch": 96,
+        "epsilon": 0.0,
+        "probe": 1
+      }
+    },
+    {
+      "config": "single_node_hnsw[M=32,efConstruction=200,efSearch=128]",
+      "family": "single_node_hnsw",
+      "judgement": {
+        "constraints": [
+          {
+            "constraint": "recall_at_k",
+            "kind": "receipt",
+            "outcome": "meets",
+            "reason": "recall@10 0.9976 >= 0.95",
+            "source": "simulate.json:rows[single_node_hnsw[M=32,efConstruction=200,efSearch=128]].recall_at_10",
+            "threshold": 0.95,
+            "value": 0.99755
+          },
+          {
+            "constraint": "storage_amplification",
+            "kind": "receipt",
+            "outcome": "meets",
+            "reason": "1.00x stored copies per vector <= 2.0x",
+            "source": "simulate.json:rows[single_node_hnsw[M=32,efConstruction=200,efSearch=128]].storage_amplification",
+            "threshold": 2.0,
+            "value": 1.0
+          },
+          {
+            "constraint": "latency_p95",
+            "kind": "receipt",
+            "outcome": "meets",
+            "reason": "p95 38.22 ms <= 40.0 ms on runpod (environment tf8sd2usxbblsm) (from k=10_under_load: under load at concurrency 32)",
+            "source": "verify.json:searches[k=10_under_load].latency_shape_single_client.p95_ms",
+            "threshold": 40.0,
+            "value": 38.216508
+          },
+          {
+            "constraint": "qps",
+            "kind": "receipt",
+            "outcome": "meets",
+            "reason": "sustained the offered 200 qps at concurrency 32: 59999 of 60000 queries in 300 s, short by 1 against a tolerance of 300 (one query per second of duration, the generator's tick), 0 errors (environment tf8sd2usxbblsm). Achieved 199.99 qps against a 200.0 target; this is a sustain check -- a throttled run cannot exceed what it was offered, so it is not a measurement of the engine's ceiling. See qps_max",
+            "source": "verify.json:load.completed",
+            "threshold": 200.0,
+            "value": 199.99
+          },
+          {
+            "constraint": "monthly_budget",
+            "kind": "estimate (declared prices)",
+            "outcome": "meets",
+            "reason": "EUR 140 +/- 35/month; upper bound EUR 175 <= 1200 EUR (1 x eu-generic-4vcpu-16gb at 0.192 EUR/hour x 730 h/month; sized from est_memory_bytes 0.50 GB at 70% headroom; prices declared, as_of 2026-09-11)",
+            "source": "report.json:costs[config].monthly_high",
+            "threshold": 1200.0,
+            "value": 175.2
+          }
+        ],
+        "indistinguishable_from": [
+          "hash_sharded[M=32,efSearch=96,shards=3]"
+        ],
+        "outcome": "meets"
+      },
+      "measurement": {
+        "build_seconds": 310.649152,
+        "ceiling_at_10": 1.0,
+        "est_memory_bytes": 499200000,
+        "fanout": 1.0,
+        "index_loss": 0.00245,
+        "inv_ratio_at_10": 0.999945,
+        "p50_copies": 1,
+        "p95_copies": 1,
+        "p99_copies_per_vector": 1,
+        "query_seconds": 1.915972,
+        "recall_at_1": 0.9985,
+        "recall_at_10": 0.99755,
+        "recall_at_100": 0.98307,
+        "routing_loss": 0.0,
+        "shards": 1,
+        "storage_amplification": 1.0,
+        "stored_vectors": 150000
+      },
+      "params": {
+        "M": 32,
+        "efConstruction": 200,
+        "efSearch": 128
+      }
+    }
+  ],
+  "price_table": {
+    "as_of": "2026-09-11",
+    "currency": "EUR",
+    "kind": "declared",
+    "node_types": 5,
+    "note": "Compute only. Storage, network egress, load balancers, backups and the people who run it are not in these numbers, and a real bill is larger. Nothing here is a quote.",
+    "path": "C:\\Users\\polo2\\projects\\oneground\\oneground\\cost\\prices.example.yaml",
+    "source": "Public list prices, EU regions, typed from vendor pages on the as_of date. On-demand, no committed-use discount, no support plan, no egress."
+  },
+  "recommendation": "single_node_hnsw[M=32,efConstruction=200,efSearch=128]",
+  "run": "arxiv-150k-via-characterize",
+  "run_environment": {
+    "executable": "C:\\Users\\polo2\\projects\\oneground\\.venv\\Scripts\\python.exe",
+    "in_venv": true,
+    "pinned": true,
+    "prefix": "C:\\Users\\polo2\\projects\\oneground\\.venv",
+    "python_version": "3.12.10",
+    "requirements": "C:\\Users\\polo2\\projects\\oneground\\requirements.txt",
+    "versions": {
+      "faiss": "1.15.0",
+      "faiss-cpu": "1.15.0",
+      "numpy": "2.5.3",
+      "scikit-learn": "1.9.0"
+    }
+  },
+  "schema": 1,
+  "summary": {
+    "couldnt_check": 1,
+    "fails": 6,
+    "meets": 1,
+    "not_run": 0,
+    "options": 8
+  }
+}

@@ -627,6 +627,18 @@ GENERIC_ACCOUNTS = frozenset({
 # Files that quote the trap by name and have to keep doing so. Each entry says
 # why: an allowlist nobody can audit is a hole with a comment on it.
 IDENTIFIER_SCAN_ALLOWLIST = {
+    "fixtures/arxiv-150k/report/superseded-2026-09-09-tf8sd2usxbblsm.report.json":
+        "a PRESERVED RECEIPT, not a file we wrote (task 044i). It is the "
+        "report behind the verdict the lab published until 2026-09-20, kept "
+        "because the page names the run and a page that names a run it cannot "
+        "show is worse than one that shows a superseded one. It predates "
+        "044g's path fix, so it carries absolute paths -- and those are "
+        "FACT ABOUT THAT RUN. Rewriting them would falsify a receipt to "
+        "satisfy a scan, which is the one repair this project must never "
+        "make. The entry is for this one file and does not generalise: a "
+        "receipt written from now on is clean at its write site, and if a "
+        "second entry of this kind is ever wanted, that is a finding about "
+        "the write site rather than a reason to extend this list",
     "oneground/environment.py":
         "this scan; the patterns it looks for are written out here",
     "oneground/test_environment.py":

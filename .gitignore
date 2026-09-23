@@ -27,11 +27,70 @@ logs/
 # VS Code workspace files — local editor state, not project configuration.
 *.code-workspace
 
-# Packaging and run outputs, both produced by task 007's own deliverables:
-# `pip install -e .` writes the egg-info, and `oneground characterize` writes
-# a workdir under runs/ (the arxiv-150k run alone is 1.4 MB of sample ids).
+# Packaging.
 *.egg-info/
-runs/
+
+# Run outputs. NARROWED IN TASK 044i, and the reason is the root cause of a
+# live defect rather than housekeeping.
+#
+# This was a blanket `runs/`, written to keep bulk out -- the arxiv-150k run
+# alone is 1.4 MB of sample ids. It also kept out `report.json` and
+# `verify.json`, which are a few tens of KB and are **the receipts a published
+# decision rests on**. The consequence was found on the lab page: its verdict
+# came from a verify run whose receipts were never committed, so the decision
+# the page showed could not be re-derived by anyone, and when a later run
+# disagreed nothing could reconcile them. A rule written to keep bulk out kept
+# out the evidence.
+#
+# So: the small receipts that make a decision re-derivable are COMMITTED, and
+# the bulk is not. The test is size and re-derivability -- a file that is
+# large and rebuildable from its seeds stays out; a file that is small and is
+# the only record of a measurement goes in.
+runs/**
+!runs/
+!runs/*/
+!runs/*/*/
+!runs/*/report.json
+!runs/*/verify.json
+!runs/*/verify_info.json
+!runs/*/simulate.json
+!runs/*/simulate_info.json
+!runs/*/build_info.json
+!runs/*/characterization.json
+!runs/*/manifest.yaml
+!runs/*/MANIFEST.sha256
+!runs/*/queries_ids.json
+# Proposal cards sit at runs/<run>/proposals/<name>/, one level deeper.
+!runs/*/*/*/
+!runs/*/*/*/card.json
+!runs/*/*/*/prediction.json
+!runs/*/*/*/propose_info.json
+!runs/*/*/*/MANIFEST.sha256
+# A NOTE ON THE RECEIPTS ALREADY IN `runs/` WHEN THIS RULE CHANGED.
+# Narrowing this made about 110 existing files trackable, and they must not be
+# bulk-added: they predate task 044g's path fix, so they carry absolute paths
+# through a home directory, and committing them would put 95+ machine
+# identifiers into the tracked tree. `test_no_tracked_file_carries_a_machine_
+# identifier` catches that, which is the guard working rather than a trap --
+# it failed on exactly this during 044i and the commit was undone.
+#
+# So this rule is forward-looking: receipts written from now on are clean at
+# their write site and are kept. A historical receipt that a page cites is
+# copied into `fixtures/<id>/report/` instead, curated and named for what it
+# is -- core's second option, and the route the 9 September superseded report
+# took.
+#
+# Still out, and each for its size rather than its kind: sample_ids.json is
+# 1.3 MB of ids re-derivable from the sampling seed; ground truth, vectors and
+# projections are megabytes and rebuildable; report.html is a rendering of
+# report.json; state/ is the simulator's emitted arrays.
+runs/*/sample_ids.json
+runs/*/report.html
+runs/*/state/
+runs/**/*.npy
+runs/**/*.bin
+runs/**/*.tgz
+runs/**/*.parquet
 
 # Calibration fixture arrays (task 012): 486 MB total and re-derivable by
 # anyone from the upstream ANN-Benchmarks HDF5, whose sha256 is recorded in

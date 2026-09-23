@@ -992,9 +992,18 @@ def report_only(args):
     values["measured"] = measured
     values["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     values["generated_by"] = "corpora/export_teaser_data.py --report-only"
+    # Carry the FULL export's stamp forward, do not take the previous run's.
+    # This field names the export the geometry came from; setting it to
+    # `prior.generated_at` made it chase -- after one report-only run it named
+    # that run, and after two it named the one before, so the field stopped
+    # naming a full export at all. Found in task 044i by exporting twice and
+    # diffing: it was one of only two fields that moved with no data change.
+    prior_geo = prior.get("geometry_from") or {}
     values["geometry_from"] = {
-        "generated_at": prior.get("generated_at"),
-        "generated_by": prior.get("generated_by"),
+        "generated_at": prior_geo.get("generated_at")
+                        or prior.get("generated_at"),
+        "generated_by": prior_geo.get("generated_by")
+                        or prior.get("generated_by"),
         "note": ("every block but verdict and verify was carried over from the "
                  "full export named here; the geometry was not re-derived"),
     }
@@ -1064,6 +1073,24 @@ def build_verify(report_path, verify_path):
             f"verify.json names environment {v.get('environment_id')} and "
             f"report.json names {report['environment'].get('environment_id')}; "
             "the page would attribute a measurement to the wrong machine.")
+
+    # TASK 015 MADE VERIFY MULTI-ENGINE AND THIS FUNCTION NEVER LEARNED
+    # ------------------------------------------------------------------
+    # A two-engine verify carries `engines`, a LIST, each entry holding the
+    # single-engine shape this function was written for. Handed one, it died
+    # on `v["searches"]` -- so **re-exporting the page has been impossible
+    # since 015, and nothing noticed because nothing tried.** That is why a
+    # stale verdict survived thirteen days: not an omission, an impossibility.
+    #
+    # Ruled (044i): the panel shows BOTH engines, named, each with its outcome
+    # and its reason. Showing one is a true number that reads as something
+    # else -- qdrant alone reads unmeasurable, pgvector alone reads far too
+    # slow, and the truth is that two engines were measured sequentially on
+    # one host and neither produced a verdict, for two different reasons. A
+    # couldn't-check and a fail are different results and collapsing them
+    # loses the only distinction worth having.
+    if isinstance(v.get("engines"), list):
+        return _verify_multi(v, info, report, vp, ip)
 
     seq = v["searches"]["k=10"]
     seq_lat = seq["latency_measured_but_not_attributable"]
@@ -1230,12 +1257,31 @@ def public_sources(obj):
     forgotten once.
     """
     if isinstance(obj, dict):
-        return {k: (public_path(v) if k in PATH_KEYS and isinstance(v, str)
-                    and v else public_sources(v))
+        return {k: (public_path(v) if _needs_sanitising(k, v)
+                    else public_sources(v))
                 for k, v in obj.items()}
     if isinstance(obj, list):
         return [public_sources(v) for v in obj]
     return obj
+
+
+def _needs_sanitising(key, value):
+    """Only what the refusal would reject. **Keyed on the value, not the name.**
+
+    The first version transformed every field called `source` or `path`, and
+    `verdict.price_table.source` is a *sentence* -- "Public list prices, EU
+    regions, ... no egress." `public_path` resolved it as a relative path
+    inside the repo and `relpath` normalised away its trailing full stop,
+    because `.` is a path component. **A sanitiser keyed on a field's name
+    silently rewrote prose**, which is core's finding: the check was doing
+    more than refusing paths.
+
+    Tying it to `LOCAL_PATH` makes the two agree by construction -- exactly
+    what would otherwise be refused is transformed, and nothing else can be.
+    A value the refusal would accept is left alone whatever it is called.
+    """
+    return (key in PATH_KEYS and isinstance(value, str) and bool(value)
+            and bool(LOCAL_PATH.search(value)))
 
 
 def public_price_table(table):
@@ -1269,6 +1315,179 @@ def public_price_table(table):
     out["path_note"] = ("rewritten by the teaser export: report.json records an "
                         "absolute path on the machine that produced it")
     return out
+
+
+#: The run this page showed until task 044i, kept visible on it.
+#:
+#: **Why it is here at all.** Between 2026-09-09 and 2026-09-20 the lab page
+#: and the oneproof.dev home page disagreed about the same fixture, one click
+#: apart: the lab recommended a configuration and the home page recommended
+#: nothing. Neither number was false. They were two runs, and **nothing on
+#: either page said so** -- which is the failure this product exists to
+#: prevent, occurring on our own page.
+#:
+#: Deleting the older run would have made the pages agree and taught a reader
+#: nothing. Both are true measurements and the difference between them is the
+#: finding: a single run at the margin is not a verdict.
+SUPERSEDED_RUN = {
+    "run": "tf8sd2usxbblsm",
+    "date": "2026-09-09",
+    "said": "single_node_hnsw[M=32,efConstruction=200,efSearch=128] meets",
+    "latency_p95_ms": 38.216508,
+    "threshold_ms": 40.0,
+    "report": ("fixtures/arxiv-150k/report/"
+               "superseded-2026-09-09-tf8sd2usxbblsm.report.json"),
+    "note": (
+        "This page showed a different verdict until 2026-09-20. On 2026-09-09 "
+        "a single verify run measured p95 latency at 38.22 ms against a 40.0 "
+        "ms threshold and the configuration met it -- by 1.8 ms, on one run. "
+        "Re-measured on 2026-09-20 on the same fixture and the same "
+        "configuration, pgvector fails it in all three runs (316.87, 317.41 "
+        "and 332.23 ms) and qdrant cannot be judged at all, because the "
+        "baseline round-trip was 60% of the query p95 and the number would "
+        "have measured the network more than the engine. "
+        "**That earlier run is not the basis of this verdict and its verify "
+        "receipt no longer exists** -- it was never committed, so only its "
+        "report survives, and it is linked above. It is shown because a "
+        "measurement that met a threshold by 1.8 ms on one run is not a "
+        "result that later turned out to be wrong; it is a result that was "
+        "never separable from its margin, and a page that quietly replaced it "
+        "would be hiding the most useful thing on it."),
+}
+
+
+def _engine_outcomes(report, verified_config=None):
+    """Per-engine latency outcomes, read from the report rather than derived.
+
+    The report already judged each engine and wrote down why. Re-deriving it
+    here would be a second judgement that could disagree with the one the rest
+    of the page shows, so this copies.
+    """
+    # The configuration the verify run actually built, named by the run
+    # itself. Without this the first option wins, and on this report that is
+    # `hash_sharded`, whose every engine row says "this configuration was not
+    # the one verified" -- true, and not what the verify panel is about.
+    seen, out = set(), []
+    options = report.get("options", [])
+    if verified_config:
+        options = ([o for o in options if o.get("config") == verified_config]
+                   or options)
+    for opt in options:
+        for c in (opt.get("judgement") or {}).get("constraints", []):
+            eng = c.get("engine")
+            if not eng or eng in seen:
+                continue
+            if c.get("constraint") != "latency_p95":
+                continue
+            seen.add(eng)
+            out.append({
+                "engine": eng,
+                "outcome": c.get("outcome"),
+                "reason": c.get("reason"),
+                "constraint": c.get("constraint"),
+                "config": opt.get("config"),
+                "source": "report.json:options[].judgement.constraints[]",
+            })
+    return sorted(out, key=lambda e: e["engine"])
+
+
+def _latency_or_why(shape):
+    """A latency block that always has the same type, never a union.
+
+    `verify.json` writes numbers when latency could be attributed and a
+    **string** saying why when it could not -- qdrant's under-load entry on
+    this run is `"couldnt_check: environment noise -- the baseline RTT p95
+    (4.62 ms) is 60% of the query p95 ..."`. That is the right thing to have
+    recorded and the wrong thing to hand a renderer, which would have to test
+    the type of a field to know whether it can read `p95_ms` from it.
+
+    So both become an object and the page reads one key to know which it has.
+    **This is the distinction the panel exists to show** -- one engine has
+    numbers and one has a reason, and flattening them to "no data" would lose
+    exactly what a couldn't-check is for.
+    """
+    if isinstance(shape, dict):
+        return dict(shape, outcome="measured")
+    if shape is None:
+        return None
+    return {"outcome": "couldnt_check", "why": str(shape)}
+
+
+def _verify_multi(v, info, report, vp, ip):
+    """A two-engine verify, with both engines named and neither chosen.
+
+    **The page must render every entry of `engines`.** A renderer that shows
+    `engines[0]` reproduces the defect this replaced: one true number standing
+    where two belong. `outcomes` is the minimum a page has to show -- one line
+    per engine with its verdict and the sentence explaining it -- and
+    `engines` carries the detail for anything that wants more.
+    """
+    # `engine_facts` sits inside each entry of verify_info["engines"] in the
+    # two-engine shape, not in a top-level map keyed by engine.
+    facts_by_engine = {e.get("engine"): (e.get("engine_facts") or {})
+                       for e in (info.get("engines") or [])}
+    verified = ((v["engines"][0].get("calibration") or {})
+                .get("simulated_config") if v.get("engines") else None)
+    engines = []
+    for e in v["engines"]:
+        name = e.get("engine")
+        facts = facts_by_engine.get(name) or {}
+        searches = e.get("searches") or {}
+        seq = searches.get("k=10") or {}
+        loaded = searches.get("k=10_under_load") or {}
+        engines.append({
+            "engine": name,
+            "engine_version": e.get("engine_version"),
+            "environment_id": e.get("environment_id"),
+            "endpoint_kind": e.get("mode"),
+            "index_type": facts.get("index_type"),
+            "index_params": facts.get("index_params"),
+            "metric": facts.get("metric"),
+            "n_base": e.get("n_base"),
+            "n_queries": e.get("n_queries"),
+            "elapsed_seconds": e.get("elapsed_seconds"),
+            "recall_at_10_measured": seq.get("recall_at_10"),
+            "calibration": public_sources(
+                dict(e.get("calibration") or {},
+                     error_recall=e.get("calibration_error_recall"))),
+            "ingest": e.get("ingest"),
+            "index": e.get("index"),
+            "rtt_baseline": e.get("rtt_baseline_ms"),
+            "sequential": _latency_or_why(
+                seq.get("latency_shape_single_client")),
+            "sequential_rtt_share_of_p95": seq.get("rtt_share_of_p95"),
+            "under_load": _latency_or_why(
+                loaded.get("latency_shape_single_client")),
+            "under_load_rtt_share_of_p95": loaded.get("rtt_share_of_p95"),
+            "load": e.get("load"),
+            "qps_max": e.get("qps_max"),
+        })
+
+    return {
+        "schema_engines": v.get("schema_engines"),
+        "source": public_path(vp),
+        "info_source": public_path(ip),
+        "kind": info.get("kind"),
+        "run_at": info["run_at"],
+        "date": info["run_at"][:10],
+        "target": info["target"],
+        "platform": info["platform"],
+        "environment_id": v["environment_id"],
+        "elapsed_seconds": v.get("elapsed_seconds"),
+        "sequential": v.get("sequential", True),
+        "sequential_note": v.get("sequential_note"),
+        "engines_measured": v.get("engines_measured"),
+        # The minimum a page must show, one line per engine.
+        "verified_config": verified,
+        "outcomes": _engine_outcomes(report, verified),
+        "engines": engines,
+        "note": (
+            "Two engines were measured sequentially on one host: neither ran "
+            "while the other was running, so neither number carries the "
+            "other's contention -- and neither says anything about how either "
+            "behaves while the other runs. Every engine here is shown; none "
+            "is the page's choice."),
+    }
 
 
 def build_verdict(report, report_path):
@@ -1366,8 +1585,12 @@ def build_verdict(report, report_path):
     return {
         "run": report["run"],
         "generated_at": report["generated_at"],
-        "source": os.path.relpath(report_path).replace("\\", "/"),
+        "source": public_path(report_path),
         "schema": report["schema"],
+        # Task 044i. The run this page used to show, kept visible rather than
+        # deleted: a page that silently replaces one decision with another
+        # teaches a reader that decisions are opinions.
+        "superseded": SUPERSEDED_RUN,
         "constraints": report["constraints"],
         "summary": report["summary"],
         "recommendation": report["recommendation"],
@@ -1421,6 +1644,32 @@ def stamp_page(out, page_dir=None):
     return version
 
 
+def _stable_gzip(raw):
+    """gzip bytes that depend on the input and nothing else.
+
+    **`gzip.compress` writes the current time into the header**, so every
+    export produced a different `inline.js` even when not one byte of data had
+    changed. That is the precise situation in which a digest stops meaning
+    what it is for: `data/MANIFEST.sha256` recorded a new digest, the page's
+    `?v=` cache-bust changed, and `check_hosted.py` would have reported drift
+    -- all of it saying *the data changed* when the data had not. A digest
+    that moves on its own is worse than no digest, because it is believed.
+
+    This has been true of every export this project has ever sent, which is
+    why core saw `inline.js` move in changes that touched nothing near it.
+
+    `mtime=0` removes the only non-deterministic input. Compression level and
+    the OS byte are already fixed by the library.
+    """
+    import gzip
+    import io as _io
+    buf = _io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=9,
+                       mtime=0) as f:
+        f.write(raw)
+    return buf.getvalue()
+
+
 def write_inline(out):
     """The four outputs, gzipped and base64-encoded into one script.
 
@@ -1437,7 +1686,7 @@ def write_inline(out):
         payload[name] = {
             "sha256": hashlib.sha256(raw).hexdigest(),
             "bytes": len(raw),
-            "gzip_b64": base64.b64encode(gzip.compress(raw, 9)).decode("ascii"),
+            "gzip_b64": base64.b64encode(_stable_gzip(raw)).decode("ascii"),
         }
     body = ("/* Generated by corpora/export_teaser_data.py. Do not edit.\n"
             "   The four files in this directory, gzipped and base64'd, for the\n"
