@@ -588,7 +588,17 @@ def test_no_module_reaches_for_platform_node_for_an_identifier():
 # tasks/016-decision-log.txt without anything noticing.
 
 def test_no_tracked_file_carries_a_machine_identifier():
-    """The guard 015 found missing, against the tree as it stands."""
+    """The guard 015 found missing, against the tree as it stands.
+
+    **One of three, and not redundant with the other two.** This one's subject
+    is what git tracks. It is blind to `runs/`, which is gitignored and which
+    a publishing path reads -- task 044f found four receipt writers putting a
+    home directory into every local `build_info.json`, invisible here for as
+    long as those writers had existed. `receipts.pathguard` reads write sites
+    and `write_json_stable` refuses payloads; what each deliberately does not
+    catch is set out in `oneground/receipts/__init__.py`, under *THREE CHECKS,
+    THREE SUBJECTS*. Read it before deleting any of them.
+    """
     if env.checkout_root() is None:
         pytest.skip("not a git checkout; nothing to scan")
     # A checkout with no runnable git raises `GitUnavailable` here rather than

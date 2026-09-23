@@ -47,7 +47,8 @@ import numpy as np
 from .. import intake
 from ..adapters import (AdapterError, engines as registered_engines,
                         get as get_engine, managed_namespace, namespace_for)
-from ..receipts import (library_versions, producing_version, round_floats,
+from ..receipts import (library_versions, producing_version, public_path,
+                        round_floats,
                         sha256_file,
                         write_json_stable, write_manifest)
 from ..sample import loaders
@@ -1332,7 +1333,7 @@ def _write(req, workdir, result, requirements_path, engine_names,
         "oneground": producing_version(),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
-        "requirements_file": {"path": os.path.abspath(requirements_path),
+        "requirements_file": {"path": public_path(requirements_path),
                               "sha256": sha256_file(requirements_path)},
         "note": ("engine_facts is what each engine reported about itself. "
                  "Nothing in this file was measured by oneground."),

@@ -39,6 +39,7 @@ import os
 import time
 
 from .. import intake
+from .. import receipts
 # The one implementation of task 018's rule for writing a path into an
 # artifact: repository-relative inside the tree, unchanged outside it, `/`
 # separators. Imported rather than copied -- a second copy of this rule is how
@@ -47,7 +48,8 @@ from ..calibrate.history import _portable_source
 from ..environment import PINNED
 from ..models import get as get_model
 from ..proposals import card as card_mod
-from ..receipts import (library_versions, producing_version, round_floats,
+from ..receipts import (library_versions, producing_version, public_path,
+                        round_floats,
                         sha256_file, write_json_stable, write_manifest)
 from ..report.verdict import CALIBRATION_TOLERANCE
 from .policy import PolicyError, canonical_json, load_policy
@@ -201,18 +203,40 @@ def plan_proposal(workdir, policy_path, prediction_path, name=None,
                 "row_sha256": row_digest(baseline_row),
             }
 
-    req_path = requirements_path or (info.get("requirements_file") or {}).get(
-        "path")
+    # Task 044g. The receipt records WHAT the requirements file is -- a
+    # repo-relative path and its sha256 -- not where the machine that ran it
+    # kept the file, so reading it back means resolving rather than opening.
+    # The digest is what makes that safe: a candidate is confirmed, never
+    # guessed at. Measured before the change: seven of 32 recorded absolute
+    # paths in `runs/` did not open here, two of them `/workspace/...` from
+    # pod sessions -- so the absolute form was already failing on this
+    # project's normal way of running heavy jobs.
+    recorded = (info.get("requirements_file") or {})
+    req_path, found_how = None, None
+    if requirements_path:
+        req_path, found_how = requirements_path, "given with --requirements"
+    elif recorded.get("path"):
+        req_path, found_how = receipts.resolve_recorded_path(
+            recorded["path"], workdir=workdir, sha256=recorded.get("sha256"))
     req = None
-    if not req_path:
+    if not recorded.get("path") and not requirements_path:
         problems.append(
             "%s/simulate_info.json records no requirements file, so the "
             "corpus this sample was drawn from cannot be found. Pass "
             "--requirements <requirements.yaml>" % workdir)
-    elif not os.path.exists(req_path):
+    elif req_path is None:
+        tried = "\n          ".join(
+            "%s  (%s)" % (c, how) for c, how in (found_how or [])[:4])
         problems.append(
-            "the requirements file the baseline run recorded is not there: "
-            "%s. Pass --requirements <requirements.yaml>" % req_path)
+            "the requirements file the baseline run recorded could not be "
+            "found: %s%s. Looked in:\n          %s\n        Pass "
+            "--requirements <requirements.yaml>, or re-run `oneground "
+            "simulate` in this checkout so the receipt records a path that "
+            "resolves here."
+            % (recorded.get("path"),
+               "" if not recorded.get("sha256")
+               else " (sha256 %s)" % recorded["sha256"][:12],
+               tried))
     else:
         try:
             req = intake.load(req_path)
@@ -661,11 +685,15 @@ def _info(plan, pred_sha, failure, elapsed, timing=None):
         "kind": {INFO_NAME: "declared"},
         "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "command": "oneground propose",
-        "workdir": str(plan.workdir).replace("\\", "/"),
+        # Task 044g: public_path, not a local spelling of it. `workdir` was
+        # recorded raw and `requirements_file.path` went through
+        # `calibrate.history._portable_source` -- a second implementation of
+        # the same rule, which is 043's finding. Both now use the one
+        # function, and `write_json_stable` refuses this receipt if either
+        # ever names a filesystem again.
+        "workdir": public_path(plan.workdir),
         "requirements_file": {
-            # Portable, for the reason calibration lines are: a path through a
-            # home directory says whose machine wrote the file.
-            "path": _portable_source(plan.requirements_path),
+            "path": public_path(plan.requirements_path),
             "sha256": sha256_file(plan.requirements_path),
             "recorded_by_the_baseline_run": (
                 plan.simulate_info.get("requirements_file") or {}).get(

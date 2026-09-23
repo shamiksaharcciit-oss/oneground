@@ -28,6 +28,7 @@ import hashlib
 import importlib.metadata as _md
 import json
 import os
+import re
 
 import numpy as np
 
@@ -202,6 +203,89 @@ def public_paths_in(table, keys=("path",), repo_root=None):
     return out
 
 
+#: Where a recorded path is looked for, in order. Each is a base directory;
+#: the recorded path is joined onto it.
+#:
+#: The list exists because **a receipt records what a file is, not where your
+#: machine keeps it** -- that is `public_path`'s whole point -- so reading one
+#: back means searching a few plausible bases rather than opening one string.
+#: Measured in task 044g before this was written: of 32 recorded paths in
+#: `runs/`, seven did not resolve as absolute paths, and two of those were
+#: `/workspace/...` from pod sessions. A pod session always produces a path
+#: the laptop cannot open, so **the absolute form fails on this project's
+#: standard heavy-job workflow**; searching bases is what fixes that case
+#: rather than a concession to it.
+RESOLUTION_BASES = ("as recorded", "the workdir's checkout", "this checkout",
+                    "beside the workdir")
+
+
+def checkout_of(path):
+    """The checkout a path sits in, or None.
+
+    Walks up looking for the marker every checkout has and no workdir does.
+    Used so a receipt fetched from a pod resolves against the checkout it was
+    extracted beside rather than against `/workspace`.
+    """
+    cur = os.path.abspath(path)
+    while True:
+        if (os.path.isdir(os.path.join(cur, "oneground"))
+                and os.path.isfile(os.path.join(cur, "pyproject.toml"))):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def resolve_recorded_path(recorded, workdir=None, sha256=None,
+                          repo_root=None):
+    """Find the file a receipt recorded. Returns (path, how) or (None, tried).
+
+    **The digest is what makes searching safe.** Every receipt that records a
+    path records its `sha256` beside it, so a candidate is not guessed at --
+    it is confirmed, and a file that matches the digest is the file whatever
+    directory it was found in. Without `sha256` the first existing candidate
+    is returned and the caller is told which base found it, because a resolved
+    path whose provenance is unstated is how the wrong file gets read quietly.
+    """
+    if not recorded:
+        return None, []
+    root = repo_root or REPO_ROOT
+    wd = os.path.abspath(workdir) if workdir else None
+    bases = [(None, "as recorded")]
+    if wd:
+        co = checkout_of(wd)
+        if co:
+            bases.append((co, "the workdir's checkout"))
+    bases.append((root, "this checkout"))
+    if wd:
+        bases.append((wd, "beside the workdir"))
+        # The workdir's parent: a run is commonly written into a subdirectory
+        # of the place its requirements file lives, so this is where a
+        # relocated run most often finds its own inputs.
+        bases.append((os.path.dirname(wd), "beside the workdir's directory"))
+
+    tried = []
+    for base, how in bases:
+        cand = recorded if base is None else os.path.join(
+            base, os.path.normpath(recorded.replace("/", os.sep)))
+        tried.append((cand, how))
+        if not os.path.isfile(cand):
+            continue
+        if sha256 and sha256_file(cand) != sha256:
+            continue
+        return cand, how
+    # Last resort: the basename beside the workdir, for a receipt whose
+    # recorded path is from another filesystem entirely.
+    if wd:
+        cand = os.path.join(wd, os.path.basename(recorded))
+        tried.append((cand, "beside the workdir, by name"))
+        if os.path.isfile(cand) and (
+                not sha256 or sha256_file(cand) == sha256):
+            return cand, "beside the workdir, by name"
+    return None, tried
+
+
 def sha256_file(path, buf=1 << 20):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -263,10 +347,121 @@ def round_floats(obj, nd=FLOAT_DECIMALS):
     return obj
 
 
+#: THREE CHECKS, THREE SUBJECTS, AND NONE IS A SUPERSET OF ANOTHER
+#: ----------------------------------------------------------------
+#: **If you are here to delete one of these as redundant: they are not.** Each
+#: sees something the other two cannot, and each was added after the previous
+#: one failed to see a real defect that shipped.
+#:
+#:   `test_no_tracked_file_carries_a_machine_identifier` (017)
+#:       subject: **what git tracks.** Catches a hand-written path in a
+#:       committed file -- a decision log, a task report, a doc.
+#:       Blind to: anything under `runs/`, which is gitignored and which a
+#:       publisher reads. It could not see the four writers that put a home
+#:       directory into every local build_info.json (044f).
+#:
+#:   `receipts.pathguard` (044f)
+#:       subject: **the source of a receipt write site.** Catches a field
+#:       built from `os.path.abspath` or named like a path, wherever the file
+#:       lands.
+#:       Blind to: a path that arrives inside an opaque call. It could not see
+#:       `price_table.path` coming out of `prices.as_dict()`, which is the
+#:       instance the whole rule was written for.
+#:
+#:   `write_json_stable`'s refusal (044g, below)
+#:       subject: **the payload, at the moment it is serialised.** By then an
+#:       opaque value is a value, so it sees what the other two cannot. On its
+#:       first run it found `calibrate.history._portable_source` writing
+#:       through two tasks' worth of review.
+#:       Blind to: a bare relative path, which is correct; a username with no
+#:       path around it, which is the tracked scan's subject; and anything
+#:       never written through this function.
+#:
+#: The pattern of the three is deliberate: **source, then output, then
+#: value.** A defect invisible to one is routinely visible to the next, and
+#: the overlap between them is small. Deleting any one restores a blind spot
+#: that a real defect has already occupied.
+
+#: What counts as a machine-local path in a receipt.
+#:
+#: **Deliberately narrow.** Receipts carry prose, notes and error text full of
+#: slashes, and a pattern wide enough to catch every path would fire on every
+#: sentence -- a refusal that fires on prose is a refusal that gets switched
+#: off. So it matches only the shapes that name a filesystem rather than a
+#: file: a drive letter, a UNC share, and the three unix roots a home
+#: directory actually lives under, plus `/workspace/`, which is where every
+#: pod session runs.
+#:
+#: What it deliberately does not catch, stated so the limit is on the record
+#: rather than discovered later: a bare relative path (`runs/x/report.json`),
+#: which is the correct form; a path under any other unix root; and a
+#: username appearing without a path around it, which is
+#: `test_no_tracked_file_carries_a_machine_identifier`'s subject and not this
+#: one. **Three checks see three different things** -- the tracked tree, the
+#: write site's source, and the payload -- and none is a superset of another.
+MACHINE_PATH = re.compile(
+    r"(^|[\s\"'=(\[])("
+    r"[A-Za-z]:[\\/]"                      # C:\ or C:/
+    r"|\\\\[^\\/\s]+\\"                    # \\server\share
+    r"|/(?:home|Users|root|workspace)/"    # unix homes, and the pod
+    r")")
+
+
+class ReceiptRefused(Exception):
+    """A receipt was not written because it named somebody's filesystem."""
+
+
+def machine_paths_in(obj, at=()):
+    """Every string in a payload that names a filesystem, with its key path."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from machine_paths_in(v, at + (str(k),))
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            yield from machine_paths_in(v, at + ("[%d]" % i,))
+    elif isinstance(obj, str):
+        m = MACHINE_PATH.search(obj)
+        if m:
+            yield ".".join(at), obj, m.group(2)
+
+
 def write_json_stable(path, obj):
     """Sorted keys and LF newlines, so the bytes do not depend on dict order
     or on the host's line-ending convention (a Windows build and a Linux build
-    of the same fixture must agree byte for byte)."""
+    of the same fixture must agree byte for byte).
+
+    **Refuses a payload that names a filesystem** (task 044g). This is the
+    choke point every receipt passes through, and the only place where a path
+    that arrived inside an opaque call is visible as a value -- which is why
+    the two static checks cannot reach it. `receipts.pathguard` reads the
+    write site's source and cannot see into `prices.as_dict()`; here, by the
+    time the payload exists, there is nothing left to see into.
+
+    **It refuses and does not repair**, and that is the ruling rather than a
+    preference. `export_teaser_data.public_price_table` repaired this same
+    defect silently on read, and a ten-day-old machine identifier sat in three
+    receipts unnoticed *because it was being repaired*. A silent repair
+    removes the symptom and leaves the writer wrong, so the next writer is
+    wrong too and nobody is told.
+    """
+    offending = list(machine_paths_in(obj))
+    if offending:
+        lines = "\n".join(
+            "    %s\n        %s" % (key, value[:160])
+            for key, value, _frag in offending[:5])
+        more = ("\n    ... and %d more" % (len(offending) - 5)
+                if len(offending) > 5 else "")
+        raise ReceiptRefused(
+            "refusing to write %s: %d field(s) name a filesystem, and a "
+            "receipt records what a file is rather than where one machine "
+            "keeps it.\n%s%s\n\n"
+            "  Not repaired on purpose: a receipt quietly corrected on the "
+            "way out leaves the writer wrong and tells nobody.\n"
+            "  If you are running oneground: re-run this command in a "
+            "checkout, which records repo-relative paths.\n"
+            "  If you are writing a receipt: pass the value through "
+            "receipts.public_path() at the point you build the field."
+            % (path, len(offending), lines, more))
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(obj, f, indent=2, sort_keys=True, ensure_ascii=True)
         f.write("\n")

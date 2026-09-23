@@ -24,10 +24,12 @@ predicate should never have been "tracked":
 The second is the class the rule is about, and whether git stores it is an
 unrelated fact about a `.gitignore`.
 
-**Both checks stay.** Two checks that see different things are not redundant,
-and this pair is the proof: one scans the tracked tree, one scans the write
-site, and the gap between them held a ten-day-old machine identifier on a
-publishing path. Deleting either restores a blind spot.
+**All three checks stay.** There are three now -- the tracked tree, this one,
+and `write_json_stable`'s refusal on the payload -- and none is a superset of
+another. What each deliberately does not catch is written out in
+`oneground/receipts/__init__.py`, under *THREE CHECKS, THREE SUBJECTS*. Read
+that before deleting any of them as redundant; each was added after the
+previous one failed to see a defect that had already shipped.
 
 PROVENANCE, NOT LOCALITY
 ------------------------

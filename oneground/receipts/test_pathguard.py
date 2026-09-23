@@ -33,56 +33,26 @@ def _fmt(found):
         "  %s:%d  %r in %s()  [caught by %s]" % f for f in found)
 
 
-#: The one finding this guard reports and 044f did not fix, with the reason
-#: and the task that closes it.
-#:
-#: `requirements_file.path` is written by four receipt writers as
-#: `os.path.abspath(...)`, so every local `build_info.json`,
-#: `simulate_info.json` and `verify_info.json` carries the operator's home
-#: directory. It was fixed, and the fix was reverted: **this field is
-#: resolvable, not descriptive.** `proposals/propose.py` reads it back out of
-#: `simulate_info.json` and reopens the file, so a public path breaks
-#: resolution whenever the requirements file sits outside the checkout -- 30
-#: tests in `test_propose.py`, measured.
-#:
-#: That makes it a behaviour change on the write path with a consumer
-#: attached, which belongs to **task 044g** and not to the task that built
-#: this guard. Recorded here rather than declared in `DECLARED_PUBLIC`,
-#: because a declaration states what the code guarantees and this code
-#: guarantees the opposite.
-KNOWN_OPEN = {
-    ("oneground/characterize.py", "path", "run"),
-    ("oneground/characterize.py", "path", "run_declared"),
-    ("oneground/simulate/__init__.py", "path", "run"),
-    ("oneground/verify/__init__.py", "path", "_write"),
-}
-
-
 # ------------------------------------------------------------- the guard
+#
+# THIS FILE HELD A `KNOWN_OPEN` SET AND IT IS GONE, WHICH IS THE POINT
+# --------------------------------------------------------------------
+# 044f left four `requirements_file.path` sites unfixed and listed them here
+# with the reason: the field is **resolvable, not descriptive** --
+# `proposals/propose.py` reads it back and reopens the file, so making it
+# public broke resolution in 30 tests.
+#
+# The set was asserted **two-sidedly**: a fifth instance failed, and so did
+# closing one of the four without deleting its entry. Task 044g closed all
+# four, this file's own test failed on the second half of that assertion, and
+# the set was removed in the same commit. That is the allowlist behaving as
+# intended rather than becoming a place defects go to be forgotten -- a
+# one-sided allowlist would have let the fix land and the exception live on.
 def test_no_receipt_write_site_records_a_machine_local_path():
     found = pg.findings(SHIPPED, REPO)
-    new = [f for f in found if (f[0], f[2], f[3]) not in KNOWN_OPEN]
-    assert new == [], (
+    assert found == [], (
         "these receipt fields hold a path that did not come from "
-        "receipts.public_path:\n" + _fmt(new))
-
-
-def test_the_known_open_set_is_exactly_what_is_still_open():
-    """Pinned to a current state deliberately, and it says so.
-
-    `docs/PRACTICE.md` section 2 warning 7 is that a test pinned to a current
-    state breaks when a later task legitimately changes it. That is the
-    intended behaviour here: when 044g closes these four, this test fails and
-    whoever closes them deletes the entry. A one-sided allowlist would let
-    them be quietly fixed and the exception live on, which is how an
-    allowlist becomes a place defects go to be forgotten.
-    """
-    found = pg.findings(SHIPPED, REPO)
-    still = {(f[0], f[2], f[3]) for f in found} & KNOWN_OPEN
-    assert still == KNOWN_OPEN, (
-        "KNOWN_OPEN lists something the guard no longer reports: %s. If task "
-        "044g closed it, delete the entry."
-        % sorted(KNOWN_OPEN - still))
+        "receipts.public_path:\n" + _fmt(found))
 
 
 # --------------------------------------- it can find what it was written for

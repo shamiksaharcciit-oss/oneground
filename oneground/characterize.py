@@ -45,6 +45,7 @@ from .measures.crispness import (CRISP_RATIO, N_CENTROIDS, boundary_crispness,
 from .measures.drift import drift_pair
 from .measures.skew import reading as skew_reading, skew_top10_share
 from .receipts import (MANIFEST_NAME, library_versions, producing_version,
+                       public_path,
                       round_floats,
                        sha256_file, write_json_stable, write_manifest)
 from .sample import loaders
@@ -444,7 +445,13 @@ def run(requirements_path, with_projection=False, log_fn=log,
                       [str(q) for q in query_ids])
 
     versions, torch_info = library_versions(log=log_fn)
-    inputs = {k: {"path": p, "sha256": sha256_file(p)}
+    # Task 044g. `public_path` for the record, the real path for the digest:
+    # the receipt says WHICH file was read and what it hashed to, and nothing
+    # about where this machine keeps it. Safe to change because no consumer
+    # opens the recorded value -- `propose._named_file` already reduces it to
+    # a basename (defensively, precisely because this used to be absolute) and
+    # the closure check reads only `sha256`.
+    inputs = {k: {"path": public_path(p), "sha256": sha256_file(p)}
               for k, p in req.input_paths().items()}
     build_info = {
         "kind": {
@@ -474,7 +481,7 @@ def run(requirements_path, with_projection=False, log_fn=log,
         "max_seq_length": (truncation or {}).get("max_seq_length"),
         "truncated_count": (truncation or {}).get("truncated_count"),
         "truncation": truncation,
-        "requirements_file": {"path": os.path.abspath(requirements_path),
+        "requirements_file": {"path": public_path(requirements_path),
                               "sha256": sha256_file(requirements_path)},
         # Which interpreter produced this, and whether it was running the
         # pins. `pinned: false` means the numbers above were computed outside
@@ -572,7 +579,7 @@ def run_declared(req, requirements_path, workdir, t0, log_fn=log,
         "max_seq_length": None,
         "truncated_count": None,
         "truncation": None,
-        "requirements_file": {"path": os.path.abspath(requirements_path),
+        "requirements_file": {"path": public_path(requirements_path),
                               "sha256": sha256_file(requirements_path)},
         # Which interpreter produced this, and whether it was running the
         # pins. `pinned: false` means the numbers above were computed outside

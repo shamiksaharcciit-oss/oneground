@@ -68,7 +68,8 @@ from .. import intake
 from ..models import Config, ConfigSpace, UnknownFamily, get as get_model
 from ..models import rerank
 from ..models.base import ParameterError, resolve_deterministic
-from ..receipts import (library_versions, producing_version, round_floats,
+from ..receipts import (library_versions, producing_version, public_path,
+                        round_floats,
                         sha256_file,
                         write_json_stable, write_manifest)
 from ..sample import loaders
@@ -650,7 +651,7 @@ def run(requirements_path, log_fn=log, emit_state=False):
         "dropped": dropped,
         "budget": dict(budget),
         "stopped_after_config": stopped_at,
-        "requirements_file": {"path": os.path.abspath(requirements_path),
+        "requirements_file": {"path": public_path(requirements_path),
                               "sha256": sha256_file(requirements_path)},
         "prediction": cited_prediction,
     }
