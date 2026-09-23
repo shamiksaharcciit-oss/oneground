@@ -190,24 +190,178 @@ def count_from_quantiles(distribution, threshold=CRISP_RATIO):
     return above
 
 
-#: Vectors above the threshold, below which the count is not resolvable from
-#: zero and must not be read as one. Thirty is the conventional floor for
-#: estimating a proportion at all.
+#: How many standard errors a rate must sit from its degenerate value to be
+#: read as a proportion at all.
 #:
-#: A QUANTILE RULE WAS TRIED FIRST AND WAS WRONG. The first version of this
-#: flagged a reading whose threshold sat above the distribution's 95th
-#: percentile. Measured against the published fixtures, that flags
-#: `arxiv-150k` (p95 1.1858) and `stackexchange-150k` (p95 1.1501) as not
-#: discriminating -- and those two demonstrably do discriminate: they order
-#: consistently and reproducibly across five subsample sizes (task 036's
-#: instrument check). A criterion that calls a working measurement broken is
-#: a worse defect than the one it was written for, so it was replaced rather
-#: than tuned.
+#: TWO CRITERIA WERE TRIED BEFORE THIS AND BOTH WERE WRONG IN THE SAME WAY:
+#: they called a working measurement broken, which is a worse defect than the
+#: one they were written for. Both were caught by measurement rather than by
+#: review, and both are recorded so neither is re-proposed.
 #:
-#: What actually separated the two cases was the **absolute count**. arxiv at
-#: 0.0363 of 150,000 is 5,445 vectors; e5 at 0.0007 of 3,000 is two. Both sit
-#: in the tail of their distribution; only one is a measurement.
-MIN_VECTORS_ABOVE = 30
+#: **A quantile rule** (task 044): flag a reading whose threshold sits above
+#: the distribution's 95th percentile. That flags `arxiv-150k` (p95 1.1858)
+#: and `stackexchange-150k` (p95 1.1501) as non-discriminating under the
+#: anchor model itself -- two corpora that order consistently and reproducibly
+#: across five subsample sizes (task 036's instrument check).
+#:
+#: **An absolute-count rule** (`n >= 30`, task 044): that flags
+#: `arxiv-smoke`'s published ambiguity of 0.935, where 13 of 200 queries fall
+#: outside the threshold. Thirteen is a small count and 0.935 over 200 has a
+#: standard error of 0.017, which puts it 3.7 sigma from 1.0 -- a measurement.
+#: The rule conflated a small SAMPLE with a saturated MEASURE. Found by 044b's
+#: tests, against a fixture 044 had already passed.
+#:
+#: What both were reaching for is whether the rate is distinguishable from the
+#: value it degenerates to -- zero for a tail count, one for a saturating one
+#: -- and that is a standard error, not a count and not a quantile. It gets
+#: all four known cases right: arxiv crispness 75 sigma, arxiv-smoke ambiguity
+#: 3.7 sigma, task 036's e5 crispness 1.45 sigma, a saturated 0.999 over 2,000
+#: at 1.41 sigma.
+DISTINGUISHABILITY_SIGMA = 3.0
+
+#: Below this many on the informative side, no standard error means anything
+#: and the answer is couldn't-check regardless of arithmetic.
+MIN_INFORMATIVE_COUNT = 5
+
+
+def distinguishable(value, n, degenerate=0.0):
+    """Is a proportion readable, or is it its own degenerate value?
+
+    `degenerate` is what the reading collapses to when its threshold leaves
+    the distribution: 0.0 for a count of a tail (crispness), 1.0 for a rate
+    that saturates (ambiguity). Returns `(resolvable, n_informative, sigma)`.
+    """
+    n = int(n)
+    p = float(value)
+    distance = p if degenerate == 0.0 else (1.0 - p)
+    n_informative = int(round(distance * n))
+    if n <= 0 or n_informative < MIN_INFORMATIVE_COUNT:
+        return False, n_informative, 0.0
+    se = float(np.sqrt(max(p * (1.0 - p), 1e-12) / n))
+    sigma = distance / se if se > 0 else 0.0
+    return bool(sigma >= DISTINGUISHABILITY_SIGMA), n_informative, sigma
+
+
+#: Where 1.20 sits in each published fixture's own base ratio distribution.
+#: Derived from the published `ground_view_base.parquet` files, recorded here
+#: with its provenance, and re-checked against them by a test.
+#:
+#: This is the reference a single corpus is weighed against, and it exists
+#: because **no single-corpus quantity can separate a working reading deep in
+#: a tail from a broken one** (task 044b). `arxiv-150k`'s published crispness
+#: sits at the 96.37th percentile and works; e5's ambiguity sits at the 97.74th
+#: and has stopped transferring. Both are statistically sound and both are deep
+#: in a tail. What differs is whether the reading discriminates BETWEEN
+#: corpora, which is not a property of one corpus -- so the only thing a single
+#: reading can be compared against is where the same threshold falls on corpora
+#: whose values are frozen.
+#: **Smoke fixtures are excluded, deliberately.** `arxiv-smoke` puts this
+#: threshold at the 47.17th percentile, and including it widened the band to
+#: 47.2-98.8 -- a range spanning half the distribution, which barely
+#: discriminates anything. A 2,000-vector smoke fixture exists to check that a
+#: command runs, not to calibrate a measure, and a band computed over both
+#: kinds is dominated by the looser one. So the reference is the full fixtures
+#: only, and this comment is where that choice is recorded rather than
+#: inferred from an absence.
+PUBLISHED_CRISP_PERCENTILES = {
+    "arxiv-150k": 96.37,
+    "sec-filings-10k": 89.25,
+    "stackexchange-150k": 98.83,
+}
+
+#: What the comparison assumes, and it is not nothing.
+#:
+#: These percentiles were measured at the published settings: 150,000 vectors
+#: and `N_CENTROIDS` regions. `characterize` always uses `N_CENTROIDS`, so the
+#: centroid count matches by construction -- but a user sampling fewer vectors
+#: is compared against a band measured on more, and how much the threshold's
+#: position moves with sample size **has not been measured**. That is task
+#: 044c's question and until it is answered this comparison carries the
+#: assumption rather than having discharged it.
+PUBLISHED_PERCENTILE_BASIS = (
+    "measured on the full published fixtures at 150,000 vectors and "
+    "N_CENTROIDS regions; smoke fixtures excluded. The threshold's position "
+    "drifts upward with sample size at a fixed centroid count and converges "
+    "on the published value, so the comparison is only made at or above "
+    "MIN_N_FOR_TRANSFER.")
+
+#: Below this many vectors the transfer comparison is not made at all.
+#:
+#: **Measured, not guessed** (task 044b), on the published vectors at the
+#: production centroid count, which isolates sample size:
+#:
+#:     arxiv-150k          n=5,000   87.46   OUTSIDE its own band
+#:                        n=10,000   93.40   inside
+#:                        n=20,000   95.79   inside
+#:                        n=50,000   96.42   inside   (published 96.37)
+#:     stackexchange-150k  n=5,000   91.45 .. n=50,000 98.64 (published 98.83)
+#:
+#: At 5,000 vectors **arxiv's own published corpus reads outside its own band
+#: under the anchor model** -- a false alarm on precisely the signal this
+#: comparison exists to give, and a false alarm degrades a warning faster than
+#: silence does. The position converges from below as n grows, so the floor is
+#: set where the measurement shows the drift has stopped mattering, which is
+#: also the sample size this project already recommends.
+MIN_N_FOR_TRANSFER = 10000
+
+
+def published_range(per_fixture):
+    return (min(per_fixture.values()), max(per_fixture.values()))
+
+
+def against_published(pct, per_fixture, threshold, what, n=None):
+    """How this corpus's threshold position compares with the published ones.
+
+    It is **not a verdict**: a position outside the published band is a reason
+    to weigh the reading, not a demonstration that it is wrong, and nothing
+    measurable on one corpus could demonstrate that.
+
+    Below `MIN_N_FOR_TRANSFER` the comparison is **not made** -- it is
+    couldn't-check, because the measured drift shows a small sample lands
+    outside the band for reasons of sample size.
+    """
+    lo, hi = published_range(per_fixture)
+    out = {
+        "threshold_percentile": pct,
+        "published_range": [lo, hi],
+        "published_per_fixture": dict(per_fixture),
+        "basis": PUBLISHED_PERCENTILE_BASIS,
+    }
+    if n is not None and int(n) < MIN_N_FOR_TRANSFER:
+        out["outside_published_range"] = None
+        out["outcome"] = "couldnt_check"
+        out["note"] = (
+            "not compared: %d vectors is below the %d this comparison needs. "
+            "The threshold's position drifts upward with sample size and "
+            "converges on the published value, so a smaller sample lands "
+            "below the band for reasons of sample size rather than of "
+            "embedding -- measured: arxiv-150k reads the 87.46th percentile "
+            "at 5,000 vectors against its own published 96.37th. Comparing "
+            "here would raise a false alarm on the one signal this block "
+            "exists to give. The threshold still sits at the %.2fth "
+            "percentile of this corpus, which is reported above."
+            % (int(n), MIN_N_FOR_TRANSFER, pct))
+        return out
+    outside = not (lo <= pct <= hi)
+    out["outside_published_range"] = outside
+    if outside:
+        out["note"] = (
+            "%.2f sits at the %.2fth percentile of this corpus's ratio "
+            "distribution. On the published corpora the same threshold sits "
+            "between the %.1fth and the %.1fth. This reading is being taken "
+            "somewhere the measure has never been calibrated, so a %s here "
+            "does not mean what the same number means on those corpora. It is "
+            "a reason to read the distribution rather than the number; it is "
+            "not a demonstration that the number is wrong, and no measurement "
+            "of one corpus could be."
+            % (threshold, pct, lo, hi, what))
+    else:
+        out["note"] = (
+            "%.2f sits at the %.2fth percentile here, inside the %.1fth to "
+            "%.1fth the published corpora span, so this reading is being "
+            "taken where the measure has been calibrated."
+            % (threshold, pct, lo, hi))
+    return out
 
 
 def threshold_percentile(distribution, threshold=CRISP_RATIO):
@@ -246,6 +400,10 @@ def reading(d_base, threshold=CRISP_RATIO, with_distribution=False):
       `threshold_percentile`  where that sits in this corpus's distribution
       `resolvable`            whether enough vectors are above it to be a
                               proportion at all
+      `transfer`              where the same threshold sits on the published
+                              corpora, and whether this one is outside that
+                              band -- the only thing a single reading can be
+                              weighed against, and not a verdict
 
     `resolvable` is a **couldn't-check on the reading, not on the measure**:
     the distribution was measured fine and it is the count that cannot be
@@ -255,17 +413,19 @@ def reading(d_base, threshold=CRISP_RATIO, with_distribution=False):
     dist = ratio_distribution(d_base)
     value = count_at(d_base, threshold)
     n = int(dist["n"])
-    n_above = int(round(value * n))
     pct = threshold_percentile(dist, threshold)
-    resolvable = n_above >= MIN_VECTORS_ABOVE
+    resolvable, n_above, sigma = distinguishable(value, n, degenerate=0.0)
     out = {
         "value": value,
         "threshold": float(threshold),
         "of": "the ratio distribution",
         "n": n,
         "n_above": n_above,
+        "sigma_from_zero": sigma,
         "threshold_percentile": pct,
         "resolvable": resolvable,
+        "transfer": against_published(pct, PUBLISHED_CRISP_PERCENTILES,
+                                      threshold, "count", n=n),
         "note": ("a count of the vectors above %.2f, which is the %.2fth "
                  "percentile of this corpus's ratio distribution under this "
                  "embedding. A different embedding places the same threshold "
@@ -276,13 +436,14 @@ def reading(d_base, threshold=CRISP_RATIO, with_distribution=False):
     if not resolvable:
         out["outcome"] = "couldnt_check"
         out["why"] = (
-            "only %d of %d vectors are above %.2f, which is fewer than the %d "
-            "needed to read a proportion at all, so this count is not "
+            "only %d of %d vectors are above %.2f -- %.2f standard errors "
+            "from zero, under the %.1f needed -- so this count is not "
             "distinguishable from zero and must not be reported as one. The "
             "threshold sits at the %.2fth percentile of this corpus's "
             "distribution. This is a couldn't-check on the reading: the "
             "distribution was measured and is the number to read."
-            % (n_above, n, threshold, MIN_VECTORS_ABOVE, pct))
+            % (n_above, n, threshold, sigma, DISTINGUISHABILITY_SIGMA, pct))
     if with_distribution:
         out["distribution"] = dist
     return out
+

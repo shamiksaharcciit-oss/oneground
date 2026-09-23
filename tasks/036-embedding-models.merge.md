@@ -22,6 +22,20 @@ the failure is pre-existing, is now diagnosed, and is not a code defect at all.
   full-size run, priced and **unspent**.
 - 29 tests.
 
+## The standing rule this merge produced
+
+> **A task whose machinery is finished and reported merges on green, not at a
+> convenient moment.**
+
+Not a preference. The cost below is what the delay bought, and it is the
+second time — 044b is the second task to work around machinery that was
+already complete, tested and reported.
+
+The rule's teeth are in what "finished and reported" means: if the checks are
+green and the report is written, the branch is not a work in progress, it is
+**unmerged finished work**, and every task started after it pays for the
+delay without knowing it is paying.
+
 ## Why this merge was overdue, and what it cost
 
 **Task 044b had to route around finished work.** Its measurement script needed

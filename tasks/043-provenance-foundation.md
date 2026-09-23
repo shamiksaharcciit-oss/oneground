@@ -41,6 +41,14 @@ already quotes an unchecked derived number. `proposals/verdict.py:97` computes
 threshold, and nothing verifies the arithmetic or records that a scale was
 chosen. It is correct today. Nothing would notice if it were not.
 
+## Where this sits in the queue
+
+**After 042d, before 044c.** 042d is five lines and a test and stays where it
+is. 044c's centroid question is good and **blocks nothing**; this task
+unblocks a feature that is already merged, tested and answering
+`couldnt_check` to every question because two fields are missing from the
+receipts — and the whole write slice behind it.
+
 ## The order of work, and why it is not negotiable
 
 **Step 1 lands first.** It is a receipt change, and until receipts can record
@@ -49,6 +57,18 @@ row cannot say what produced it, so two rows cannot be compared, so the
 verdict returns "unknown" for every pair and the derived cite has nothing to
 be checked against. Building the checkers first would produce machinery that
 is correct and permanently silent.
+
+**And step 1 stops for a demonstration before the rest is built.** Once the
+receipt change lands, produce **one run on this machine that records a
+clean-tree commit and a machine digest**, and show the side-by-side verdict
+**flip** — `couldnt_check` before, a real verdict after, on the same pair of
+runs. Report that and stop.
+
+That is not ceremony. It is the proof that the foundation is the right one:
+the whole task rests on the claim that two missing fields are what make the
+verdict silent, and a flip on real receipts demonstrates it where an argument
+cannot. If the verdict does not flip, the diagnosis is wrong and steps 2–7
+are built on it.
 
 ## Do
 
