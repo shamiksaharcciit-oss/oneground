@@ -111,7 +111,8 @@ measurement that refuted it.
 | A tail count over many vectors is **not** flagged | **PASS** — the 5,441-vector case, the mirror test that would have caught my wrong criterion |
 | `site/teaser/` byte-identical | **PASS** — `git status site/` empty; no teaser file was opened |
 | `fixtures/` byte-identical | **PASS** — `git status fixtures/` empty |
-| Nothing stored | **PASS** — no artifact gains a field; `characterization.json` unchanged |
+| Nothing **published** stored | **PASS** — no fixture gains a field; every published digest unchanged |
+| A user's own run **does** store it | **PASS** — `crispness_reading` with the full grid in the workdir's `characterization.json`; the stored count equals `boundary_crispness` exactly |
 | Full suite | **1367 passed, 40 skipped, 1 failed** — the failure is pre-existing and is not this task's; established rather than assumed, below |
 
 ### The one failure, and it is not 044's
@@ -158,14 +159,18 @@ Not fixed: it is outside this task and belongs to whoever owns the
 
 ## Observed, not done
 
-- **Whether a user's own run should *store* the distribution.** The ruling was
-  "derived on demand" and its stated reason was that nothing published should
-  change. A user's own workdir is not published, so writing it there would
-  violate neither the letter's purpose nor any digest — but it was not put to
-  the developer and is not assumed here. Today `characterize` **prints** the
-  reading and its percentile; a user who wants the distribution later
-  recomputes it or reads a ground view's `ratio` column. This is the one open
-  question the task leaves.
+- *(Closed by ruling, and implemented.)* Whether a user's own run should
+  **store** the distribution. It does: `characterize` writes
+  `crispness_reading` — value, threshold, percentile, `n_above`, `resolvable`
+  and the full 201-point quantile grid — into its own workdir's
+  `characterization.json`. The published fixtures keep deriving on demand.
+  The reason for the asymmetry is that the storage ruling protects published
+  bytes and a fresh workdir has none, and **a user whose corpus ships no
+  `ratio` column is exactly the person who cannot recover the distribution
+  afterwards**. Checked both ways by
+  `tasks/scratch/044b-stored-distribution-check.py`: the grid is present and
+  complete in a user run, the stored count equals `boundary_crispness` to
+  machine precision, and `git status fixtures/ site/` is empty.
 - **`N_CENTROIDS = 256` was not examined**, as the brief required it not be.
   Whether the same class of defect applies to it is unknown, and unknown is
   what this says.
@@ -203,6 +208,16 @@ Scratch: `tasks/scratch/044-verify-against-fixtures.py`.
 
 ## Blocked on developer
 
-Nothing. One question is open and is named above: whether a user's own run
-should store the distribution in its own workdir. The ruling covered published
-artifacts; this does not assume it extends.
+Nothing, and nothing open. The storage question this report first left open
+was ruled and is implemented: a user's own run stores the distribution, the
+published fixtures keep deriving it.
+
+**Merged onto a red suite, knowingly.** The one failure is 041's
+`test_every_couldnt_check_claim_carries_a_remedy`, established above as not
+this task's — it reproduces identically with 044's changes stashed, 044 writes
+into no artifact a claim is built from, and it can only fail on a machine
+holding an untracked workdir. Holding a clean change hostage to another
+task's defect is worse than merging onto it and saying so. It is sent to the
+interface stream as `tasks/045-addition-remedy-without-an-action.md`, with the
+action identified: *verify this configuration, built as `hash_sharded`, on a
+real engine.*

@@ -63,6 +63,7 @@ DECLARED_FILES = ["characterization.json", "build_info.json"]
 # every consumer that already renders a couldnt_check string renders it with
 # no change.
 MEASURED_FIELDS = ("intrinsic_dimensionality", "boundary_crispness",
+                   "crispness_reading",
                    "skew_top10_share", "ambiguous_query_rate", "drift")
 
 DECLARED_NOT_MEASURED = f"{COULDNT_CHECK}: declared, not measured"
@@ -182,13 +183,20 @@ def characterize_arrays(base, queries, seed, timestamps=None,
     out["boundary_crispness"] = boundary_crispness(d_b)
     out["skew_top10_share"] = skew_top10_share(r_b[:, 0], len(base))
 
-    # Task 044. The ratio distribution is the measurement and this count is a
-    # reading of it at 1.20. Reported rather than stored: it is re-derivable
-    # from the vectors, the seed and the declared centroid count, all of which
-    # are already receipts, so storing it would declare bytes for something
-    # that needs none. `characterization.json` is unchanged by this, which is
-    # what keeps every published value and every published digest where it is.
-    _say_reading(crispness_reading(d_b), log_fn)
+    # Task 044. The ratio distribution is the measurement and `boundary_
+    # crispness` above is a reading of it at 1.20, which is why the reading
+    # carries its threshold and where that threshold falls in this corpus's
+    # own distribution.
+    #
+    # Stored here, in a user's own workdir, and NOT added to the published
+    # fixtures. The storage ruling protects published bytes; a fresh workdir
+    # has none to protect, and a user whose corpus ships no `ratio` column is
+    # exactly the person who cannot recover the distribution afterwards. The
+    # published fixtures keep deriving it on demand: their ground views
+    # already carry the ratio for every base vector, and their digests are
+    # the thing the ruling exists to hold still.
+    out["crispness_reading"] = crispness_reading(d_b, with_distribution=True)
+    _say_reading(out["crispness_reading"], log_fn)
 
     if len(queries) >= count_min:
         d_q, _ = centroid_dists(queries, cents, 2)

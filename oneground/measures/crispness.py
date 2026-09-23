@@ -229,8 +229,15 @@ def threshold_percentile(distribution, threshold=CRISP_RATIO):
     return float(np.interp(t, vals, grid))
 
 
-def reading(d_base, threshold=CRISP_RATIO):
+def reading(d_base, threshold=CRISP_RATIO, with_distribution=False):
     """The count, with the threshold beside it and where that threshold sits.
+
+    `with_distribution` embeds the quantile grid. A **user's own run stores
+    it** -- a fresh workdir has no published bytes to protect, and a user
+    whose corpus ships no `ratio` column is exactly the person who needs the
+    distribution rather than a count they cannot situate. The published
+    fixtures keep deriving it on demand, because their bytes are the thing the
+    storage ruling protects and their ground views already carry the ratio.
 
     Reports three things and judges only one of them:
 
@@ -276,4 +283,6 @@ def reading(d_base, threshold=CRISP_RATIO):
             "distribution. This is a couldn't-check on the reading: the "
             "distribution was measured and is the number to read."
             % (n_above, n, threshold, MIN_VECTORS_ABOVE, pct))
+    if with_distribution:
+        out["distribution"] = dist
     return out
