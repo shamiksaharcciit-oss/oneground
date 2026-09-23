@@ -250,7 +250,7 @@ own vectors.
 
 ---
 
-## What this slice does not do
+## What slice 1 did not do, and what slice 2 did
 
 Stated plainly, because the position paper's slice 2 adds all of it:
 
@@ -263,16 +263,109 @@ Stated plainly, because the position paper's slice 2 adds all of it:
 - **No measurement is computed.** A number on screen came from a file the CLI
   wrote, or it is not on screen.
 
-### Settled before slice 2: what holds the write path
+### A candidate for slice 2: the crispness distribution
 
-> **On this section's home.** It describes a path this document says does not
-> exist, and it lives here because this is where whoever writes slice 2's
-> brief will look. When that brief gives it a better home, **move it rather
-> than copy it** — two statements of this rule in two documents is precisely
-> the failure the rule is about, and a ruling that contradicts itself across
-> documents is worse than one in a slightly wrong place.
+Task 044 made `boundary_crispness` a **named reading of a distribution**
+rather than a bare count, and `characterize` now writes a `crispness_reading`
+block — value, threshold, percentile, `n_above`, `resolvable`, and a 201-point
+quantile grid — into a user's own workdir's `characterization.json`.
 
-Slice 2 adds a form that writes `requirements.yaml`. **A form writing a file
+**The characterize page does not draw it, and that is not breakage.** The page
+declares its fields and draws `boundary_crispness`, which is correct: the
+stored reading equals it to machine precision. Nothing on screen is wrong;
+there is a measure available that the page does not yet know about.
+
+Two reasons this is design work rather than a column, and both are worth
+settling before anyone starts:
+
+- **The field is present in a user's run and absent in a published fixture's.**
+  Fixtures keep deriving the distribution on demand, deliberately, so a view
+  declaring `crispness_reading` must ask `has()` and gap its absence with a
+  reason. That is precisely the contract's absent-field case, and
+  `oneground ui --demo` hits it on the first page it opens, because the demo
+  *is* a published fixture.
+- **A page showing the distribution and the count must say which is a reading
+  of which.** They are one measurement, not two. Drawn side by side without
+  that relationship stated, a reader sees two numbers about crispness and has
+  to guess whether they agree — which is the shape of the defect the evidence
+  drawer exists to make impossible elsewhere.
+
+---
+
+## The write half
+
+Slice 2. Three pages now: the run list and its views, unchanged; a form that
+writes a requirements file; and the jobs the stages run as.
+
+**Everything below was decided by two rules and a guard**, and it is worth
+saying that before describing any of it, because almost every shape here is
+a consequence rather than a preference:
+
+- *the UI is a front-end over the CLI, never a second implementation*;
+- *the three outcomes live in the artifact, not in the process*;
+- and the lab's guard, which refuses the measuring packages to every served
+  module and permits exactly one of them to open a file for writing.
+
+### What the server does not do, and what does it instead
+
+| the thing | why the server cannot | what does it |
+|---|---|---|
+| run a stage | the guard refuses it `oneground.simulate` and the rest | the supervisor, a second process |
+| own the job list | it has one write path and that writes requirements files | the supervisor; the server reads the list |
+| enqueue a job | it makes no request of its own, and cannot write | the page, talking to the supervisor directly |
+| compute the pod card | the guard refuses it `oneground.pod` | `pod plan`, as a job; the card is its log |
+
+The last row is the one to read twice. **The pod card is not reproduced by
+the interface — it is the command line's card, printed by the command line,
+shown verbatim.** There was never a version of this that computed a price.
+
+### The form
+
+Three doors, one artifact: fill it in, upload one you have, download a
+template. All three construct the document through one code path, so
+upload-and-edit and fill-from-empty produce the same file for the same
+answers — a file that arrives becomes *form state* and rejoins the same
+construction, rather than being edited in place.
+
+Every field's explanation is written into the file as a comment, from the
+same declaration the form renders itself from
+(`oneground/intake/fields.py`), so the two cannot drift.
+
+**And the form validates nothing**, which is the part most likely to be
+"improved" later. Eleven of `intake`'s twenty-five refusals are relational or
+not about a field at all, and a form re-expressing them would be the second
+implementation this whole design exists to prevent. The page **names all
+eleven** with the reason each is out, because silence would otherwise read as
+*this is valid*. The write guard refuses all eleven at save, in the CLI's
+words.
+
+### The jobs
+
+Each stage is a job: an invocation, a state, a log streamed from the CLI's
+own output, start and end times, and the receipt the CLI wrote. Six states,
+and `refused` is not a kind of `failed` — a refusal is the tool declining,
+with a reason and a remedy, and it is shown verbatim.
+
+**A stage is offered only when the page can name what it would run against**,
+and one that cannot is not offered, with the reason. That rule is why five
+pipeline stages are withheld in a directory with no requirements file, and
+why `pod status` is never offered at all: its target is the id of a running
+session, which is not a thing in a directory.
+
+The click asks. Nothing defaults — an earlier version sent `.` and produced a
+traceback for a job whose target the user was never asked for, and *a job
+records exactly what ran, so a target nobody chose makes the record accurate
+and meaningless.*
+
+### The money boundary, unmoved
+
+`pod up` is never a job, and the page says so where a button for it would
+otherwise be. The card is shown, the command is printed, and the typed `y`
+stays at a terminal — a scriptable page is `--yes` with a nicer surface.
+
+### What holds the write path
+
+Slice 2 added a form that writes `requirements.yaml`. **A form writing a file
 is the first thing in this interface that is not a drawing**, and the
 rendering contract has nothing to say about bytes leaving the page: its three
 clauses describe what a view may be handed, what it may read and what it must
@@ -385,35 +478,6 @@ typing. The table can therefore be completed field by field while the guard
 holds the line, and the brief should say so, because the alternative reading
 — that the table must be complete before anything ships — makes the hardest
 piece of slice 2 a precondition rather than an increment.
-
-### A candidate for slice 2: the crispness distribution
-
-Task 044 made `boundary_crispness` a **named reading of a distribution**
-rather than a bare count, and `characterize` now writes a `crispness_reading`
-block — value, threshold, percentile, `n_above`, `resolvable`, and a 201-point
-quantile grid — into a user's own workdir's `characterization.json`.
-
-**The characterize page does not draw it, and that is not breakage.** The page
-declares its fields and draws `boundary_crispness`, which is correct: the
-stored reading equals it to machine precision. Nothing on screen is wrong;
-there is a measure available that the page does not yet know about.
-
-Two reasons this is design work rather than a column, and both are worth
-settling before anyone starts:
-
-- **The field is present in a user's run and absent in a published fixture's.**
-  Fixtures keep deriving the distribution on demand, deliberately, so a view
-  declaring `crispness_reading` must ask `has()` and gap its absence with a
-  reason. That is precisely the contract's absent-field case, and
-  `oneground ui --demo` hits it on the first page it opens, because the demo
-  *is* a published fixture.
-- **A page showing the distribution and the count must say which is a reading
-  of which.** They are one measurement, not two. Drawn side by side without
-  that relationship stated, a reader sees two numbers about crispness and has
-  to guess whether they agree — which is the shape of the defect the evidence
-  drawer exists to make impossible elsewhere.
-
----
 
 ## The security model, unchanged
 
