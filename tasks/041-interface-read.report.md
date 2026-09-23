@@ -280,6 +280,49 @@ theoretical, not a corner case, and not fixable at the rendering layer: a
 missing or unusable version can never be read as a match, so the verdict is
 correct and the artifacts are what must change.
 
+### And `machine` is not a gap at all — it is a contradiction between two rules
+
+`docs/LIBRARY.md` §2.2 requires *the same machine* before a pair may be
+`comparable`. Tasks 014 and 015 forbid a machine identifier in a published
+artifact, and `oneground/environment.py:171` refuses one deliberately, in as
+many words:
+
+> *"A pod id names a rented machine that no longer exists; a hostname names a
+> laptop that does."*
+
+Both rules are right and they cannot both be satisfied as written. The
+consequence, stated plainly: **`comparable` is permanently unreachable for
+any two runs on a laptop.** The side-by-side view a user reaches from their
+own two runs can never do its job off a pod. That is not an omission anyone
+can build their way out of — 043's three pieces would leave the verdict
+correct, well plumbed, and useless.
+
+**Ruled: a salted one-way digest.** A per-installation random salt, generated
+once, stored locally, never published and never written into a receipt; the
+recorded field is a truncated `sha256(salt + machine identifier)`. It
+identifies without naming — the same machine yields the same value, a
+different machine a different one, and the value discloses nothing about
+either — so it satisfies 014/015 **by construction rather than by
+exception**, which is the property that makes it the right answer rather than
+a workaround. Two runs from different installations correctly read as
+different machines, which is true.
+
+Two alternatives were considered and rejected, and they are recorded because
+they are the argument for the one chosen:
+
+- **Accept the platform class** — let `local:windows-amd64` count as the same
+  machine for local-to-local pairs. Rejected for the reason §2.2 exists at
+  all: two different Windows laptops are indistinguishable under that string,
+  so the verdict would assert sameness it cannot see. That is an unknown
+  rounded up, which is the failure the third value was invented to prevent.
+- **Accept `comparable` as pod-only** — state the limit and live with it.
+  Rejected because it means the view a user reaches from their own two runs
+  never works for anyone who does not rent a machine, which makes a published
+  feature a demonstration.
+
+The salt is a receipt-writing change, so it belongs with 043's other
+provenance work and not in the interface.
+
 ## Finding 6 — a gated commit is run in the foreground
 
 Not a defect in the product, and recorded because the next person will be
@@ -523,6 +566,27 @@ section is cited rather than restated.
   `report/test_claims.py:421`. All three pass — and all three also pass
   against the *defective* report, which was verified by swapping it back in.
   Nothing rotted; what they never checked is Finding 1.
+
+## For the proposals stream — 043's scope, revised before it is scheduled
+
+Three revisions, all produced by building the interface rather than by
+reading the brief:
+
+1. **Piece 3 becomes cite-and-extend, not build.** The brief says *"this task
+   is the first, so this task builds it"*. 041 arrived first and built the
+   verdict at `oneground/comparability.py`, under the brief's own rule. What
+   043 adds is extending it from two run directories to two rows of a
+   cross-run index.
+2. **A row needs two provenance lists, and neither subsumes the other.**
+   043's piece 2 asks a row to carry the corpus digest, the ground truth and
+   the query subset — *what was measured*. The verdict compares code,
+   libraries, settings digest, sample digest, platform and machine — *what
+   did the measuring*. A row that carries only one of the two cannot answer
+   the question either position is asking.
+3. **The machine contradiction is ruled, and the ruling is a receipt
+   change**: a per-installation salted one-way digest, recorded above with
+   the two rejected alternatives. Without it, pieces 1–3 leave the verdict
+   answering `couldnt_check` to every question asked of it on a laptop.
 
 ## Blocked on developer
 
