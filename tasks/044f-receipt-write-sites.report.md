@@ -1,5 +1,37 @@
 # Report: 044f-receipt-write-sites
 
+## This report carried a home directory, and the guard this task built caught it
+
+**Leading, because it is the clearest evidence in the task and it is against
+its own author.**
+
+The first draft of this report quoted the real path as evidence:
+
+    "path": "C:\\Users\\<redacted>\\projects\\oneground\\requirements.arxiv-150k.yaml",
+
+`test_no_tracked_file_carries_a_machine_identifier` failed on
+`tasks/044f-receipt-write-sites.report.md:22`. **The report documenting the
+home-directory defect carried a home directory, inside the task built to stop
+that, caught by a guard this task wrote — while its author was writing the
+sentence arguing for guards over documented rules.**
+
+> **The count for *a rule you have written down is not a rule you have
+> applied* is three, across two tasks.**
+>
+> 1. **044c** — 043's path rule, broken by the author of 043's report, one
+>    task later. A scratch script's absolute paths committed as evidence.
+> 2. **044f** — 044d's *select on provenance, not locality* rule, broken three
+>    times in a row while building the guard that enforces it, with the rule
+>    in a file authored that morning.
+> 3. **044f, this document** — 043's path rule again, in the report about it.
+
+The third is **the first that a machine caught rather than a person
+noticing**, and the first two were found by a test failing too. Nothing in
+this sequence was found by review.
+
+The path is now `<HOME>` in the quotation below and **the incident is left
+visible**, because a quiet redaction is how the count stops being three.
+
 ## Four live write sites, and the tracked scan could never have seen them
 
 **Leading, because it settles the scoping argument by measurement rather than
@@ -16,10 +48,11 @@ path into a receipt:
 | `oneground/verify/__init__.py:1335` (`_write`) | `requirements_file.path` |
 
 All four: `os.path.abspath(requirements_path)`. What that produces, from this
-checkout's own `runs/arxiv-150k-via-characterize/build_info.json`:
+checkout's own `runs/arxiv-150k-via-characterize/build_info.json`, with the
+home directory replaced for the reason given above:
 
     "requirements_file": {
-        "path": "C:\\Users\\polo2\\projects\\oneground\\requirements.arxiv-150k.yaml",
+        "path": "C:\\<HOME>\\projects\\oneground\\requirements.arxiv-150k.yaml",
 
 **Every local run of `characterize`, `simulate` and `verify` writes the
 operator's home directory into a receipt**, and has been doing so for as long

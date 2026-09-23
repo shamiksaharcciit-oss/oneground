@@ -81,12 +81,23 @@ error text and repo-relative paths, all of which may contain slashes. A home
 directory, a drive letter and a UNC prefix are the shapes that matter. State
 the rule, and state what it deliberately does not catch.
 
-### 3. The remedy in the message
+### 3. The remedy in the message, and the report says what a real user sees
 
-A user whose old receipt trips this has one: **re-run the command**, which now
-writes public paths. Say so in the refusal. `couldnt_check` is not the
-outcome here — this is a refusal to write, not a measurement that could not be
-made.
+A user whose old receipt trips this has a remedy: **re-run the command**,
+which now writes public paths. Say so in the refusal. `couldnt_check` is not
+the outcome here — this is a refusal to write, not a measurement that could
+not be made.
+
+**And the report states what a user with pre-043 receipts actually sees**,
+verbatim and in order: which command they run, which message they get, what
+they do next, and what happens when they do it. They exist — six info files in
+this checkout alone, and every workdir fetched from a pod — so **the remedy
+has to be a sentence they read, not an inference they make.** A refusal whose
+remedy is obvious to the person who wrote the refusal is not a remedy.
+
+Show the real text, not a paraphrase of it. If reading it back reveals that
+the next step is not obvious, that is a finding about the message and it is
+cheaper to find here than in a bug report.
 
 ### 4. Rediscovery, as the standing rule now requires
 
@@ -127,13 +138,59 @@ workdir has been moved away from the checkout it was produced beside.
 > **Measure that case before deciding. If it is common, say so and the ruling
 > changes.**
 
-What to measure, on real workdirs rather than by reasoning: how the existing
-`runs/*` relate to the checkout, whether any workdir here sits outside it,
-what `propose` does today when the recorded absolute path is missing (the
-`--requirements` remedy already exists and its message is already written),
-and what a pod session's fetched workdir looks like — a run produced on a pod
-and extracted here is precisely a workdir that has moved, so it may be the
-common case rather than the edge one.
+### It was measured, and it points the other way
+
+`tasks/scratch/044g_moved_workdirs.py`, over all 32 info files in `runs/`:
+
+| | |
+|---|---|
+| recorded path resolves against this checkout | **25** |
+| does not resolve | **7** (one is a `c:` / `C:` artifact of the check, so **6** real) |
+| field absent | 0 |
+
+The kinds matter more than the 19%:
+
+| workdir | recorded | why it fails |
+|---|---|---|
+| `032b-state-pod/simulate_info.json` | `/workspace/oneground/…` | **pod-produced** |
+| `arxiv-150k-via-characterize/verify_info.json` | `/workspace/oneground/…` | **pod-produced** |
+| `034-reference-before-034` ×2 | `…/oneground-pre034/…` | a checkout that no longer exists |
+| `032b-state-pod`, `032b-state-local.before-fix` | `…/oneground-v2/…` | a sibling checkout |
+
+**The moved workdir is not the edge case. It is this project's standard
+heavy-job workflow.** Every pod session produces `/workspace/...` paths and
+fetches the workdir here, so a pod run's recorded path can never resolve on
+the laptop — by design, not by accident.
+
+So the worry inverts. **The absolute-path scheme is what breaks on the moved
+case, today, in 19% of workdirs and in 100% of pod runs.** And the files those
+broken paths name are present in this checkout by basename —
+`requirements.arxiv-150k.pod.yaml`,
+`requirements.arxiv-150k.determinism.032b.pod.yaml` and
+`requirements.arxiv-150k.reference.yaml` all resolve here — so a repo-relative
+path resolved against the workdir's checkout **fixes** the pod case rather
+than breaking it.
+
+The one case nothing recovers is `020-ref-arxiv.yaml`, from the deleted
+`oneground-v2` worktree: absent from this checkout entirely. No scheme
+resolves a file that does not exist, and losing it is the worktree-deletion
+rule this project already has, not an argument about path form.
+
+### Ruled: the digest plus the repo-relative path, resolved against the workdir
+
+**On the measurement, not on anyone's inclination.** A pod session always
+produces a path the laptop cannot resolve, so **the absolute scheme fails on
+this project's standard heavy-job workflow while claiming to protect a case it
+does not protect.**
+
+**The deleted-worktree casualty is not to be scored against this change.**
+`020-ref-arxiv.yaml` lived in the `oneground-v2` worktree and the worktree was
+deleted; the file is gone. No path scheme recovers a file that does not exist,
+and an absolute path pointing at it fails exactly as a repo-relative one does.
+That loss belongs to the worktree rule this project already has — *a
+throwaway worktree's contents are deleted with it* — and naming it here is so
+that nobody counts it as a cost of moving to repo-relative paths. It is not
+one.
 
 `oneground/receipts/test_pathguard.py:KNOWN_OPEN` holds the four sites and
 asserts the set is exactly those four, so closing them here fails that test
@@ -163,9 +220,10 @@ in a payload, that is a finding about the test.
 - **`requirements_file.path` settled**, with the option chosen and the other
   two said to be refused and why; `KNOWN_OPEN` emptied and its assertion
   updated in the same commit.
-- **The moved-workdir case measured, not reasoned about**, with the count and
-  where it was taken. A ruling that rests on it being rare must say how rare,
-  and a pod-fetched workdir counted as the case it is.
+- **The moved-workdir case measured, not reasoned about** — done above, 7 of
+  32, and the ruling rests on it.
+- **What a user with pre-043 receipts sees**, quoted verbatim in the report:
+  command, message, next step, result.
 - The blast radius measured and reported before the behaviour changed.
 - The rediscovery tally reported, including `price_table.path`.
 - Both existing checks present and passing, unmodified.
