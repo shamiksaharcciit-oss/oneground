@@ -912,6 +912,44 @@ repairs the new caller is not a fix, it is a workaround with a test.**
 The tell: *the thing that needs to recognise this is not the thing that
 raised it, and there is already one that does.*
 
+### 7.5 To prove a classifier reads an input, vary only that input
+
+**The form.** A classifier that takes several inputs and returns a verdict
+can pass every test it has while ignoring one of them entirely. The only
+thing that proves it reads input *N* is a pair of cases **identical in
+everything but N**, with different verdicts.
+
+Not a test per input. A *pair* per input, with everything else held.
+
+**The instance.** `jobs.classify(stage, exit_code, workdir)` decides whether
+exit 1 means *the run happened and dropped some configurations* or *the run
+crashed*, and the workdir is the only thing that separates them:
+`simulate.json` exists in the first case and not in the second. That is the
+whole of *the truth is the workdir* made operational.
+
+Ten tests covered it — five stages with the receipt written, five without —
+and **every one of them would have passed against a classifier that never
+looked at the workdir at all**, because each also varied the stage. So the
+row got an eleventh: same stage, same exit code, and the receipt appearing
+between the two calls.
+
+```python
+before, _ = jobs.classify("simulate", 1, d)     # failed
+open(os.path.join(d, "simulate.json"), "w").write("{}")
+after,  _ = jobs.classify("simulate", 1, d)     # done
+assert (before, after) == ("failed", "done")
+```
+
+> The rule: **hold every input fixed but one.** A suite that varies two
+> things at once measures the pair, and a classifier can satisfy it by
+> reading either. The mutant is what turns *the truth is the workdir* from a
+> slogan into a fact about this function.
+
+This is warning 3 with the subject narrowed. *A passing check must be able to
+fail* asks whether the check can go red at all; this asks whether it can go
+red **for the reason it claims**. A classifier is exactly where those two come
+apart, because its verdict is right for many wrong reasons.
+
 ### What to do when an exemption is demanded
 
 This is the sentence a future author should meet, because the pressure is
