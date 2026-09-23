@@ -216,80 +216,157 @@ Required behaviour:
 
 ---
 
-### 5. A couldn't-check without a remedy fails the rule where it matters most
+### 5. A couldn't-check whose remedy restates the obstacle
 
 **The sharpest of the five**, because the remedy is the only part of a
 couldn't-check a reader can act on. A verdict that says *I could not check
 this* and stops has told them the one thing they already suspected.
 
-Found by the proposals stream while building 044:
-`test_every_couldnt_check_claim_carries_a_remedy` fails on the arXiv workdir,
-on two claims reading:
+Found by the proposals stream in task 044, which did not cause it and does not
+own it: `test_every_couldnt_check_claim_carries_a_remedy` fails on the arXiv
+workdir, claims `[33, 34]`, both reading:
 
 > *"To decide latency_p95: this configuration was not the one verified — the
 > verify run built hnsw in a single namespace, which is not a hash_sharded
 > deployment."*
 
-That names the obstacle thoroughly and **never names an action.** The action
-is: *verify this configuration, built as hash_sharded, on a real engine.*
+**Read that sentence twice.** It begins with the grammar of a remedy — *To
+decide X:* — and never becomes one. What follows the colon is the obstacle.
+A reader skimming, or a reviewer checking that remedies exist, sees a sentence
+shaped like an instruction; only someone who reads to the end finds there is
+nothing to do in it. The action it is missing is: *verify this configuration,
+built as `hash_sharded`, on a real engine.*
 
-**The shape is larger than those two claims**, and the count is the finding:
+#### The routing exists. Check it before writing any prose.
 
-| in `oneground/report/verdict.py` | |
-|---|---|
-| couldn't-check verdicts constructed | **29** |
-| that set `remedy=` | **0** |
-| that set `couldnt_check_kind=` | **0** |
+**Do this first, and do not write a sentence until it is answered.** This is
+the addition's lead and it is the part of this finding most worth keeping:
+`report/claims.py:how_to_resolve` **already routes a remedy**, for two kinds:
 
-`Verdict` has carried both fields since **task 034**, whose own docstring
-says why:
+```python
+remedy = getattr(verdict, "remedy", "")
+kind = getattr(verdict, "couldnt_check_kind", None)
+if remedy and kind in ("not_verifiable_here", "coverage_unresolved"):
+    return f"To decide {name}: {remedy}."
+```
 
-> *"`not_verified` is a run that could have happened and did not — remedy: run
-> it. `not_verifiable_here` is a configuration no engine in this run can build
-> — remedy: a different engine, or an adapter that does not exist. A reader
-> who cannot tell them apart cannot act."*
+So a hand-written sentence for these two claims **would paper over a routing
+fault with better prose**: the claim would read well, the test would pass, and
+every other verdict taking the same path would keep arriving unrouted. Fix the
+routing and the sentence follows. Write the sentence and the routing stays
+broken and invisible.
 
-The field is serialized (`verdict.py:81`) and read (`claims.py:1119`). Exactly
-one path populates it — `oneground/adapters/index_families.py`, the coverage
-check added by the same task. Every couldn't-check `verdict.py` issues leaves
-both empty.
+#### What the routing actually does, measured
 
-Several of the 29 do carry an action **inside `reason`** — *"run `oneground
-verify` against a real engine"* — which is better than nothing and is in the
-wrong field: a drawer, a card or a summary looking for the remedy finds an
-empty string and shows none. The two at `verdict.py:364` and `:524` carry no
-action anywhere.
+`verdict.py` post-processes couldn't-check verdicts in one loop, and only for
+`ENGINE_CONSTRAINTS = ("latency_p95", "qps")`:
 
-Required behaviour:
+| branch | `couldnt_check_kind` | `remedy` | routed by `how_to_resolve`? |
+|---|---|---|---|
+| a decision exists | `not_verifiable_here` | composed from it | **yes** |
+| coverage unknown | `coverage_unresolved` | composed from it | **yes** |
+| otherwise | `not_verified` | **`""`**, explicitly | **no** |
 
-- Every couldn't-check verdict sets `couldnt_check_kind` and `remedy`.
-- A remedy names **an action**, not the obstacle: what to run, what to change,
-  or that no action exists and why. "No action exists" is a remedy; silence is
-  not.
-- Where an action is currently inside `reason`, it moves to `remedy` and the
-  reason keeps the explanation. Neither field repeats the other.
-- The two at `verdict.py:364` and `:524` get *verify this configuration, built
-  as the family the row names, on a real engine.*
+Three facts follow, and the third is the defect:
 
-**Findings 2 and 5 meet at the same two lines.** `verdict.py:364` and `:524`
-produce both the unactionable reason *and* the citation Finding 2 describes —
-they carry `source="verify_info.json:engine_facts.index_params"`, which names
-a per-engine field from a verdict spanning every engine. One edit closes both,
-and doing them apart would touch the same two verdicts twice.
+1. **The `else` branch sets `remedy = ""` deliberately.** `not_verified` is a
+   kind with no remedy attached, though task 034's own docstring says what its
+   remedy is: *"a run that could have happened and did not — remedy: run it."*
+2. **`how_to_resolve` does not route `not_verified`**, so even a populated
+   remedy would not reach the claim through that branch.
+3. **`how_to_resolve` falls through to
+   `return "To decide %s: %s." % (name, reason)`** — the reason, wearing a
+   remedy's opening words. That is the sentence above, and it is produced for
+   every couldn't-check the earlier branches do not match.
 
-**Why it went unnoticed, which is a finding about the check rather than the
-code.** `test_every_couldnt_check_claim_carries_a_remedy` reads a local
-workdir. In CI there is none, so it **skips** and the suite is green; it is
-red only on a machine holding that workdir. A check that passes everywhere it
-runs and only runs where nobody looks reported nothing for as long as it
-existed.
+The two claims are the visible case. **Every couldn't-check on a constraint
+other than `latency_p95` or `qps` never enters the routing loop at all** —
+`recall_at_k`, `storage_amplification`, `memory_budget` and the rest reach a
+reader with `couldnt_check_kind: None`, `remedy: ""`, and a fall-through
+sentence that restates their obstacle.
 
-That is task 041's Finding 6b in a second place: *a check that fires when
-something is missing is only tested by making it missing*, and a check that
-skips rather than fails has made itself missing. Whoever fixes this should
-say whether the test should fail rather than skip — 041's
-`oneground/lab/test_evidence.py` shows the shape, where a tracked fixture is
-`required=True` and only a genuinely local run may skip.
+#### Required behaviour
+
+- **Fix the routing, then the prose.** In order, and the report says which
+  change did what.
+- `not_verified` carries a remedy. Task 034 already wrote it: *run it.* For
+  the two claims that means *verify this configuration, built as the family
+  the row names, on a real engine.*
+- `how_to_resolve` routes every kind that carries a remedy, not two of three.
+- **The fall-through stops dressing a reason as a remedy.** If no remedy is
+  known, the claim says so in words a reader can act on — *"nothing here can
+  settle this; what would is …"* — or the absence is visible rather than
+  disguised by an opening clause. A sentence that begins *To decide X* and
+  does not say how to decide X is worse than a blank, because a blank is
+  obviously missing.
+
+  **This is finding 5's other half, one layer along: right shape, no
+  content.** The first half is an action sitting in `reason` where nothing
+  looking for a remedy will find it — right words, wrong field, and worse than
+  absent because it reads as done. The second is a sentence carrying a
+  remedy's opening words and an obstacle's content — right shape, wrong
+  content, and worse than absent for the same reason. Both defeat a reader and
+  a reviewer in the same way: the thing has the appearance of the thing. A
+  check that asks *"is there a remedy?"* answers yes to both.
+
+- **Routing covers every constraint, not two of them.** *The two claims anyone
+  looked at were inside the routed set and still unrouted, so everything
+  outside it was never in scope at all* — which is the size of the problem in
+  one sentence.
+
+  The loop runs only over `ENGINE_CONSTRAINTS = ("latency_p95", "qps")`, so a
+  couldn't-check on `recall_at_k`, `storage_amplification`, `memory_budget` or
+  `monthly_budget` **never enters routing at all**: it arrives with
+  `couldnt_check_kind: None`, `remedy: ""`, and the fall-through sentence.
+  This is the larger half of the finding.
+
+  Either every constraint's couldn't-check is routed, or the ones that are not
+  carry a recorded reason why routing does not apply to them. "It was only
+  ever written for engine constraints" is a fact about the code, not a reason
+  a reader can act on.
+
+#### Findings 2 and 5 are the same two lines
+
+`verdict.py:364` and `:524` produce both the unactionable reason *and* the
+citation Finding 2 describes — they carry
+`source="verify_info.json:engine_facts.index_params"`, a per-engine field
+named by a verdict spanning every engine. One edit closes both, and doing them
+apart touches the same two verdicts twice.
+
+#### Why it went unnoticed, which is a finding about the check
+
+`test_every_couldnt_check_claim_carries_a_remedy` reads a local, untracked
+workdir. In CI there is none, so it **skips**, and the suite is green. It is
+red only on a machine that happens to hold that workdir.
+
+> **A check that passes everywhere it runs, and only runs where nobody looks,
+> reported nothing for as long as it existed.**
+
+The general form is now `docs/FAMILIES.md` §4.1 warning 6, alongside the two
+other ways to produce a green result without evidence.
+
+**So this task also owes a tracked workdir that exercises the
+not-verifiable-here path**, so the case fails for everyone or for no one.
+`oneground/lab/testdata/041-pre-fix-report.json` is the precedent: tracked,
+digest pinned in the test, and the helper that reads it fails rather than
+skips when it is absent.
+
+#### Established, not assumed
+
+- **Task 044 did not cause it.** The failure reproduces identically with 044's
+  changes stashed, and 044 writes into no artifact a claim is built from. 044
+  merged onto it knowingly rather than holding a clean change hostage, which
+  its own merge report records.
+- **The test post-dates the workdir**, not the other way round:
+  `test_evidence.py` arrived with 041, so task 036's full-suite runs were green
+  on the same machine with the same run directory. For dating the defect, not
+  for blame.
+- **A correction to this brief's own first draft.** It said `verdict.py` sets
+  `couldnt_check_kind` zero times. That was a grep for `couldnt_check_kind=`
+  which missed the spaced assignment form, and the truth is more useful: it is
+  set at three sites in one loop, two of which also set a remedy. The routing
+  is not absent. It is incomplete, and it has a fall-through that hides its
+  own gap.
 
 ---
 
@@ -322,9 +399,17 @@ say whether the test should fail rather than skip — 041's
 - The spanning citation is two claims with `member` set, or one claim citing
   both values, and resolves under the new check.
 - No claim's `text` contains an outcome constant, asserted over a real report.
-- Every couldn't-check verdict sets `couldnt_check_kind` and `remedy`, and
-  every remedy names an action — asserted over all 29 in `verdict.py`, not
-  over the two that were noticed.
+- Every couldn't-check verdict carries a kind and a remedy that names an
+  action, or a recorded reason why it cannot — asserted over all 29 in
+  `verdict.py`, not over the two that were noticed, and including the
+  constraints outside `ENGINE_CONSTRAINTS` that never enter the routing loop.
+- `how_to_resolve` routes every kind that carries a remedy, and its
+  fall-through no longer returns a reason prefixed with *To decide X*.
+- Routing reaches **every constraint**, not only `latency_p95` and `qps`, or
+  each constraint it does not reach carries a recorded reason why — asserted
+  over a report whose couldn't-checks span more than the engine constraints.
+- A tracked input exercises the not-verifiable-here path, so the case fails
+  for everyone or for no one.
 - The remedy check fails rather than skips where its input is tracked, and the
   report says which inputs are tracked and which may honestly be absent.
 - Repeated-in-substance claims are emitted as one quantified claim whose

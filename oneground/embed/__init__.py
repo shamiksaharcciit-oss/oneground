@@ -27,6 +27,12 @@ def load_model(model_name, device="cpu", max_seq_length=512, log=None):
     The weight hash is best-effort: it needs the HuggingFace cache layout, and
     a miss must not sink a run that is otherwise fine. It is recorded as null
     and reported as couldn't-check rather than silently omitted.
+
+    `max_seq_length=None` means **leave the model's own limit alone**. Task
+    036: models declare different limits, and the old unconditional assignment
+    had no way to say "whatever this model says" -- passing None set the limit
+    to None, which reads back as 0 and truncates everything to nothing. The
+    default stays 512 so every existing caller is unchanged.
     """
     def _say(msg):
         if log:
@@ -34,7 +40,8 @@ def load_model(model_name, device="cpu", max_seq_length=512, log=None):
 
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(model_name, device=device)
-    model.max_seq_length = max_seq_length
+    if max_seq_length is not None:
+        model.max_seq_length = max_seq_length
 
     weights_sha = None
     try:

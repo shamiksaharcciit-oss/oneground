@@ -97,6 +97,20 @@ class Requirements:
     def model(self):
         return self.text.get("model")
 
+    @property
+    def models(self):
+        """Every model this run measures, as a list.
+
+        One name and a list of one are the same run (task 036): a comparison
+        of one model is a single-model run, and it must produce exactly the
+        labels and values it produced before `models:` existed.
+        """
+        listed = self.text.get("models")
+        if listed:
+            return [str(m) for m in listed]
+        one = self.text.get("model")
+        return [str(one)] if one else []
+
     def resolve(self, path):
         """Paths in a requirements file are relative to the file itself, so a
         file and its data can be moved together.
@@ -268,12 +282,38 @@ def load(path):
             f"{path}: corpus.sample.vectors.path and corpus.sample.text.path "
             "are both set. Provide one; which of the two produced the vectors "
             "would otherwise be unrecorded.")
-    if has_text and not req.text.get("model"):
+    # Task 036: `model` (one) and `models` (a comparison) are the same
+    # declaration at two arities, and naming both leaves it unsaid which one
+    # produced the vectors -- the same defect as setting vectors and text
+    # together, refused above for the same reason.
+    if req.text.get("model") and req.text.get("models"):
         raise RequirementsError(
-            f"{path}: corpus.sample.text is set but "
-            "corpus.sample.text.model is not. Text has to be embedded by a "
-            "named, pinned model -- oneground will not choose one for you, "
-            "because the model decides what the measurements mean.")
+            f"{path}: corpus.sample.text.model and corpus.sample.text.models "
+            "are both set. Use `model:` for one model and `models:` for a "
+            "comparison across several; naming both leaves it unrecorded "
+            "which of them produced the vectors.")
+    models = req.text.get("models")
+    if models is not None:
+        if not isinstance(models, (list, tuple)) or not models:
+            raise RequirementsError(
+                f"{path}: corpus.sample.text.models must be a non-empty list "
+                "of model names. An empty list is not 'use the default' -- "
+                "there is no default, because the model decides what the "
+                "measurements mean.")
+        dupes = sorted({m for m in models if list(models).count(m) > 1})
+        if dupes:
+            raise RequirementsError(
+                f"{path}: corpus.sample.text.models lists {dupes} more than "
+                "once. Each model is its own embedding pass, its own ground "
+                "truth and its own characterization, so listing one twice "
+                "measures it twice and reports it under one name.")
+    if has_text and not (req.text.get("model") or models):
+        raise RequirementsError(
+            f"{path}: corpus.sample.text is set but neither "
+            "corpus.sample.text.model nor corpus.sample.text.models is. Text "
+            "has to be embedded by a named, pinned model -- oneground will "
+            "not choose one for you, because the model decides what the "
+            "measurements mean.")
 
     if not req.queries.get("path"):
         raise RequirementsError(

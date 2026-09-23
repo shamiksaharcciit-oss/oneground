@@ -1,0 +1,80 @@
+# oneground requirements — arxiv-150k under three embedding models.
+#
+# THIS IS A DEVELOPER-RUNS FILE. Measured on the laptop, embedding is
+# token-bound at roughly 273 tokens/second, so this corpus is about 41 hours
+# per model and this file is about 95 hours. It is written for a pod with a
+# GPU, and the developer starts that: the money boundary is a typed `y`.
+#
+# It points at text rather than vectors, which is the whole point. The
+# published `vectors.npy` cannot be reused here for two reasons:
+#
+#   1. it is one model's output, and the comparison needs three;
+#   2. it was built on CUDA on Linux (see fixtures/arxiv-150k/build_info.json,
+#      `RTX PRO 4500 Blackwell`, torch 2.14.0+cu130). Re-embedding the same
+#      text with the same model name on another machine reproduces it only to
+#      cosine 0.9969 — about a thousand times float32 noise. Mixing a stored
+#      anchor with locally embedded challengers would put a platform
+#      difference inside the comparison, where nothing could distinguish it
+#      from a model difference. So every arm is embedded in one environment,
+#      including the anchor, even though the anchor's vectors already exist.
+#
+# What this produces: one workdir per model under runs/.../models/, each with
+# its own ground truth and its own characterization, plus models.json and
+# models.txt — the comparison in three registers. See docs/EMBEDDINGS.md.
+
+oneground: 1
+
+run:
+  name: 036-models-arxiv-150k
+  mode: measure
+  # The fixture's own sampling seed, as every arxiv-150k requirements file
+  # uses, so the sample is the one the published values were measured on.
+  seed: 20260908
+  workdir: ./runs/036-models-arxiv-150k
+
+corpus:
+  sample:
+    kind: receipt
+
+    text:
+      path: ~/oneground-assets/arxiv-150k/sample.jsonl.zst
+      text_field: text
+
+      # The anchor first. Every published arxiv-150k value was measured under
+      # bge-base-en-v1.5, so it is the model the other two are read against —
+      # and `models:` preserves order, so `anchor` in models.json is this one.
+      #
+      # The other two differ from the anchor on both axes the task cares
+      # about: MiniLM is a different family AND a different dimension (384),
+      # e5 is the same dimension with a different training objective. A pair
+      # that differed on one axis only could not separate "the family
+      # matters" from "the dimension matters".
+      models:
+        - BAAI/bge-base-en-v1.5
+        - sentence-transformers/all-MiniLM-L6-v2
+        - intfloat/e5-base-v2
+
+      # NOT declared, deliberately: `dimension` and `max_seq_length` are read
+      # from each model. A declared dimension that disagreed with the model's
+      # would be a number nobody could act on, and the vectors are whatever
+      # the model produces either way. Each model's own limit is what it
+      # truncates at, and the truncation is counted per model and reported
+      # beside its measures.
+
+      device: cuda
+      batch_size: 64
+
+    metadata:
+      path: ~/oneground-assets/arxiv-150k/base_meta.parquet
+
+    queries:
+      path: ~/oneground-assets/arxiv-150k/queries_meta.parquet
+
+metadata:
+  timestamp_field: update_date
+
+# Nothing here declares an architecture. This run answers "what geometry does
+# each embedding produce over these documents", which is upstream of every
+# question about shards and indexes — and the five measures are properties of
+# the embedding rather than of the documents, which is the reason this file
+# exists at all.
