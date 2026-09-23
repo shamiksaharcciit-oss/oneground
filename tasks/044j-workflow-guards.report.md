@@ -15,8 +15,10 @@ silent about what they did not reach:
 | 3 | an `atexit` test | — |
 | 4 | **an enumeration of a page's claims** | the options table's outcome badges |
 
-*The first three are named as the developer named them; the fourth is the one
-this task produced and the one described below in detail.*
+*Provenance of this table, stated because the page's own rule requires it: the
+fourth is the instance this task produced and traced. The first three are
+named as the developer named them and were **not** measured here — a reader
+can tell which is which, and should weigh them accordingly.*
 
 **The fourth.** Core found a self-contradiction on the workspace mockup and the
 instruction was explicit: read the whole page before editing, not the section
@@ -35,26 +37,47 @@ reading *1 meets · 6 fails · 1 couldn't check*.
 > list. The pattern list is itself a claim about where claims live — and it
 > was incomplete.**
 
-### The general form
+### The mechanism, which outranks the four instances
 
 > **A tool's coverage is a claim, and a claim nobody checked is what all four
 > have in common.**
 
-Each of these tools reported a result and, silently alongside it, a second
-proposition: *these are all of them*. The first is tested, argued about and
-believed on evidence. The second is never stated, so it is never doubted — and
-it is the one that fails.
+Each tool reports a result and, unstated beside it, a second proposition:
+*these are all of them*. The first is tested, argued about, and believed on
+evidence. The second is never said — and therefore never doubted.
 
-This is why a zero from a search is the least trustworthy result it can give,
-and it is the same shape as `docs/PRACTICE.md`'s rule that a survey which
-cannot rediscover its own motivating case is not evidence. That rule asked a
-tool to prove it could find one known thing. The general form asks the harder
-question: **what kind of thing can this tool not find at all?**
+> **Scepticism has no surface to land on.**
 
-The cheap check is to state the coverage claim out loud beside the result —
-*"patterns: section headers, figure cells, log entries, drawers"* — because a
-list written down invites the question *what else is there?* and a list left
-implicit does not.
+That is why careful people are not protected by being careful. The coverage
+claim is not weakly supported; it is *absent*. A reader can interrogate a
+finding, disagree with a threshold, re-run a measurement — and none of that
+touches the proposition that the search looked everywhere, because nobody ever
+put it into words to be doubted.
+
+### The practical form
+
+> **A search that finds nothing has told you about itself, not about the
+> tree.**
+
+A zero is the least trustworthy result a search can give, and the reflex it
+should produce is not relief but *what would this have been unable to see?*
+This is the harder sibling of `docs/PRACTICE.md`'s existing rule that a survey
+which cannot rediscover its own motivating case is not evidence. That rule
+asks a tool to prove it can find one known thing, which a test can settle.
+This one asks **what kind of thing can this tool not find at all** — which no
+test can settle, because a test is written from the same list of patterns.
+
+### The repair, and it is remove-the-moment-of-choice's sibling
+
+**State the coverage claim beside the result.** *"Patterns: section headers,
+figure cells, log entries, drawers."*
+
+It belongs next to *remove the moment of choice* for the same reason that one
+earns its place: **it changes what the tool emits rather than what a reader
+must remember.** A list written down invites *what else is there?*; a list
+left implicit cannot be questioned because it cannot be seen. Neither repair
+asks anyone to be more careful, which is what makes both of them survive
+contact with someone who is not.
 
 
 Four guards, built against a tree that was already correct so each could be
