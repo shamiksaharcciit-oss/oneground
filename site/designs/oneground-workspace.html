@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oneground — run workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --base:#1B2432; --panel:#243040; --raised:#2B3848; --line:#35455A;
+  --ink:#E7EAEF; --muted:#8B96A5; --faint:#6B7785;
+  --ochre:#C99A3B;
+  --meets:#4FC1AD; --fails:#E36C5E; --check:#D9A441;
+  --r:5px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--base);color:var(--ink);
+  font-family:"Space Grotesk",system-ui,sans-serif;font-size:14px;line-height:1.5}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+:focus-visible{outline:2px solid var(--meets);outline-offset:2px;border-radius:3px}
+
+.app{display:grid;grid-template-rows:auto auto 1fr;height:100vh;min-height:0}
+.top{display:flex;align-items:center;gap:20px;padding:0 18px;height:52px;
+  border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font-weight:600;font-size:16px;letter-spacing:-.01em}
+.brand span{color:var(--ochre)}
+.run{color:var(--muted);font-size:13px}
+.run b{color:var(--ink);font-weight:500}
+.env{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.env .pin{width:7px;height:7px;border-radius:50%;background:var(--meets)}
+
+.body{display:grid;grid-template-columns:212px minmax(0,1fr) 300px;min-height:0}
+@media (max-width:1100px){.body{grid-template-columns:186px minmax(0,1fr)} .drawer{display:none}}
+@media (max-width:760px){.body{grid-template-columns:minmax(0,1fr)} .rail{display:none}}
+
+.rail{border-right:1px solid var(--line);padding:14px 0;overflow-y:auto;background:var(--panel)}
+.rail h4{margin:16px 16px 7px;font-size:11px;font-weight:500;color:var(--faint)}
+.rail h4:first-child{margin-top:2px}
+.step{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:7px 16px;color:var(--muted);font-size:13.5px}
+.step:hover{color:var(--ink)}
+.step[aria-current="true"]{color:var(--ink);background:var(--raised);box-shadow:inset 2px 0 0 var(--ochre)}
+.mark{width:14px;flex:none;text-align:center;font-size:11px;font-family:"IBM Plex Mono",monospace}
+.mark.ok{color:var(--meets)} .mark.part{color:var(--check)} .mark.none{color:var(--faint)}
+.rail .note{margin:12px 16px 0;font-size:11.5px;color:var(--faint);line-height:1.45}
+
+.main{overflow-y:auto;padding:26px 30px 60px;min-width:0}
+.view{display:none} .view.on{display:block}
+.vh{display:flex;align-items:baseline;gap:14px;margin-bottom:6px;flex-wrap:wrap}
+h1{font-size:22px;font-weight:500;letter-spacing:-.01em;margin:0}
+.vh .sub{color:var(--muted);font-size:13px}
+.lede{color:var(--muted);margin:0 0 22px;max-width:70ch}
+
+.v{font-family:"IBM Plex Mono",monospace;border-bottom:1px dotted var(--faint);
+  cursor:pointer;padding-bottom:1px}
+.v:hover{border-bottom-color:var(--ochre);color:var(--ochre)}
+.v[aria-pressed="true"]{color:var(--ochre);border-bottom-color:var(--ochre)}
+
+.verdict{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:20px 22px;margin-bottom:22px}
+.tally{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.chip{display:flex;align-items:center;gap:8px;padding:5px 11px;border-radius:3px;
+  background:var(--raised);font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.dot.m{background:var(--meets)} .dot.f{background:var(--fails)} .dot.c{background:var(--check)}
+.verdict .say{font-size:16px;line-height:1.45;max-width:64ch}
+.verdict .say em{font-style:normal;color:var(--ochre)}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:500;color:var(--muted);font-size:11.5px;
+  padding:0 12px 7px 0;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 12px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:hover td{background:rgba(255,255,255,.018)}
+td.cfg{font-family:"IBM Plex Mono",monospace;font-size:12px;min-width:20ch}
+td.num{font-family:"IBM Plex Mono",monospace;text-align:right;white-space:nowrap}
+th.num{text-align:right}
+.out{font-family:"IBM Plex Mono",monospace;font-size:11.5px;display:inline-flex;
+  align-items:center;gap:6px;white-space:nowrap}
+.out.m{color:var(--meets)} .out.f{color:var(--fails)} .out.c{color:var(--check)}
+
+.log{margin-top:26px}
+.entry{display:grid;grid-template-columns:auto 1fr;gap:12px;padding:11px 0;
+  border-bottom:1px solid var(--line);align-items:start}
+.kind{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--faint);
+  padding-top:2px;white-space:nowrap}
+.entry p{margin:0;max-width:74ch}
+.entry .src{display:block;margin-top:5px;font-family:"IBM Plex Mono",monospace;
+  font-size:11px;color:var(--faint)}
+
+.grid5{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.cell{background:var(--panel);padding:15px 16px}
+.cell .k{color:var(--muted);font-size:12px;margin-bottom:6px}
+.cell .n{font-family:"IBM Plex Mono",monospace;font-size:23px;line-height:1.1}
+.cell .w{color:var(--faint);font-size:11.5px;margin-top:6px;line-height:1.4}
+.cell.cc .n{color:var(--check);font-size:15px;padding-top:6px}
+
+.lab{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:18px;align-items:start}
+@media (max-width:900px){.lab{grid-template-columns:minmax(0,1fr)}}
+.canvaswrap{background:#151C27;border:1px solid var(--line);border-radius:var(--r);padding:10px 10px 8px}
+canvas{width:100%;height:auto;display:block}
+.cap{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--faint);
+  padding:8px 4px 2px;line-height:1.5}
+.ctrl{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.ctrl .labk{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}
+.ctrl .labk b{font-weight:500;font-size:13px}
+.ctrl .labk span{font-family:"IBM Plex Mono",monospace;font-size:16px;color:var(--ochre)}
+input[type=range]{width:100%;accent-color:var(--ochre);margin:0 0 16px}
+.stat{display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid var(--line);font-size:12.5px}
+.stat:first-of-type{border-top:none}
+.stat span{color:var(--muted)}
+.stat b{font-family:"IBM Plex Mono",monospace;font-weight:400}
+.hist{margin-top:12px}
+.hist .row{display:grid;grid-template-columns:14px 1fr 44px;gap:8px;align-items:center;
+  margin-bottom:5px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted)}
+.bar{height:6px;background:var(--raised);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ochre);transition:width .18s ease}
+.bar i.one{background:#5F7D9E}
+
+.qpick{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px;max-height:300px;overflow-y:auto}
+.q{display:block;width:100%;text-align:left;padding:9px 10px;border-radius:3px;
+  color:var(--muted);font-size:13px;line-height:1.35}
+.q:hover{background:var(--raised);color:var(--ink)}
+.q[aria-current="true"]{background:var(--raised);color:var(--ink);box-shadow:inset 2px 0 0 var(--ochre)}
+.q small{display:block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;
+  color:var(--faint);margin-top:3px}
+.hops{margin-top:16px}
+.hop{display:grid;grid-template-columns:20px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.hop .i{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--faint);padding-top:3px}
+.hop b{font-weight:500;display:block;margin-bottom:3px}
+.hop span{color:var(--muted);font-family:"IBM Plex Mono",monospace;font-size:11.5px;line-height:1.5}
+
+.drawer{border-left:1px solid var(--line);background:var(--panel);padding:18px;overflow-y:auto}
+.drawer h5{margin:0 0 3px;font-size:11px;font-weight:500;color:var(--faint)}
+.drawer .big{font-family:"IBM Plex Mono",monospace;font-size:21px;margin:8px 0 14px;word-break:break-all}
+.drawer .fld{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);
+  background:var(--base);border:1px solid var(--line);border-radius:3px;
+  padding:9px 10px;margin-bottom:14px;word-break:break-all;line-height:1.55}
+.drawer p{font-size:12.5px;color:var(--muted);margin:0 0 12px;line-height:1.55}
+.drawer .empty{color:var(--faint);font-size:12.5px;line-height:1.6}
+.drawer .kindtag{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;
+  border:1px solid var(--line);border-radius:2px;padding:1px 6px;color:var(--muted);margin-bottom:12px}
+.drawer .resolve{border-top:1px solid var(--line);padding-top:12px;margin-top:4px}
+.drawer .resolve b{display:block;font-size:11px;font-weight:500;color:var(--check);margin-bottom:5px}
+
+.mocknote{margin-top:34px;padding:12px 14px;border:1px dashed var(--line);border-radius:var(--r);
+  font-size:12px;color:var(--faint);line-height:1.55;max-width:80ch}
+
+/* ---- injected by oneproof.dev: this file is a DESIGN, not a shipped product ---- */
+#ogp-banner{position:relative;background:#1c1713;color:#e8ddcc;border-bottom:2px solid #c9a227;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;line-height:1.5;
+  display:flex;gap:8px 18px;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;padding:9px 18px}
+#ogp-banner b{color:#c9a227;font-weight:600;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+#ogp-banner span{color:#a5947d}
+#ogp-banner a{color:#c9a227;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="app">
+<div id="ogp-banner"><b>Design &#183; not a shipped product</b><span>An interface study for oneground. No application like this exists; the tool is a set of commands and the figures here are illustrative.</span><a href="/building.html">What is actually shipped &#8594;</a></div>
+
+  <div class="top">
+    <div class="brand">one<span>ground</span></div>
+    <div class="run"><b>support-tickets-2026q3</b> · 20,000 vectors, 768-d · 2,000 queries</div>
+    <div class="env"><i class="pin"></i>pinned environment · calibrated 2026-09-11, −0.0019</div>
+  </div>
+
+  <div class="body">
+
+    <nav class="rail">
+      <h4>this run</h4>
+      <button class="step" data-view="characterize"><i class="mark ok">●</i>Characterize</button>
+      <button class="step" data-view="simulate"><i class="mark ok">●</i>Simulate</button>
+      <button class="step" data-view="verify"><i class="mark part">◐</i>Verify</button>
+      <button class="step" data-view="report" aria-current="true"><i class="mark ok">●</i>Report</button>
+      <h4>lab</h4>
+      <button class="step" data-view="ground"><i class="mark none">○</i>The ground</button>
+      <button class="step" data-view="trace"><i class="mark none">○</i>Query trace</button>
+      <p class="note">Verify is partial: one engine measured, one constraint unanswerable in this environment.</p>
+    </nav>
+
+    <main class="main">
+
+      <section class="view on" id="v-report">
+        <div class="vh"><h1>Decision</h1><span class="sub">8 configurations · 3 families · 5 constraints</span></div>
+        <p class="lede">Every constraint is met, failed, or unchecked. Select any figure to see the file and field it was read from.</p>
+
+        <div class="verdict">
+          <div class="tally">
+            <span class="chip"><i class="dot m"></i>1 meets</span>
+            <span class="chip"><i class="dot f"></i>6 fails</span>
+            <span class="chip"><i class="dot c"></i>1 couldn't check</span>
+          </div>
+          <div class="say">Recommended: <em>single_node_hnsw</em> — it meets every constraint that could be checked, and was ranked first by fewest constraints at margin.</div>
+        </div>
+
+        <table>
+          <thead><tr>
+            <th>configuration</th><th class="num">recall@10</th><th class="num">storage</th>
+            <th class="num">p95 under load</th><th class="num">sustained</th><th>outcome</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td class="cfg">single_node_hnsw<br>M=32 ef=128</td>
+              <td class="num"><button class="v" data-k="r1">0.9976</button></td>
+              <td class="num"><button class="v" data-k="s1">1.00×</button></td>
+              <td class="num"><button class="v" data-k="p1">38.22 ms</button></td>
+              <td class="num"><button class="v" data-k="q1">200.0</button></td>
+              <td><span class="out m"><i class="dot m"></i>meets</span></td>
+            </tr>
+            <tr>
+              <td class="cfg">hash_sharded<br>shards=3 ef=96</td>
+              <td class="num"><button class="v" data-k="r2">0.9984</button></td>
+              <td class="num">1.00×</td>
+              <td class="num"><button class="v" data-k="p2">—</button></td>
+              <td class="num">—</td>
+              <td><span class="out c"><i class="dot c"></i>couldn't check</span></td>
+            </tr>
+            <tr>
+              <td class="cfg">semantic_sharded<br>ε=0.20 probe=2</td>
+              <td class="num"><button class="v" data-k="r3">0.9318</button></td>
+              <td class="num"><button class="v" data-k="s3">3.72×</button></td>
+              <td class="num">—</td><td class="num">—</td>
+              <td><span class="out f"><i class="dot f"></i>fails</span></td>
+            </tr>
+            <tr>
+              <td class="cfg">semantic_sharded<br>ε=0.10 probe=2</td>
+              <td class="num">0.8952</td><td class="num">2.67×</td><td class="num">—</td><td class="num">—</td>
+              <td><span class="out f"><i class="dot f"></i>fails</span></td>
+            </tr>
+            <tr>
+              <td class="cfg">semantic_sharded<br>ε=0.00 probe=1</td>
+              <td class="num">0.5472</td><td class="num">1.00×</td><td class="num">—</td><td class="num">—</td>
+              <td><span class="out f"><i class="dot f"></i>fails</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="log">
+          <div class="entry">
+            <div class="kind">indistinguishable</div>
+            <p>single_node_hnsw and hash_sharded differ by less than the calibration tolerance on recall. They are separated only where they differ measurably.
+              <span class="src">simulate.json:rows[*].recall_at_10 · tolerance 0.01</span></p>
+          </div>
+          <div class="entry">
+            <div class="kind">meets</div>
+            <p>single_node_hnsw meets latency_p95 in environment tf8sd2usxbblsm: p95 38.22 ms ≤ 40.0 ms, from the under-load row at concurrency 32.
+              <span class="src">verify.json:searches[k=10_under_load].p95_ms</span></p>
+          </div>
+          <div class="entry">
+            <div class="kind">to resolve</div>
+            <p>hash_sharded could not be checked on latency_p95: the verify run built a single index, which is not a hash_sharded deployment. This row's architecture was simulated and never built.
+              <span class="src">verify_info.json:engine_facts.index_params</span></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="v-characterize">
+        <div class="vh"><h1>Your corpus</h1><span class="sub">measured on 20,000 of 2.1M vectors</span></div>
+        <p class="lede">Five properties decide which architectures are worth trying at all. These are measurements of your data, not a comparison against anything.</p>
+        <div class="grid5">
+          <div class="cell"><div class="k">Topic separability</div><div class="n"><button class="v" data-k="cr">0.036</button></div><div class="w">Almost no vector has a clearly nearest region. Partitioning by meaning has little to partition on.</div></div>
+          <div class="cell"><div class="k">Ambiguous queries</div><div class="n"><button class="v" data-k="am">0.891</button></div><div class="w">Nine in ten queries sit between two regions.</div></div>
+          <div class="cell"><div class="k">Intrinsic dimension</div><div class="n">32.6</div><div class="w">Distances concentrate; near neighbours are close together in score.</div></div>
+          <div class="cell"><div class="k">Skew</div><div class="n">0.075</div><div class="w">The ten largest regions hold 7.5% of the corpus.</div></div>
+          <div class="cell cc"><div class="k">Answers going stale</div><div class="n">couldn't check</div><div class="w">No timestamp column supplied. Add one and drift is measured over your own history.</div></div>
+        </div>
+        <div class="mocknote">Each figure recomputes from your sample with a published definition and a stated tolerance. The same commands reproduce them on any machine with the pinned environment.</div>
+      </section>
+
+      <section class="view" id="v-simulate">
+        <div class="vh"><h1>The alternatives</h1><span class="sub">8 configurations, scored against exact answers</span></div>
+        <p class="lede">Nothing here is a verdict. Recall is split into what the partition lost and what the index lost, so you know which one to fix.</p>
+        <table>
+          <thead><tr><th>configuration</th><th class="num">recall@10</th><th class="num">reachable</th><th class="num">index loss</th><th class="num">storage</th><th class="num">fan-out</th></tr></thead>
+          <tbody>
+            <tr><td class="cfg">hash_sharded shards=3</td><td class="num">0.9984</td><td class="num">1.0000</td><td class="num">0.0016</td><td class="num">1.00×</td><td class="num">3</td></tr>
+            <tr><td class="cfg">single_node_hnsw M=32</td><td class="num">0.9976</td><td class="num">1.0000</td><td class="num">0.0024</td><td class="num">1.00×</td><td class="num">1</td></tr>
+            <tr><td class="cfg">semantic ε=0.20 probe=2</td><td class="num">0.9318</td><td class="num"><button class="v" data-k="ceil">0.9324</button></td><td class="num">0.0006</td><td class="num">3.72×</td><td class="num">2</td></tr>
+            <tr><td class="cfg">semantic ε=0.10 probe=2</td><td class="num">0.8952</td><td class="num">0.8958</td><td class="num">0.0006</td><td class="num">2.67×</td><td class="num">2</td></tr>
+            <tr><td class="cfg">semantic ε=0.20 probe=1</td><td class="num">0.7755</td><td class="num">0.7761</td><td class="num">0.0006</td><td class="num">3.72×</td><td class="num">1</td></tr>
+            <tr><td class="cfg">semantic ε=0.00 probe=1</td><td class="num">0.5472</td><td class="num">0.5478</td><td class="num">0.0006</td><td class="num">1.00×</td><td class="num">1</td></tr>
+          </tbody>
+        </table>
+        <div class="mocknote">Index loss is near zero in every semantic row: everything missing was unreachable from the route, not missed by the index. No amount of index tuning recovers it.</div>
+      </section>
+
+      <section class="view" id="v-verify">
+        <div class="vh"><h1>The real engine</h1><span class="sub">qdrant 1.19.1 · runpod tf8sd2usxbblsm · 3 runs</span></div>
+        <p class="lede">Latency and throughput are properties of an implementation on a machine. They are measured, never simulated.</p>
+        <div class="grid5">
+          <div class="cell"><div class="k">p95 under load</div><div class="n"><button class="v" data-k="p1">38.22</button></div><div class="w">median of 3 runs · spread 4.6 ms · engine restarted between runs</div></div>
+          <div class="cell"><div class="k">Sustained</div><div class="n">200.0</div><div class="w">of 200 offered, 0 errors, 300 s</div></div>
+          <div class="cell"><div class="k">Ceiling</div><div class="n">381.2</div><div class="w">stopped at concurrency 8 on p99 degradation, not errors</div></div>
+          <div class="cell"><div class="k">Recall measured</div><div class="n">0.9994</div><div class="w">against the same exact answers the simulation used</div></div>
+          <div class="cell"><div class="k">Round-trip share</div><div class="n">18.3%</div><div class="w">under the 20% limit, so this figure describes the engine rather than the path</div></div>
+        </div>
+        <div class="mocknote">A second engine measured on a different machine is not a comparison. To compare, run both on one host with this sample — the report will say so rather than ranking them.</div>
+      </section>
+
+      <section class="view" id="v-ground">
+        <div class="vh"><h1>The ground</h1><span class="sub">your vectors, partitioned</span></div>
+        <p class="lede">Semantic sharding stores a copy of a vector in every region whose centre is within ε of its nearest. Move ε and the copies are recounted from the distances carried for each vector.</p>
+        <div class="lab">
+          <div>
+            <div class="canvaswrap"><canvas id="cv" width="1000" height="560"></canvas></div>
+            <div class="cap">Schematic: this mockup draws generated points. In the product the ground draws your own vectors, and the placement is a projection — regions, distances and copy counts are computed in the full 768 dimensions.</div>
+          </div>
+          <div class="ctrl">
+            <div class="labk"><b>closure band ε</b><span id="epsv">0.20</span></div>
+            <input id="eps" type="range" min="0" max="40" value="20" aria-label="closure band epsilon">
+            <div class="stat"><span>vectors copied</span><b id="ncopy">—</b></div>
+            <div class="stat"><span>storage</span><b id="namp">—</b></div>
+            <div class="stat"><span>p99 copies</span><b id="np99">—</b></div>
+            <div class="hist" id="hist"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="v-trace">
+        <div class="vh"><h1>One query, every hop</h1><span class="sub">2,000 held-out queries with exact top-10</span></div>
+        <p class="lede">Follow a query from scoring to answer, and see which of its true neighbours the route never reaches.</p>
+        <div class="lab">
+          <div>
+            <div class="canvaswrap"><canvas id="cv2" width="1000" height="460"></canvas></div>
+            <div class="cap">Schematic placement. The route, the neighbours and the miss count come from the run's own state.</div>
+            <div class="hops" id="hops"></div>
+          </div>
+          <div class="qpick" id="qpick"></div>
+        </div>
+      </section>
+
+    </main>
+
+    <aside class="drawer" id="drawer">
+      <h5>evidence</h5>
+      <p class="empty">Select any figure in the run to see the file and field it was read from, its kind, and — where a constraint could not be settled — what would settle it.</p>
+    </aside>
+
+  </div>
+</div>
+
+<script>
+const EV = {
+  r1:{n:"0.9976",kind:"receipt",f:"simulate.json:rows[single_node_hnsw[M=32,efConstruction=200,efSearch=128]].recall_at_10",p:"Measured against exact nearest neighbours over your sample. The constraint asked for 0.95."},
+  r2:{n:"0.9984",kind:"receipt",f:"simulate.json:rows[hash_sharded[M=32,efSearch=96,shards=3]].recall_at_10",p:"Within the calibration tolerance of the row above, so the two are reported as indistinguishable on recall rather than ranked."},
+  r3:{n:"0.9318",kind:"receipt",f:"simulate.json:rows[semantic_sharded[centroids=256,epsilon=0.2,probe=2]].recall_at_10",p:"Below the 0.95 floor. The reachable set for this route was 0.9324, so the deficit is routing rather than the index."},
+  s1:{n:"1.00×",kind:"receipt",f:"simulate.json:rows[...].storage_amplification",p:"One stored copy per vector. The constraint allowed up to 2.0×."},
+  s3:{n:"3.72×",kind:"receipt",f:"simulate.json:rows[...].storage_amplification",p:"Closure replication at ε=0.20 copies 84% of the corpus to the four-copy cap. Exceeds the 2.0× budget."},
+  p1:{n:"38.22 ms",kind:"receipt",f:"verify.json:searches[k=10_under_load].latency_shape.p95_ms",p:"Median of three runs at concurrency 32, engine restarted between runs and readiness proved by a real query. Spread 4.6 ms; the worst run also met the 40 ms budget, which is what a pass requires."},
+  p2:{n:"couldn't check",kind:"couldn't-check",f:"verify_info.json:engine_facts.index_params",p:"The verify run built one index in a single namespace, which is not a hash_sharded deployment. A measurement of the index that was built says nothing about one that was not.",r:"Run oneground verify with a hash_sharded deployment on the same host and sample."},
+  q1:{n:"200.0 qps",kind:"receipt",f:"verify.json:load.completed",p:"59,999 of 60,000 offered queries in 300 s, 0 errors. This is a sustain check: a throttled run cannot exceed what it was offered, so it is not the engine's ceiling. The ceiling is measured separately at 381.2."},
+  cr:{n:"0.036",kind:"receipt",f:"characterization.json:boundary_crispness",p:"Fraction of vectors whose second-nearest region centre is more than 1.20× the distance of the nearest, under k-means with 256 regions. Tolerance 0.02."},
+  am:{n:"0.891",kind:"receipt",f:"characterization.json:ambiguous_query_rate",p:"Fraction of queries whose two nearest region centres are within 1.10× of each other. Predicts how often routing must look beyond one region."},
+  ceil:{n:"0.9324",kind:"receipt",f:"simulate.json:rows[...].routing_ceiling",p:"Exact search restricted to the regions this route actually probes — the best any index could do from here. The gap to 0.9318 is the index; the gap from 1.0 is the partition."}
+};
+const drawer=document.getElementById('drawer');
+const EMPTY=drawer.innerHTML;
+let openKey=null;
+document.addEventListener('click',ev=>{
+  const b=ev.target.closest('.v');
+  if(b){
+    document.querySelectorAll('.v[aria-pressed="true"]').forEach(x=>x.setAttribute('aria-pressed','false'));
+    if(openKey===b.dataset.k){openKey=null;drawer.innerHTML=EMPTY;return;}
+    openKey=b.dataset.k;b.setAttribute('aria-pressed','true');
+    const e=EV[b.dataset.k];if(!e)return;
+    drawer.innerHTML='<h5>evidence</h5><div class="big">'+e.n+'</div>'+
+      '<span class="kindtag">'+e.kind+'</span>'+
+      '<h5>read from</h5><div class="fld">'+e.f+'</div><p>'+e.p+'</p>'+
+      (e.r?'<div class="resolve"><b>what would settle it</b><p>'+e.r+'</p></div>':'');
+    return;
+  }
+  const q=ev.target.closest('.q');
+  if(q){qi=+q.dataset.i;drawTrace();}
+});
+
+document.querySelectorAll('.step').forEach(s=>{
+  s.addEventListener('click',()=>{
+    document.querySelectorAll('.step').forEach(x=>x.setAttribute('aria-current','false'));
+    s.setAttribute('aria-current','true');
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+    document.getElementById('v-'+s.dataset.view).classList.add('on');
+    if(s.dataset.view==='ground')drawGround(+eps.value/100);
+    if(s.dataset.view==='trace')drawTrace();
+  });
+});
+
+let seed=11;const rnd=()=>{seed=(seed*1664525+1013904223)%4294967296;return seed/4294967296};
+const W=1000,H=560,CN=14,N=5200;
+const cents=[],pts=[];
+for(let i=0;i<CN;i++)cents.push({x:90+rnd()*(W-180),y:70+rnd()*(H-150)});
+for(let c=0;c<CN;c++){
+  const n=c<3?Math.round(N*0.13):Math.round(N*0.045);
+  for(let i=0;i<n;i++){
+    const r=Math.pow(rnd(),0.55)*(c<3?150:105),a=rnd()*Math.PI*2;
+    pts.push({x:cents[c].x+Math.cos(a)*r,y:cents[c].y+Math.sin(a)*r});
+  }
+}
+pts.forEach(p=>{
+  const d=cents.map(c=>Math.hypot(p.x-c.x,p.y-c.y)).sort((a,b)=>a-b);
+  p.d1=d[0];p.d2=d[1];p.d3=d[2];p.d4=d[3];
+});
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function copiesOf(p,e){let n=1;if(p.d2<=p.d1*(1+e))n++;if(p.d3<=p.d1*(1+e))n++;if(p.d4<=p.d1*(1+e))n++;return n}
+function drawGround(e){
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  const hist=[0,0,0,0];let stored=0;
+  for(const p of pts){
+    const c=copiesOf(p,e);hist[c-1]++;stored+=c;
+    ctx.fillStyle=c===1?'rgba(95,125,158,.72)':(c===4?'rgba(201,154,59,.92)':'rgba(201,154,59,.55)');
+    ctx.beginPath();ctx.arc(p.x,p.y,c>1?1.7:1.35,0,6.2832);ctx.fill();
+  }
+  ctx.strokeStyle='rgba(231,234,239,.34)';ctx.lineWidth=1;
+  for(const c of cents){ctx.beginPath();ctx.arc(c.x,c.y,5.5,0,6.2832);ctx.stroke()}
+  const n=pts.length,copied=n-hist[0];
+  document.getElementById('ncopy').textContent=copied.toLocaleString()+' ('+Math.round(copied/n*100)+'%)';
+  document.getElementById('namp').textContent=(stored/n).toFixed(2)+'×';
+  document.getElementById('np99').textContent=hist[3]/n>0.01?'4':(hist[2]/n>0.01?'3':(copied/n>0.01?'2':'1'));
+  document.getElementById('hist').innerHTML=hist.map((h,i)=>{
+    const pc=h/n*100;
+    return '<div class="row"><span>'+(i+1)+'</span><div class="bar"><i class="'+(i===0?'one':'')+'" style="width:'+pc.toFixed(1)+'%"></i></div><span>'+pc.toFixed(1)+'%</span></div>';
+  }).join('');
+}
+const eps=document.getElementById('eps');
+eps.addEventListener('input',()=>{
+  document.getElementById('epsv').textContent=(eps.value/100).toFixed(2);
+  drawGround(+eps.value/100);
+});
+
+const QS=[
+  {t:"refund window after delivery confirmation",region:131,second:215,ratio:1.0147,out:10,recall:0.0},
+  {t:"why is my invoice showing two line items",region:88,second:88,ratio:1.31,out:2,recall:0.8},
+  {t:"cannot reset password, link expired",region:41,second:203,ratio:1.0391,out:7,recall:0.3},
+  {t:"bulk export of closed tickets to csv",region:12,second:12,ratio:1.44,out:0,recall:1.0}
+];
+let qi=0;
+const cv2=document.getElementById('cv2'),c2=cv2.getContext('2d');
+function hop(i,t,s){return '<div class="hop"><div class="i">'+i+'</div><div><b>'+t+'</b><span>'+s+'</span></div></div>'}
+function drawTrace(){
+  const q=QS[qi],W2=1000,H2=460;
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  cv2.width=W2*dpr;cv2.height=H2*dpr;c2.setTransform(dpr,0,0,dpr,0,0);
+  c2.clearRect(0,0,W2,H2);
+  const s=H2/H;
+  for(const p of pts){c2.fillStyle='rgba(95,125,158,.20)';c2.beginPath();c2.arc(p.x*(W2/W),p.y*s,1.1,0,6.2832);c2.fill()}
+  const home=cents[qi%cents.length],hx=home.x*(W2/W),hy=home.y*s;
+  c2.strokeStyle='rgba(95,125,158,.85)';c2.lineWidth=1.4;
+  c2.beginPath();c2.arc(hx,hy,52,0,6.2832);c2.stroke();
+  seed=99+qi;
+  for(let i=0;i<10;i++){
+    const inside=i>=q.out,a=rnd()*6.2832,r=inside?20+rnd()*26:90+rnd()*230;
+    const nx=hx+Math.cos(a)*r,ny=hy+Math.sin(a)*r*0.7;
+    c2.strokeStyle='rgba(231,234,239,.9)';c2.lineWidth=1.3;
+    c2.beginPath();c2.arc(nx,ny,4.2,0,6.2832);c2.stroke();
+    if(!inside){c2.fillStyle='rgba(231,234,239,.16)';c2.beginPath();c2.arc(nx,ny,9,0,6.2832);c2.fill()}
+  }
+  c2.fillStyle='#E7EAEF';c2.beginPath();c2.arc(hx,hy,5.5,0,6.2832);c2.fill();
+  document.getElementById('hops').innerHTML=
+    hop(1,'score against 256 regions','d2 / d1 = '+q.ratio.toFixed(4)+(q.ratio<=1.1?'  ·  ambiguous (≤ 1.10)':'  ·  unambiguous'))+
+    hop(2,'route',q.ratio<=1.1?'region '+q.region+' and region '+q.second+' — two probed':'region '+q.region+' — one probed')+
+    hop(3,'the ten true neighbours','exact top-10 over all 20,000 vectors')+
+    hop(4,'what the route returns',(10-q.out)+' of 10 found  ·  '+q.out+' in regions never probed  ·  recall@10 '+q.recall.toFixed(1));
+  document.getElementById('qpick').innerHTML=QS.map((x,i)=>
+    '<button class="q" data-i="'+i+'" aria-current="'+(i===qi)+'">'+x.t+'<small>'+x.out+' of 10 neighbours outside the routed region</small></button>').join('');
+}
+drawGround(0.20);
+</script>
+</body>
+</html>

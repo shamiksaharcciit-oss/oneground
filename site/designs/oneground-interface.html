@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oneground — interface</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F3F4F1; --sunk:#EAECE8; --panel:#FFFFFF;
+  --ink:#19212A; --soft:#5C6874; --faint:#8A949D;
+  --rule:#D5D9D5; --rule-strong:#B9C0BD;
+  --meets:#2C7A5E; --fails:#B04338; --check:#9E7526;
+  --meets-bg:#E6F0EB; --fails-bg:#F6E7E5; --check-bg:#F4EDE0;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Newsreader",Georgia,serif; font-size:17px; line-height:1.55;
+}
+.m{font-family:"Spline Sans Mono",ui-monospace,monospace}
+
+/* ---- chrome ---- */
+.shell{max-width:1240px;margin:0 auto;padding:0 24px}
+.topbar{border-bottom:1px solid var(--rule);background:var(--paper);position:sticky;top:40px;z-index:20}
+.topbar .shell{display:flex;align-items:center;gap:30px;padding:14px 24px}
+.mark{font-size:19px;font-weight:600;letter-spacing:-.015em}
+.mark i{font-style:normal;color:var(--soft);font-weight:400}
+.runid{font-family:"Spline Sans Mono",monospace;font-size:12px;color:var(--faint);margin-left:auto}
+
+nav.steps{display:flex;gap:2px;margin-left:8px}
+nav.steps button{
+  font:inherit;font-size:15px;background:none;border:none;color:var(--soft);
+  padding:7px 14px;border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:9px;
+}
+nav.steps button:hover{background:var(--sunk)}
+nav.steps button[aria-selected="true"]{background:var(--ink);color:#EDEFEC}
+nav.steps .tick{width:6px;height:6px;border-radius:50%;background:var(--rule-strong);flex:none}
+nav.steps button[aria-selected="true"] .tick{background:var(--meets)}
+nav.steps button[data-done="1"] .tick{background:var(--meets)}
+nav.steps button:focus-visible{outline:2px solid var(--meets);outline-offset:2px}
+
+/* ---- screens ---- */
+.screen{display:none;padding:34px 0 80px}
+.screen.on{display:block}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 268px;gap:38px;align-items:start}
+h1{font-size:30px;font-weight:500;letter-spacing:-.02em;margin:0 0 6px;line-height:1.16}
+.sub{color:var(--soft);margin:0 0 26px;font-size:18px;max-width:64ch}
+h2{font-size:19px;font-weight:600;margin:30px 0 12px;letter-spacing:-.01em}
+h2:first-child{margin-top:0}
+p{margin:0 0 14px}
+
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:4px;padding:22px 24px}
+.panel + .panel{margin-top:18px}
+
+/* margin rail — evidence, never chrome */
+.rail{
+  font-family:"Spline Sans Mono",monospace;font-size:11.5px;line-height:1.62;color:var(--faint);
+  border-left:1px solid var(--rule);padding-left:18px;
+}
+.rail b{display:block;color:var(--soft);font-weight:500;margin-bottom:3px}
+.rail section{margin-bottom:22px}
+.rail section:last-child{margin-bottom:0}
+
+/* ---- form (screen 1) ---- */
+.field{display:grid;grid-template-columns:200px minmax(0,1fr);gap:18px;padding:13px 0;border-bottom:1px solid var(--rule);align-items:baseline}
+.field:last-child{border-bottom:none}
+.field label{color:var(--soft);font-size:16px}
+.field .val{font-family:"Spline Sans Mono",monospace;font-size:13.5px}
+.field .val .hint{font-family:"Newsreader",serif;font-size:15px;color:var(--faint);display:block;margin-top:3px}
+.chooser{display:flex;gap:8px;flex-wrap:wrap}
+.chooser span{
+  font-family:"Spline Sans Mono",monospace;font-size:12.5px;padding:4px 11px;border-radius:3px;
+  border:1px solid var(--rule-strong);color:var(--soft);
+}
+.chooser span.sel{background:var(--ink);color:#EDEFEC;border-color:var(--ink)}
+
+.act{display:flex;gap:12px;align-items:center;margin-top:24px}
+.btn{
+  font:inherit;font-size:16px;background:var(--ink);color:#EDEFEC;border:none;
+  padding:10px 20px;border-radius:3px;cursor:pointer;
+}
+.btn.ghost{background:none;color:var(--ink);border:1px solid var(--rule-strong)}
+.btn:focus-visible{outline:2px solid var(--meets);outline-offset:3px}
+.act .note{color:var(--faint);font-size:15px}
+
+/* ---- console ---- */
+.console{
+  background:var(--ink);color:#DFE3E0;border-radius:4px;padding:20px 22px;
+  font-family:"Spline Sans Mono",monospace;font-size:13px;line-height:1.72;white-space:pre-wrap;overflow-x:auto;
+}
+.console .dim{color:#7E8891}
+.console .ok{color:#6FBF9B}
+.console .warn{color:#D8AC5E}
+.console .bad{color:#DE8278}
+
+/* ---- measures (screen 2) ---- */
+.measures{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.meas{background:var(--panel);padding:16px 18px}
+.meas .k{font-size:14px;color:var(--soft);margin-bottom:6px}
+.meas .v{font-family:"Spline Sans Mono",monospace;font-size:24px;letter-spacing:-.01em}
+.meas .v.na{font-size:15px;color:var(--check);letter-spacing:0}
+.meas .w{font-size:13.5px;color:var(--faint);margin-top:5px;line-height:1.45}
+
+/* ---- tables ---- */
+table{width:100%;border-collapse:collapse;font-size:14px}
+thead th{
+  text-align:left;font-weight:600;font-size:12.5px;color:var(--soft);
+  border-bottom:1.5px solid var(--ink);padding:0 12px 7px 0;white-space:nowrap;
+}
+tbody td{padding:9px 12px 9px 0;border-bottom:1px solid var(--rule);vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-family:"Spline Sans Mono",monospace;font-size:13px;padding-right:0}
+td.cfg{font-family:"Spline Sans Mono",monospace;font-size:12.5px;line-height:1.4}
+tr.best td{background:var(--meets-bg)}
+
+.pill{
+  display:inline-flex;align-items:center;gap:7px;font-family:"Spline Sans Mono",monospace;
+  font-size:12px;padding:3px 9px;border-radius:3px;white-space:nowrap;
+}
+.pill i{width:7px;height:7px;border-radius:50%;flex:none}
+.p-meets{background:var(--meets-bg);color:var(--meets)} .p-meets i{background:var(--meets)}
+.p-fails{background:var(--fails-bg);color:var(--fails)} .p-fails i{background:var(--fails)}
+.p-check{background:var(--check-bg);color:var(--check)} .p-check i{background:var(--check)}
+
+/* ---- verify (screen 4) ---- */
+.runs{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:4px;overflow:hidden;margin-top:6px}
+.run{background:var(--panel);padding:14px 16px}
+.run .r{font-family:"Spline Sans Mono",monospace;font-size:11.5px;color:var(--faint);margin-bottom:5px}
+.run .v{font-family:"Spline Sans Mono",monospace;font-size:19px}
+.spread{margin-top:12px;font-size:15px;color:var(--soft)}
+.spread b{font-family:"Spline Sans Mono",monospace;font-size:14px;color:var(--ink);font-weight:400}
+
+.costline{
+  display:flex;justify-content:space-between;align-items:baseline;gap:20px;
+  padding:13px 0;border-bottom:1px solid var(--rule);
+}
+.costline:last-child{border-bottom:none}
+.costline .l{color:var(--soft);font-size:16px}
+.costline .r{font-family:"Spline Sans Mono",monospace;font-size:14px}
+
+/* ---- report (screen 5) ---- */
+.verdictbar{
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+  padding:18px 22px;background:var(--panel);border:1px solid var(--rule);border-radius:4px;margin-bottom:18px;
+}
+.verdictbar .headline{font-size:20px;font-weight:500;margin-right:auto}
+.rec{background:var(--panel);border:1px solid var(--rule);border-left:3px solid var(--meets);border-radius:4px;padding:22px 24px}
+.rec .who{font-size:14px;color:var(--soft);margin-bottom:8px}
+.rec .cfg{font-family:"Spline Sans Mono",monospace;font-size:16px;color:var(--meets);margin-bottom:14px;word-break:break-all}
+.rec .where{font-family:"Spline Sans Mono",monospace;font-size:11.5px;color:var(--faint);margin-bottom:18px}
+.constraint{display:grid;grid-template-columns:160px 1fr auto;gap:16px;padding:11px 0;border-top:1px solid var(--rule);align-items:baseline}
+.constraint .n{color:var(--soft);font-size:15px}
+.constraint .why{font-family:"Spline Sans Mono",monospace;font-size:12.5px;line-height:1.55}
+.constraint .why .from{display:block;color:var(--faint);font-size:11px;margin-top:4px}
+
+.log{background:var(--panel);border:1px solid var(--rule);border-radius:4px;padding:6px 24px}
+.logline{padding:14px 0;border-bottom:1px solid var(--rule);display:grid;grid-template-columns:118px 1fr;gap:16px}
+.logline:last-child{border-bottom:none}
+.logline .kind{font-family:"Spline Sans Mono",monospace;font-size:11.5px;color:var(--faint);padding-top:2px}
+.logline .txt{font-size:16px}
+.logline .txt .from{display:block;font-family:"Spline Sans Mono",monospace;font-size:11.5px;color:var(--faint);margin-top:6px}
+
+.foot{margin-top:24px;padding-top:18px;border-top:1px solid var(--rule);font-size:14px;color:var(--soft);display:flex;gap:26px;flex-wrap:wrap}
+.foot .m{font-size:12px}
+
+@media (max-width:1000px){
+  .grid{grid-template-columns:minmax(0,1fr)}
+  .rail{border-left:none;border-top:1px solid var(--rule);padding-left:0;padding-top:18px}
+  .runs{grid-template-columns:1fr}
+  .field{grid-template-columns:1fr;gap:4px}
+  .constraint{grid-template-columns:1fr;gap:5px}
+  .logline{grid-template-columns:1fr;gap:5px}
+  nav.steps{overflow-x:auto;margin-left:0}
+  .topbar .shell{flex-wrap:wrap;gap:12px}
+  .runid{margin-left:0}
+}
+
+/* ---- injected by oneproof.dev: this file is a DESIGN, not a shipped product ---- */
+#ogp-banner{position:fixed;top:0;left:0;right:0;z-index:99999;
+  background:#1c1713;color:#e8ddcc;border-bottom:2px solid #c9a227;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;line-height:1.5;
+  display:flex;gap:8px 18px;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;padding:9px 18px}
+#ogp-banner b{color:#c9a227;font-weight:600;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+#ogp-banner span{color:#a5947d}
+#ogp-banner a{color:#c9a227;white-space:nowrap}
+body{padding-top:40px}
+@media(max-width:700px){#ogp-banner{font-size:11px}body{padding-top:66px}.topbar{top:66px}}
+
+/* injected: long unbreakable field paths widened the page on a phone */
+@media(max-width:700px){
+  .constraint .why,.constraint .why .from,.logline .txt .from,.rail,.rail section,.console,
+  .field .val,.rec .cfg,.rec .where{overflow-wrap:anywhere;word-break:break-word}
+  nav.steps{min-width:0;max-width:100%}
+  .shell{padding-left:16px;padding-right:16px}
+}
+</style>
+</head>
+<body>
+<div id="ogp-banner"><b>Design &#183; not a shipped product</b><span>An interface study for oneground. No application like this exists; the tool is a set of commands and the figures here are illustrative.</span><a href="/building.html">What is actually shipped &#8594;</a></div>
+
+<div class="topbar">
+  <div class="shell">
+    <div class="mark">one<i>ground</i></div>
+    <nav class="steps" role="tablist">
+      <button role="tab" aria-selected="false" data-done="1" data-s="setup"><i class="tick"></i>Run</button>
+      <button role="tab" aria-selected="false" data-done="1" data-s="char"><i class="tick"></i>Corpus</button>
+      <button role="tab" aria-selected="false" data-done="1" data-s="sim"><i class="tick"></i>Architectures</button>
+      <button role="tab" aria-selected="false" data-done="1" data-s="ver"><i class="tick"></i>Engine</button>
+      <button role="tab" aria-selected="true" data-s="rep"><i class="tick"></i>Decision</button>
+    </nav>
+    <div class="runid">support-tickets-2026q3 · seed 20260915</div>
+  </div>
+</div>
+
+<!-- ============ 1. RUN SETUP ============ -->
+<section class="screen" id="s-setup"><div class="shell"><div class="grid">
+  <div>
+    <h1>What are we measuring, and against what?</h1>
+    <p class="sub">One file describes the sample and the requirements the decision will be judged against. Nothing else is configured anywhere.</p>
+
+    <div class="panel">
+      <h2>Your corpus</h2>
+      <div class="field">
+        <label>Sample</label>
+        <div class="val">./data/tickets_sample.npy
+          <span class="hint">20,000 vectors · 768 dimensions · float32</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Queries</label>
+        <div class="val">./data/queries_from_logs.jsonl
+          <span class="hint">412 real queries — above the 50 needed to measure ambiguity</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Timestamps</label>
+        <div class="val">created_at
+          <span class="hint">present, so drift can be measured</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Drawn from</label>
+        <div class="val">2,140,000 documents
+          <span class="hint">stratified by month — recorded, not enforced</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>What the decision must satisfy</h2>
+      <div class="field">
+        <label>Recall</label>
+        <div class="val">≥ 0.95 at k=10</div>
+      </div>
+      <div class="field">
+        <label>Latency</label>
+        <div class="val">p95 ≤ 40 ms at 200 qps, concurrency 32
+          <span class="hint">a load constraint — only an under-load run can answer it</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Storage</label>
+        <div class="val">≤ 2.0× the raw vectors</div>
+      </div>
+      <div class="field">
+        <label>Budget</label>
+        <div class="val">≤ €1,200 / month</div>
+      </div>
+      <div class="field">
+        <label>Engines to try</label>
+        <div class="chooser">
+          <span class="sel">qdrant</span><span class="sel">pgvector</span><span>milvus · adapter needed</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Run the engine on</label>
+        <div class="chooser">
+          <span>this machine</span><span class="sel">a machine I rent</span><span>my existing cluster</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="act">
+      <button class="btn">Start the run</button>
+      <button class="btn ghost">Check the file</button>
+      <span class="note">Four steps. The first three run here; the engine step asks before it spends anything.</span>
+    </div>
+  </div>
+
+  <aside class="rail">
+    <section><b>nothing leaves this machine</b>
+      no upload, no account, no telemetry. the engine step runs on hardware you rent under your own key, and returns a file.</section>
+    <section><b>environment</b>
+      python 3.12.7 · numpy 2.5.3 · faiss-cpu 1.15.0
+      pinned — matches requirements.txt</section>
+    <section><b>estimated</b>
+      steps 1–3: ~6 min here
+      step 4: ~25 min on a rented machine, about €0.30</section>
+  </aside>
+</div></div></section>
+
+<!-- ============ 2. CHARACTERIZE ============ -->
+<section class="screen" id="s-char"><div class="shell"><div class="grid">
+  <div>
+    <h1>Your corpus, measured</h1>
+    <p class="sub">Five properties of your data, computed against exact answers. These decide which architectures are even in the running — before anything is tried.</p>
+
+    <div class="measures">
+      <div class="meas">
+        <div class="k">Topic separability</div>
+        <div class="v">0.084</div>
+        <div class="w">Low. Few documents sit clearly inside one topic.</div>
+      </div>
+      <div class="meas">
+        <div class="k">Ambiguous queries</div>
+        <div class="v">72.6%</div>
+        <div class="w">Most queries sit between two regions.</div>
+      </div>
+      <div class="meas">
+        <div class="k">Concentration</div>
+        <div class="v">0.31</div>
+        <div class="w">Top ten regions hold a third of the corpus.</div>
+      </div>
+      <div class="meas">
+        <div class="k">Intrinsic dimensionality</div>
+        <div class="v">28.4</div>
+        <div class="w">High. Distances concentrate; partitions blur.</div>
+      </div>
+      <div class="meas">
+        <div class="k">Drift</div>
+        <div class="v">0.61 → 0.48</div>
+        <div class="w">Older partitions find newer documents less well.</div>
+      </div>
+      <div class="meas">
+        <div class="k">Truncated documents</div>
+        <div class="v na">1,204 of 20,000</div>
+        <div class="w">Longer than your model reads. If these are documents rather than chunks, chunk them first.</div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:20px">
+      <h2>What this means before anything is tried</h2>
+      <p>Your topics overlap and your queries sit between them. Architectures that partition by meaning need boundaries to partition on, and this corpus has few — they will be measured anyway, and the numbers will say so.</p>
+      <p>Your answers also go stale: a partition built on last year's documents finds this year's noticeably worse. That is a fact about your corpus rather than about any database, and it is worth knowing before you choose one.</p>
+    </div>
+
+    <div class="console" style="margin-top:18px"><span class="dim">measured in 4.2 min · 4 artifacts + MANIFEST.sha256 written</span>
+These are measurements of this corpus,
+not a comparison against anything.</div>
+  </div>
+
+  <aside class="rail">
+    <section><b>ground truth</b>
+      exact k-NN, k=100, inner product over all 20,000 vectors. not an approximation.</section>
+    <section><b>definitions</b>
+      separability: share of vectors whose second-nearest region is more than 1.20× further than the nearest, over 256 regions
+      ambiguity: share of queries within 1.10×</section>
+    <section><b>drift</b>
+      regions trained on documents before 2025-06-01, measured separately on queries from each side.</section>
+    <section><b>recorded</b>
+      characterization.json — receipt
+      build_info.json — declared</section>
+  </aside>
+</div></div></section>
+
+<!-- ============ 3. SIMULATE ============ -->
+<section class="screen" id="s-sim"><div class="shell"><div class="grid">
+  <div>
+    <h1>Three architectures, twenty-four configurations</h1>
+    <p class="sub">Each scored against the same exact answers on your sample. Nothing is judged here — these are measurements, and the constraint column is shown only so you can see where the line falls.</p>
+
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>Architecture</th><th>Configuration</th>
+            <th class="num">Recall</th><th class="num">Reachable</th><th class="num">Storage</th><th class="num">Queries a node sees</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="best">
+            <td>One index, one machine</td><td class="cfg">M=32 · ef=128</td>
+            <td class="num">0.991</td><td class="num">1.000</td><td class="num">1.00×</td><td class="num">all</td>
+          </tr>
+          <tr>
+            <td>Split by hash</td><td class="cfg">3 shards · M=32 · ef=96</td>
+            <td class="num">0.989</td><td class="num">1.000</td><td class="num">1.00×</td><td class="num">all</td>
+          </tr>
+          <tr>
+            <td>Split by meaning</td><td class="cfg">256 regions · ε=0.00 · probe 1</td>
+            <td class="num">0.412</td><td class="num">0.413</td><td class="num">1.00×</td><td class="num">1 of 256</td>
+          </tr>
+          <tr>
+            <td>Split by meaning</td><td class="cfg">256 regions · ε=0.10 · probe 2</td>
+            <td class="num">0.734</td><td class="num">0.736</td><td class="num">2.41×</td><td class="num">2 of 256</td>
+          </tr>
+          <tr>
+            <td>Split by meaning</td><td class="cfg">256 regions · ε=0.20 · probe 2</td>
+            <td class="num">0.861</td><td class="num">0.862</td><td class="num">3.68×</td><td class="num">2 of 256</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Where the loss is</h2>
+      <p>For every configuration that split by meaning, what the index returned was almost exactly everything its routing could reach — the gap between <em>recall</em> and <em>reachable</em> is under 0.002 throughout. The deficit is not the index being imprecise; it is neighbours living in regions the query never visits, and no amount of tuning recovers them.</p>
+      <p>That matches what the corpus said before anything ran: few clear boundaries, most queries sitting between regions.</p>
+    </div>
+
+    <div class="console" style="margin-top:18px"><span class="dim">24 configurations across 3 families · 5m 51s</span>
+No option is judged here. Run <span class="warn">oneground report</span> to compare these
+against your constraints.</div>
+  </div>
+
+  <aside class="rail">
+    <section><b>reachable</b>
+      exact search restricted to the regions this configuration's routing actually probes. the ceiling a perfect index could reach.</section>
+    <section><b>why it is mandatory</b>
+      without it, a low recall cannot be told from a badly tuned index, and the wrong thing gets fixed.</section>
+    <section><b>queries a node sees</b>
+      how many machines answer one query. lower is cheaper; the cost is recall.</section>
+    <section><b>recorded</b>
+      simulate.json — receipt
+      state/ — for the lab</section>
+  </aside>
+</div></div></section>
+
+<!-- ============ 4. VERIFY ============ -->
+<section class="screen" id="s-ver"><div class="shell"><div class="grid">
+  <div>
+    <h1>The real database, three times each</h1>
+    <p class="sub">Two engines, one machine, the same sample and the same queries, run in turn. Speed is measured three times because one measurement near a threshold is a coin flip.</p>
+
+    <div class="panel">
+      <h2>qdrant 1.19.1</h2>
+      <div class="runs">
+        <div class="run"><div class="r">run 1 · p95</div><div class="v">36.4 ms</div></div>
+        <div class="run"><div class="r">run 2 · p95</div><div class="v">38.9 ms</div></div>
+        <div class="run"><div class="r">run 3 · p95</div><div class="v">37.1 ms</div></div>
+      </div>
+      <div class="spread">Spread <b>2.5 ms</b> across three runs, engine restarted between each and confirmed answering before the next began. Sustained <b>200.0 of 200</b> offered queries per second, <b>0</b> errors. Ceiling before latency broke down: <b>381 qps</b> at concurrency 4.</div>
+      <div class="costline" style="margin-top:14px"><span class="l">Recall against exact answers</span><span class="r">0.9990</span></div>
+      <div class="costline"><span class="l">Ingest</span><span class="r">3,688 vectors/s</span></div>
+      <div class="costline"><span class="l">Round trip with no query behind it</span><span class="r">1.9 ms — 5% of the measurement</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>pgvector 0.8.6</h2>
+      <div class="runs">
+        <div class="run"><div class="r">run 1 · p95</div><div class="v">317 ms</div></div>
+        <div class="run"><div class="r">run 2 · p95</div><div class="v">332 ms</div></div>
+        <div class="run"><div class="r">run 3 · p95</div><div class="v">317 ms</div></div>
+      </div>
+      <div class="spread">Spread <b>15.4 ms</b>. Sustained <b>119.1 of 200</b> offered, 0 errors — it did not keep up with the rate it was asked for. Ceiling <b>121 qps</b> at concurrency 4.</div>
+      <div class="costline" style="margin-top:14px"><span class="l">Recall against exact answers</span><span class="r">0.9984</span></div>
+      <div class="costline"><span class="l">Ingest</span><span class="r">1,196 vectors/s — index built during ingest</span></div>
+      <div class="costline"><span class="l">Settings it ran under</span><span class="r">recorded, engine defaults</span></div>
+    </div>
+
+    <div class="console" style="margin-top:18px"><span class="dim">machine tzr4k9 · rented 28 min · €0.31 · terminated</span>
+Both engines measured on the same host, in turn, never at the same time.
+<span class="ok">A comparison between them is admissible.</span></div>
+  </div>
+
+  <aside class="rail">
+    <section><b>why three runs</b>
+      the same setup once measured 38.22 ms and 42.82 ms against a 40 ms target. a pass now means it passed every time.</section>
+    <section><b>the round trip</b>
+      measured before every run. if it exceeds a fifth of the query time, the number describes your network and is not reported as a verdict.</section>
+    <section><b>sustained ≠ ceiling</b>
+      a throttled run cannot exceed what it was offered. the ceiling is a separate, unthrottled ramp.</section>
+    <section><b>your account</b>
+      the machine was created, used and destroyed under your credentials. the price was shown before it started.</section>
+  </aside>
+</div></div></section>
+
+<!-- ============ 5. REPORT ============ -->
+<section class="screen on" id="s-rep"><div class="shell"><div class="grid">
+  <div>
+    <h1>One recommendation, and what it rests on</h1>
+    <p class="sub">Twenty-four configurations judged against five constraints. Every verdict below names the file and field it was read from.</p>
+
+    <div class="verdictbar">
+      <span class="headline">24 configurations</span>
+      <span class="pill p-meets"><i></i>1 meets</span>
+      <span class="pill p-fails"><i></i>21 fails</span>
+      <span class="pill p-check"><i></i>2 couldn't check</span>
+    </div>
+
+    <div class="rec">
+      <div class="who">Recommended</div>
+      <div class="cfg">one index, one machine · M=32 · efConstruction=200 · efSearch=128</div>
+      <div class="where">built and measured on qdrant 1.19.1 · machine tzr4k9 · 2026-09-15</div>
+
+      <div class="constraint">
+        <div class="n">Recall</div>
+        <div class="why">0.991 ≥ 0.95
+          <span class="from">simulate.json:rows[single_node_hnsw…].recall_at_10</span>
+        </div>
+        <div><span class="pill p-meets"><i></i>meets</span></div>
+      </div>
+      <div class="constraint">
+        <div class="n">Latency</div>
+        <div class="why">worst of three runs 38.9 ms ≤ 40 ms, at 200 qps and concurrency 32
+          <span class="from">verify.json:searches[k=10_under_load].p95_across_runs.max</span>
+        </div>
+        <div><span class="pill p-meets"><i></i>meets</span></div>
+      </div>
+      <div class="constraint">
+        <div class="n">Storage</div>
+        <div class="why">1.00× ≤ 2.0×
+          <span class="from">simulate.json:rows[…].storage_amplification</span>
+        </div>
+        <div><span class="pill p-meets"><i></i>meets</span></div>
+      </div>
+      <div class="constraint">
+        <div class="n">Sustained rate</div>
+        <div class="why">200.0 of 200 offered, 0 errors — a sustain check, not the ceiling
+          <span class="from">verify.json:load.completed</span>
+        </div>
+        <div><span class="pill p-meets"><i></i>meets</span></div>
+      </div>
+      <div class="constraint">
+        <div class="n">Budget</div>
+        <div class="why">€310 ± €78 per month; the verdict uses €388 against €1,200
+          <span class="from">report.json:costs[…].monthly_high · prices declared 2026-09-15</span>
+        </div>
+        <div><span class="pill p-meets"><i></i>meets</span></div>
+      </div>
+    </div>
+
+    <h2>What the report will not say</h2>
+    <div class="log">
+      <div class="logline">
+        <div class="kind">indistinguishable</div>
+        <div class="txt">Split by hash reaches 0.989 against 0.991 — closer than this tool's own calibration error, so the two are indistinguishable on recall. They separate on the number of machines a query touches, which is measured, and nothing else.
+          <span class="from">calibration tolerance 0.01 · calibration/history.jsonl 2026-09-14</span>
+        </div>
+      </div>
+      <div class="logline">
+        <div class="kind">couldn't check</div>
+        <div class="txt">Split by hash carries no latency verdict: the engine was built as one index in one namespace, which is not a three-shard deployment. A measurement of the index that was built says nothing about the one that wasn't.
+          <span class="from">verify_info.json:engine_facts.index_params</span>
+        </div>
+      </div>
+      <div class="logline">
+        <div class="kind">fails</div>
+        <div class="txt">Every configuration that split by meaning fails recall — best 0.861 against 0.95 — and the three with replication also fail storage, at 2.41× to 3.68×. The shortfall is routing rather than tuning: what was returned was everything the routing could reach.
+          <span class="from">simulate.json:rows[…].recall_at_10, .routing_ceiling</span>
+        </div>
+      </div>
+      <div class="logline">
+        <div class="kind">to resolve</div>
+        <div class="txt">pgvector was measured and fails latency at 332 ms against 40 ms. It is not recommended, and it was not ranked against qdrant on anything that was not measured on the same machine.
+          <span class="from">verify.json:engines[pgvector] · machine tzr4k9</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span>Calibrated against qdrant 1.19.1 on 14 September: this tool's prediction was within <span class="m">0.0019</span> of what the engine did.</span>
+      <span class="m">report.json · report.html · manifest.yaml</span>
+    </div>
+  </div>
+
+  <aside class="rail">
+    <section><b>every number has a path</b>
+      each verdict names the file and field it was read from. nothing on this screen was summarised away.</section>
+    <section><b>deployable</b>
+      manifest.yaml holds the recommended configuration in the form your infrastructure takes, with the digest of every input that produced it.</section>
+    <section><b>couldn't check is an outcome</b>
+      not a failure and not a pass. each one says what would settle it.</section>
+    <section><b>keep the folder</b>
+      the run directory is the record. when someone asks why this database, it is the answer.</section>
+  </aside>
+</div></div></section>
+
+<script>
+  const tabs=[...document.querySelectorAll('nav.steps button')];
+  const show=id=>{
+    document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id==='s-'+id));
+    tabs.forEach(t=>t.setAttribute('aria-selected',String(t.dataset.s===id)));
+    window.scrollTo({top:0,behavior:'instant'});
+  };
+  tabs.forEach(t=>t.addEventListener('click',()=>show(t.dataset.s)));
+</script>
+</body>
+</html>
