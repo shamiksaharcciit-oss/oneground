@@ -291,14 +291,14 @@ input[type=range]{width:100%;accent-color:var(--ochre);margin:0 0 16px}
       </section>
 
       <section class="view" id="v-verify">
-        <div class="vh"><h1>The real engine</h1><span class="sub">qdrant 1.19.1 · runpod tf8sd2usxbblsm · 3 runs</span></div>
+        <div class="vh"><h1>The real engine</h1><span class="sub">qdrant 1.19.1 · runpod tf8sd2usxbblsm · <b>measured on arxiv-150k, 150,000 vectors — not on the support-tickets corpus this page otherwise describes</b></span></div>
         <p class="lede">Latency and throughput are properties of an implementation on a machine. They are measured, never simulated.</p>
         <div class="grid5">
-          <div class="cell"><div class="k">p95 under load</div><div class="n"><button class="v" data-k="p1">38.22</button></div><div class="w">median of 3 runs · spread 4.6 ms · engine restarted between runs</div></div>
+          <div class="cell"><div class="k">p95 under load</div><div class="n"><button class="v" data-k="p1">38.22</button></div><div class="w">concurrency 32 · 59,999 of 60,000 queries · one run</div></div>
           <div class="cell"><div class="k">Sustained</div><div class="n">200.0</div><div class="w">of 200 offered, 0 errors, 300 s</div></div>
-          <div class="cell"><div class="k">Ceiling</div><div class="n">381.2</div><div class="w">stopped at concurrency 8 on p99 degradation, not errors</div></div>
+          <div class="cell"><div class="k">Ceiling</div><div class="n">381.2</div><div class="w">environment 1ombs4scr257a5, 13 September — a different run from the p95 above; stopped at concurrency 8 on p99 degradation, not errors</div></div>
           <div class="cell"><div class="k">Recall measured</div><div class="n">0.9994</div><div class="w">against the same exact answers the simulation used</div></div>
-          <div class="cell"><div class="k">Round-trip share</div><div class="n">18.3%</div><div class="w">under the 20% limit, so this figure describes the engine rather than the path</div></div>
+          <div class="cell"><div class="k">Round-trip share</div><div class="n">withdrawn</div><div class="w">no receipt carries the 18.3% once shown here. The only measured round-trip share for this engine is 60%, on the later run, which is why that run's latency could not be attributed. The sentence “under the 20% limit, so this figure describes the engine” is withdrawn.</div></div>
         </div>
         <div class="mocknote">A second engine measured on a different machine is not a comparison. To compare, run both on one host with this sample — the report will say so rather than ranking them.</div>
       </section>
@@ -352,7 +352,7 @@ const EV = {
   r3:{n:"0.9318",kind:"receipt",f:"simulate.json:rows[semantic_sharded[centroids=256,epsilon=0.2,probe=2]].recall_at_10",p:"Below the 0.95 floor. The reachable set for this route was 0.9324, so the deficit is routing rather than the index."},
   s1:{n:"1.00×",kind:"receipt",f:"simulate.json:rows[...].storage_amplification",p:"One stored copy per vector. The constraint allowed up to 2.0×."},
   s3:{n:"3.72×",kind:"receipt",f:"simulate.json:rows[...].storage_amplification",p:"Closure replication at ε=0.20 copies 84% of the corpus to the four-copy cap. Exceeds the 2.0× budget."},
-  p1:{n:"38.22 ms",kind:"receipt",f:"verify.json:searches[k=10_under_load].latency_shape.p95_ms",p:"Median of three runs at concurrency 32, engine restarted between runs and readiness proved by a real query. Spread 4.6 ms; the worst run also met the 40 ms budget, which is what a pass requires."},
+  p1:{n:"38.22 ms",kind:"receipt",f:"verify.json:searches[k=10_under_load].latency_shape.p95_ms",p:"One run at concurrency 32, 59,999 of 60,000 queries completed. It met the 40 ms budget by 1.8 ms. The verify receipt behind this run no longer exists; its report survives at fixtures/arxiv-150k/report/superseded-2026-09-09-tf8sd2usxbblsm.report.json and is what these figures are taken from. A later run of the same configuration did not meet it."},
   p2:{n:"couldn't check",kind:"couldn't-check",f:"verify_info.json:engine_facts.index_params",p:"The verify run built one index in a single namespace, which is not a hash_sharded deployment. A measurement of the index that was built says nothing about one that was not.",r:"Run oneground verify with a hash_sharded deployment on the same host and sample."},
   q1:{n:"200.0 qps",kind:"receipt",f:"verify.json:load.completed",p:"59,999 of 60,000 offered queries in 300 s, 0 errors. This is a sustain check: a throttled run cannot exceed what it was offered, so it is not the engine's ceiling. The ceiling is measured separately at 381.2."},
   cr:{n:"0.036",kind:"receipt",f:"characterization.json:boundary_crispness",p:"Fraction of vectors whose second-nearest region centre is more than 1.20× the distance of the nearest, under k-means with 256 regions. Tolerance 0.02."},
