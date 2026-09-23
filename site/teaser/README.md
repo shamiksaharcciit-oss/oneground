@@ -50,7 +50,11 @@ there and it changes here.
 Then it checks itself: it recomputes `boundary_crispness`,
 `ambiguous_query_rate`, `skew_top10_share`, `storage_amplification` and
 one-region `recall@10` and asserts each against the spec's published value and
-tolerance, exiting non-zero if any misses. It also compares the whole
+tolerance, exiting non-zero if any misses. The first three are properties of
+the corpus at one centroid count — 256, carried as
+`values.json:geometry.n_centroids` and named on the page beside each of them —
+not of the ratio alone; `skew_top10_share` in particular holds its published
+value at no other count (task 044c). It also compares the whole
 recomputation against build 3's own `ground_view_*.parquet` tables and records
 the comparison in `values.json:measured.cross_check_vs_build3_tables` — that
 comparison is reported, never asserted, because the fixture's published claim
