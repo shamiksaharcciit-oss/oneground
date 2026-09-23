@@ -84,9 +84,25 @@ Scripts: `tasks/scratch/044c_centroid_sweep.py` (the sweep),
 `044c_band_edge.py`. All import project code unmodified.
 
 Outputs: `runs/044c/*.json`. `runs/` is gitignored by project rule, so the
-four sweep JSONs are also copied to
-`tasks/044c-centroid-count.sweep/` and verified there by sha256 — rule 9,
-because every number below is cited from them.
+four sweep JSONs are also copied to `tasks/044c-centroid-count.sweep/` and
+verified there by sha256 — rule 9, because every number below is cited from
+them. The copies are byte-identical to the run outputs.
+
+**Two digests per file, because one of them would have been misleading.** git
+normalises CRLF to LF on `add`, so the sha256 of the copy I verified is not
+the sha256 a fresh clone produces:
+
+| file | as written (CRLF) | as committed (LF) |
+|---|---|---|
+| `arxiv-150k.default.json` | `5d723d7dcd5eb5d2…` | `b91eaeff675564cb…` |
+| `arxiv-150k.allpts.json` | `663e09cb772347c8…` | `e0a165d721d34cc4…` |
+| `stackexchange-150k.default.json` | `3f6552dbf61ac3ce…` | `3298ad9a7efc9e37…` |
+| `stackexchange-150k.allpts.json` | `f1b081b424bf1be6…` | `bb90f059cad1f6e0…` |
+
+The first column proves the copy matches the run that produced it; the second
+is what a reader can check. Recording only the first would have been a digest
+nobody else could reproduce — the failure mode rule 9 exists to prevent,
+arriving by a route rule 9 does not mention.
 
 ### The second arm, which nobody briefed, and without which none of this reads
 
@@ -477,7 +493,7 @@ the file.
 | Sweep brackets 256 by ≥ 1 order of magnitude each way | **PASS** — 16× down, 16× up |
 | No published value moved | **PASS** — `git status fixtures/ site/ docs/ oneground/` empty; nothing outside `tasks/` and `runs/` was written |
 | No constant changed | **PASS** — `N_CENTROIDS`, `CRISP_RATIO`, `AMBIGUOUS_RATIO` untouched; the control arm is a copy in scratch, not an edit |
-| Cited artifacts in the main checkout, verified by digest | **PASS** — `tasks/044c-centroid-count.sweep/`, four files, sha256 compared |
+| Cited artifacts in the main checkout, verified by digest | **PASS** — `tasks/044c-centroid-count.sweep/`, four files, sha256 compared against `runs/044c/`; both CRLF and committed-LF digests recorded |
 | Full suite | see below |
 | `sec-filings-10k` swept | **COULDN'T-CHECK** — see below |
 
