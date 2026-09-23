@@ -69,7 +69,52 @@ the most recent rule about it. That is the argument for mechanical guards over
 documented rules in one line: **the guard does not need to be in front of
 anyone.**
 
-## The tell
+## Three instances now, and the third names what the other two only imply
+
+The rule was written after the first. It did not prevent the second or the
+third, both by its author, both within a week.
+
+| # | task | the rule that failed to reach the code |
+|---|---|---|
+| 1 | 044c | 043's *sanitise at the write site* — a scratch script's absolute paths committed as evidence, by the author of 043's report |
+| 2 | 044f | 044d's *select on provenance, not locality* — a guard built on a locality predicate three times running, with the rule in a file authored that morning |
+| 3 | 044j | **this rule's own subject**, below |
+
+**The third.** Task 044i narrowed `.gitignore`, which made about 110
+historical receipts trackable. Bulk-adding them put 95+ machine identifiers
+into the tracked tree; the scan caught it and the commit was undone. The
+lesson was then written down — **into `.gitignore` itself**, the file the
+command consults:
+
+> they must not be bulk-added … the scan catches that, which is the guard
+> working rather than a trap — it failed on exactly this during 044i and the
+> commit was undone.
+
+Two tasks later the same author ran `git add -A` on the same repository and
+did it again. The scan caught it again.
+
+**So: warning written by the person who would need it, about the exact
+command, in the file that command reads — and reached for anyway.** There is
+no version of "put the rule closer to the action" left to try. It was already
+as close as text can get.
+
+### What that settles
+
+> **A rule that has to be remembered at the moment of action is not a rule. It
+> is a hope with documentation.**
+
+This is the argument for a catalogue of hard-won rules and against it in the
+same breath, and the resolution is not to stop writing them but to be honest
+about what they are for. **They are for diagnosis, not prevention.** Every one
+of these three was *caught by a mechanism* — a failing test, three times — and
+*understood* because the rule existed to name what had happened. A page of
+rules shortens the distance between a symptom and a decision. It does not
+shorten the distance between an intention and an action, and asking it to is
+how people conclude the page is useless when it merely is not that.
+
+**The repair is never a better-placed warning.** It is to remove the moment of
+choice: here, staging by path instead of `git add -A`, so the dangerous form
+is not typed rather than typed carefully.
 
 **You have just created a new place that writes a file, and you are thinking
 about what the file contains rather than where it might end up.** If any
@@ -82,7 +127,7 @@ implementation of a shared rule is a second place for it to be wrong. Writing
 one inside the fix for that finding would have been a fifth instance rather
 than a fourth.
 
-## What it cost
+## What it cost, across all three
 
 Task 043 recorded four instances of one defect and a fifth written by the
 person eliminating the first four. This is the same task's *other* rule,
