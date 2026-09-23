@@ -365,6 +365,63 @@ not-verifiable-here path**, so the case fails for everyone or for no one.
 digest pinned in the test, and the helper that reads it fails rather than
 skips when it is absent.
 
+#### The failing test is a stale artifact, and not for the reason first given
+
+Task 044b corrected the 044 merge report's attribution, and the correction
+needs correcting in turn. Both are folded here, because the conclusion is
+right and the reason is not, and an implementer who believes the reason will
+close finding 5 without fixing anything.
+
+**What is true.** The test reads claims out of a `report.json` on disk, and
+`runs/arxiv-150k-via-characterize/report.json` was last written **14
+September**. Regenerate it with today's code and the test passes. So the
+failure is not a failing check of working code.
+
+**What is not true: "the code is fixed."** The correction attributes a fix to
+commit `951450f` — *"verdict.py now sets `couldnt_check_kind`, 6
+references"*. Checked:
+
+- `951450f` changed **two files, `docs/UI.md` and this brief**. It is
+  documentation. It touched no code.
+- `verdict.py`'s `couldnt_check_kind` assignments arrived in **task 034**
+  (`68498ab`), not in September's work.
+- There are **three** of them, not six.
+
+**Why a fresh report passes anyway, which is the part that matters.** The two
+artifacts take *different branches*:
+
+| | the `to_resolve` claims read | kinds recorded |
+|---|---|---|
+| 14 September | *"this configuration was not the one verified"* — the **mismatch** branch | **none** |
+| regenerated | *"has not been asked what index families it builds"* — the **coverage** branch | `coverage_unresolved` |
+
+The newer run has unresolved adapter coverage, so it reaches a branch that
+**is** routed and does carry a remedy. The mismatch branch — `verdict.py:364`
+and `:524`, ending in `else: v.remedy = ""` — is untouched, still unrouted,
+and will produce the same unactionable claim the next time a run's verified
+configuration disagrees with its simulated one.
+
+**So the artifact is stale and the defect is not.** A regenerated report hides
+finding 5 rather than resolving it.
+
+**Do not regenerate `runs/arxiv-150k-via-characterize` to make the test
+pass.** It is `test_evidence`'s `TIER1` subject and several other tests read
+it; regenerating changes what they see, and it would make the failure
+disappear with nothing demonstrated.
+
+**The tracked case is the fix, and it must exercise the mismatch branch
+specifically.** Three failure modes in one today:
+
+1. on a fresh clone it **skips**, so no test demonstrates the routing;
+2. on the one machine holding the workdir it **fails**, against an artifact
+   nine days older than the code;
+3. there is **no configuration in which it passes because the routing is
+   right** — regenerating produces a pass that proves only that a different
+   branch was taken.
+
+A tracked case built from the mismatch branch fixes all three: it fails today,
+passes when `not_verified` is routed, and does both identically everywhere.
+
 #### Established, not assumed
 
 - **Task 044 did not cause it.** The failure reproduces identically with 044's
