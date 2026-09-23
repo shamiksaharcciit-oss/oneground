@@ -26,6 +26,7 @@ import argparse
 import sys
 
 from . import provenance
+from . import refusals
 from . import __display_version__, __version__
 from . import environment as envmod
 
@@ -583,6 +584,22 @@ def build_parser():
 
 
 def main(argv=None):
+    """The command line's entry point, and the one place a refusal is
+    printed.
+
+    Task 046. Until this, `intake.RequirementsError` -- the project's own
+    refusal type, twenty-five messages each naming a field -- escaped as an
+    unhandled traceback with the sentence on the last line. So the commonest
+    refusal in the product was met as a crash by every command-line user, and
+    the form looked clean only because `lab/compose.py` catches it from
+    `intake.load()` directly and never comes through here.
+
+    **This changes what the command line prints and returns**, for a case
+    that is not rare: a missing or malformed requirements file now prints one
+    line and exits 2, where it printed a traceback and exited 1. The code is
+    the one `guard_or_exit` and `_cmd_propose` already use, so a refusal
+    leaves the tool the same way whichever part produced it.
+    """
     argv = list(sys.argv[1:] if argv is None else argv)
 
     # Recorded before anything runs, so every receipt written under this
@@ -591,6 +608,21 @@ def main(argv=None):
     # writer that had to be told would be a writer that could be forgotten.
     provenance.record_invocation(argv)
 
+    try:
+        return _dispatch(argv)
+    except BaseException as e:                            # noqa: BLE001
+        # Re-raised unless it is a declared refusal, so a genuine failure
+        # keeps its traceback -- which is the thing a traceback is for. The
+        # set is exact on the type and lives in `oneground/refusals.py` with
+        # a reason per entry; anything not in it comes out of here unchanged.
+        if not refusals.is_refusal(e):
+            raise
+        where = ("oneground " + argv[0]) if argv else "oneground"
+        print(f"{where}: refused. {e}", file=sys.stderr)
+        return refusals.REFUSED_EXIT
+
+
+def _dispatch(argv):
     # `fixture` and `pod` own the rest of the command line; parsing them here
     # would mean maintaining two copies of their flags.
     if argv and argv[0] == "fixture":

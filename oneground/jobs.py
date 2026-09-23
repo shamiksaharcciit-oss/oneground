@@ -226,3 +226,78 @@ def read(runs_dir):
         raise JobError(f"{JOBS_NAME} holds a {type(raw).__name__}, not a "
                        "list of jobs")
     return [Job.from_dict(d) for d in raw]
+
+# ------------------------------------------ reading an exit code honestly
+# Task 046. A supervisor is given an exit code, a stream of output, and
+# whatever landed in the workdir. `tasks/finding-refusals-arrive-as-
+# tracebacks.md` measured what those codes mean, and the mapping is declared
+# here rather than written into the supervisor, so every row is checkable by
+# reading one table.
+#
+# The `1` row is the only one where a single code means two things, and it is
+# the row to test hardest.
+EXIT_MEANING = {
+    0: ("done",
+        "the command completed"),
+    2: ("refused",
+        "the tool declined, with a reason and a remedy. Every stage uses "
+        "this code for a refusal and for nothing else; `cli.main` now routes "
+        "the declared refusal types here too, which is what made `refused` "
+        "reachable at all"),
+    1: (None,
+        "TWO THINGS, and the workdir separates them. `simulate` exits 1 when "
+        "it ran and dropped some configurations -- the measured rows are in "
+        "`simulate.json` and each drop is named with its reason in "
+        "`simulate_info.json:dropped` -- and the interpreter exits 1 when "
+        "something raised. The first is closer to done than to failed; the "
+        "second produced nothing"),
+}
+
+#: The receipt whose presence says the stage actually ran. This is what
+#: resolves the `1` row, and it is the whole of *the truth is the workdir*
+#: made concrete: the exit code is a claim about the process, the receipt is
+#: evidence about the work.
+STAGE_RECEIPT = {
+    "characterize": "characterization.json",
+    "simulate": "simulate.json",
+    "verify": "verify.json",
+    "report": "report.json",
+    "chunk": "chunk_info.json",
+    "propose": "proposals",
+    "pod plan": "pod_plan.json",
+    "pod status": None,
+    "pod watch": None,
+    "pod fetch": None,
+}
+
+
+def classify(stage, exit_code, workdir):
+    """`(state, why)` for a finished job. Never guesses.
+
+    `why` is returned beside the state because a reader of a `failed` job
+    deserves to know whether it was the code or the missing receipt that
+    decided -- `docs/PRACTICE.md` §7.2, an exemption or an inference that is
+    not reported has only moved the silence.
+    """
+    if stage not in STAGES:
+        raise JobError(f"{stage!r} is not a stage")
+    state, why = EXIT_MEANING.get(exit_code, (None, None))
+    if state is not None:
+        return state, why
+    if why is None:
+        return FAILED, (f"exit {exit_code}, which is not a code this tool "
+                        f"returns deliberately")
+
+    receipt = STAGE_RECEIPT.get(stage)
+    if receipt is None:
+        # A stage that writes no receipt of its own cannot be separated this
+        # way, and saying so beats guessing. `failed` is the safe reading:
+        # calling a crash `done` would put a run in the list as complete.
+        return FAILED, ("exit 1, and this stage writes no receipt of its "
+                        "own, so nothing here can tell a drop from a crash")
+    where = os.path.join(workdir or "", receipt)
+    if os.path.exists(where):
+        return DONE, ("exit 1 with %s written: the run happened and dropped "
+                      "something, which the receipt records" % receipt)
+    return FAILED, ("exit 1 with no %s: nothing was produced, so the run "
+                    "did not happen" % receipt)

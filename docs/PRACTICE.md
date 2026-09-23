@@ -875,6 +875,43 @@ match exactly.
 > outside, which is warning 3: a passing check must be able to fail, and here
 > the two designs differ only in whether it can.
 
+### 7.4 A refusal is produced where it is raised, once
+
+Not strictly an exemption, and here because it is the same failure seen from
+the other side: a rule that exists, is written down, and is implemented in
+the wrong place, so that everyone downstream reimplements it or does without.
+
+**The instance.** `intake.RequirementsError` is the project's own refusal
+type. Its module header states the two rules that shape all twenty-five of
+its messages -- *name the field*, and *refuse rather than guess* -- and every
+message obeys them. `cli.main` caught none of them, so the commonest refusal
+in the product reached every command-line user as an unhandled Python
+traceback with the carefully written sentence on the last line.
+
+**It looked fine from the interface**, which is the part worth sitting with.
+`lab/compose.py` catches `RequirementsError` from `intake.load()` directly
+and never goes through the CLI, so the form showed clean refusals throughout.
+The slice's acceptance -- *a refused job shows the CLI's refusal verbatim* --
+would have been met by a path that was shielded by accident rather than by
+one that was fixed. **A slice whose acceptance is satisfied by a shielded
+path is passing for the wrong reason** (§2, warning 3, at the level of a
+whole deliverable).
+
+> The rule: **produce a refusal where it is raised, once, and let every
+> caller read it.** If two callers each have to recognise it, one of them
+> will do it differently and the other will do it later.
+
+**And the direction refused, recorded because it was the tempting one.** The
+supervisor could have parsed the traceback -- match the exception name off
+the last line, classify from that. It would have worked. It would also have
+been a second implementation of the CLI's own error formatting in the one
+place the design says not to have one (§2 warning 2), and it would have left
+the command line's own users exactly where they were. **A fix that only
+repairs the new caller is not a fix, it is a workaround with a test.**
+
+The tell: *the thing that needs to recognise this is not the thing that
+raised it, and there is already one that does.*
+
 ### What to do when an exemption is demanded
 
 This is the sentence a future author should meet, because the pressure is
