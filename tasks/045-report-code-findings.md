@@ -39,6 +39,15 @@ rather than things a reader has to notice.
 `verdict.py:364` and `:524` — the same pair of couldn't-check verdicts carry
 an unreconstructable citation *and* no remedy. Do them together.
 
+**This brief has been corrected twice, and both times the acceptance was
+left behind.** The routing diagnosis changed and the acceptance kept a stale
+count; the stale-artifact diagnosis changed and the acceptance kept the
+branch name the old diagnosis used — the one branch that cannot demonstrate
+the fix. Both are repaired above. Read the acceptance against the body before
+building, not only the body: **a correction updates the argument and leaves
+the checklist, and the acceptance is where an implementer looks last and
+trusts most.**
+
 **And one of them is being scheduled by its own recurrence.** The failing
 remedy test has now been recorded in two separate merge reports — task 044's
 and task 036's — each by a stream that did not cause it, did not own it, and
@@ -471,16 +480,28 @@ passes when `not_verified` is routed, and does both identically everywhere.
   both values, and resolves under the new check.
 - No claim's `text` contains an outcome constant, asserted over a real report.
 - Every couldn't-check verdict carries a kind and a remedy that names an
-  action, or a recorded reason why it cannot — asserted over all 29 in
-  `verdict.py`, not over the two that were noticed, and including the
-  constraints outside `ENGINE_CONSTRAINTS` that never enter the routing loop.
+  action, or a recorded reason why it cannot — asserted over **all 20**
+  `verdict.py` constructs, not over the two that were noticed. The split is
+  the better statement of the gap: **14 inside `ENGINE_CONSTRAINTS`**
+  (`latency_p95` 9, `qps` 5), which the routing loop reaches and still leaves
+  unrouted in its `else` branch, and **6 outside it** (`recall_at_k`,
+  `storage_amplification`, `memory_budget` 1 each, `monthly_budget` 3), which
+  never enter the loop at all. *An earlier draft said 29. That was a token
+  count — `grep -c COULDNT_CHECK` over a file that also defines the constant,
+  lists it in `OUTCOMES`, defaults a field to it and compares against it four
+  times. 20 is the parsed figure; do not re-derive it with grep.*
 - `how_to_resolve` routes every kind that carries a remedy, and its
   fall-through no longer returns a reason prefixed with *To decide X*.
 - Routing reaches **every constraint**, not only `latency_p95` and `qps`, or
   each constraint it does not reach carries a recorded reason why — asserted
   over a report whose couldn't-checks span more than the engine constraints.
-- A tracked input exercises the not-verifiable-here path, so the case fails
-  for everyone or for no one.
+- A tracked input exercises the **mismatch branch** — `verdict.py:364` and
+  `:524`, the `else` that sets `NOT_VERIFIED` and `remedy = ""` — so the case
+  fails for everyone or for no one. **Not `not_verifiable_here`:** that kind
+  already routes and already carries a remedy, so a case built on it passes
+  the day it is written and proves only that a different branch was taken.
+  An earlier draft of this line named it, from the addition that predated the
+  correction below.
 - The remedy check fails rather than skips where its input is tracked, and the
   report says which inputs are tracked and which may honestly be absent.
 - Repeated-in-substance claims are emitted as one quantified claim whose

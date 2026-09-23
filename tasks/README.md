@@ -6,29 +6,27 @@ reported against, and anything discovered adjacent to it is recorded in the
 report under "Observed, not done" rather than fixed in passing. Scratch
 diagnostic scripts live in `tasks/scratch/`.
 
+## Correcting a brief or a report
+
+A brief is corrected in place rather than superseded by a second file: two
+documents sharing a number is how one gets built and the other forgotten. Fold
+and delete, and say in the commit what was kept.
+
+**When you correct one, correct its checklist in the same pass.** A correction
+updates the argument and leaves the acceptance behind, and **the acceptance is
+where an implementer looks last and trusts most** — so a stale line there
+outranks a corrected paragraph above it. Task 045 was corrected twice and both
+times kept an acceptance line the correction had invalidated: once a count
+that no longer matched the code, once the name of the one branch that could
+not demonstrate the fix.
+
+The same applies to any section of a document that states a current state
+rather than a rule. State-bearing sections go stale silently, because nothing
+fails when the world moves and the sentence does not.
+
 ## Currently blocked
 
-**041 — the interface, slice 1: read.** Cannot start. Its specification
-(`docs/INTERFACE.md`) and its brief (`tasks/041-interface-read.md`) both
-exist only on the unmerged branch `task-039`, so neither is on main. The
-unmerged branch is the blocker, not the work; 041 begins the moment it
-lands.
-
-Three things settled while waiting, recorded here so they are not
-rediscovered:
-
-- **The pod session card is slice 2, not slice 1.** `docs/INTERFACE.md` §8
-  assigns it to slice 1 as "a read"; the paper's own §4.2 mechanism forbids
-  it, because `oneground/lab/guard.py` lists `oneground.pod` in `MEASURING`
-  and the server refuses to start if a view imports it. Nor is there a
-  recorded plan to render instead: `pod` `cmd_plan` prints and writes no
-  receipt. The mechanism decides the slicing, not the sequencing, and the
-  paper is to be corrected to say so.
-- **The report page reads `report.json` as data.** `oneground.report` is in
-  `MEASURING` as well, so the report page and its evidence drawer may not
-  import `oneground/report/claims.py`. If the drawer needs something the
-  JSON does not carry, that is a finding to report rather than an import to
-  add.
-- **`TRANSPORT_ALLOWLIST` is not a precedent to widen.** Both its entries
-  are `vector-data`, and its own comment says the exemption covers naming a
-  vector column, "never arithmetic or a measuring import".
+Nothing. *(This section states a current state, so it goes stale silently —
+see above. It last named task 041 as blocked on an unmerged `task-039`; both
+merged, and 041 shipped. Emptied rather than deleted, because the next blocked
+task needs somewhere to say so.)*
