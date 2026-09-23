@@ -778,3 +778,97 @@ served module. The choice was a second implementation of *what commit is this*
 or one more leaf module. It moved, and both old homes re-export it. That is
 the second time in one slice that a guard's refusal pointed at a dependency
 rather than a name, and the answer was the same both times: see §5.
+
+---
+
+## 7. Exemptions
+
+Every check worth having eventually needs one. A rule with no exceptions is
+usually a rule that has not met the world yet, and the exceptions are not the
+problem — an exemption nobody can see is. Three rules, in the order they bite.
+
+### 7.1 An exemption carries a reason, or it has nowhere to go
+
+**The mechanism.** Declare exemptions as a **mapping from the thing exempted
+to the reason it is exempt**, never as a list of names. Then an entry that
+cannot be justified in a sentence has no shape to be written in, and the cost
+of adding one is paid at the moment somebody wants it rather than at review.
+
+A pinning test — one that asserts the exact contents — is worth having
+alongside, but be clear about which is doing the work. **The reason is the
+mechanism; the pinning test is only the alarm.** A list of bare names with a
+pinning test can still grow: somebody edits both in one commit and nobody
+reading the diff can tell whether the new entry was justified, because there
+was never anywhere to say.
+
+Two instances, and the second is the older one.
+`oneground/replay.py:MAY_DIFFER` maps each field two runs of one command may
+differ in to why it may — `oneground.dirty` because an editor saving a
+docstring flips it while `oneground.commit` beside it does not move. And
+`guard.TRANSPORT_ALLOWLIST` has carried a reason per entry since 041, per
+file and per rule, which is why §5 could weigh its two cases against each
+other at all: the reasons were there to read.
+
+### 7.2 An exemption that is not reported has only moved the silence
+
+**A test that names its exemptions and then does not report them has only
+moved the silence somewhere quieter.** Declaring what you set aside, and then
+discarding it at the point of comparison, buys the appearance of rigour and
+none of it: the reader of the result still cannot see what was skipped on
+*this* run, which is the thing they would have wanted to know.
+
+So the implementation is that the comparison **returns what it set aside**.
+`replay.compare()` answers with an `exempt` list beside `differing` — which
+file, which field — so a person reading a green replay can see that three
+fields were exempted and which three, rather than inferring from a
+declaration somewhere else that they probably were.
+
+This generalises past tests. A guard that permits something, a report that
+drops a row, a verdict that sets a case aside: if the output does not say so,
+the exemption is invisible at exactly the moment it matters, and the
+declaration has become documentation rather than evidence.
+
+### 7.3 An exemption applied to a container is a hole the size of the container
+
+**The instance, and it is why this has its own rule.** Two runs of one command
+differ in `run_at` and `elapsed_seconds`, and `MANIFEST.sha256` covers the
+files holding them — so the manifest differs too, and the obvious exemption
+is *skip the manifest*.
+
+That would have been an exemption for two timestamps that stopped checking
+**every file in the workdir**. The manifest is the thing that says what the
+artifacts are; setting it aside sets aside the whole comparison, and the test
+would have gone on passing while reporting nothing.
+
+So the manifest is compared line by line, and only the lines for files whose
+bytes may legitimately differ are set aside. Every other line still has to
+match exactly.
+
+> The rule: **exempt the entries, not the container.** When the thing you want
+> to skip is an aggregate — a manifest, a digest, a summary count, a whole
+> file — the exemption has to reach inside it and name the parts, or it
+> silently covers everything the aggregate covers.
+>
+> **And the mutant is what proves the difference**, because the two versions
+> are indistinguishable from a green run. A test corrupts one manifest entry
+> for a non-exempt file and asserts it is caught. Without it, *skip the
+> manifest* and *skip two lines of the manifest* look identical from the
+> outside, which is warning 3: a passing check must be able to fail, and here
+> the two designs differ only in whether it can.
+
+### What to do when an exemption is demanded
+
+This is the sentence a future author should meet, because the pressure is
+real and arrives at a bad moment — a replay differs, the difference looks
+legitimate, and adding a name to a list is thirty seconds' work.
+
+> **The question is not whether the field differs. It is whether a receipt
+> that cannot reproduce it is recording the right thing.**
+>
+> A receipt that cannot be reproduced is telling you something: that it
+> records a fact it should not, or fails to record one it should. **That is a
+> finding about the receipt, not a reason to widen the list.** Write it up,
+> and leave the list where it is until it has been.
+
+The list is small because it has been defended, not because nothing has ever
+wanted in.
