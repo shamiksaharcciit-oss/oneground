@@ -88,8 +88,20 @@ repeating it:
   does `relpath`-or-`basename` on something bound for a receipt is a
   recognisable shape, and finding copy 6 before it is written is worth more
   than converting copies 1–3.
-- is there anything that makes the canonical function *arrive* at the author,
-  as opposed to waiting to be found?
+- **is the canonical function where someone would look _before_ they write,
+  not only where they find it after?** These are different problems and the
+  five copies suggest the first is what failed. Every one of those authors
+  was solving a problem, not searching for a helper — you do not look for a
+  function whose existence you have no reason to suspect. A function that can
+  be *found* answers "where is the thing I know I want"; a function that
+  *arrives* answers "you are about to need this", and nothing in this project
+  does the second. The error message is the closest thing, and it arrives
+  after the mistake rather than before the writing.
+- so: is there anything that makes the canonical function reach the author at
+  the moment they are building a receipt field — a template, a type, a single
+  constructor for receipt dicts that takes paths and sanitises them, an
+  example in the place people copy from? Name what that would be even if it
+  is not built here.
 
 **A convincing answer here is worth more than the three conversions**, because
 the conversions fix five known copies and this fixes the sixth.
