@@ -550,7 +550,8 @@ class LabServer:
         fields, because a guard that says only *they differ* hands back the
         obstacle rather than anything to do with it.
         """
-        out = {"error": str(e), "refusal": e.refusal}
+        out = {"error": str(e), "refusal": e.refusal,
+               "field": getattr(e, "field", None)}
         if e.lost:
             out["lost"] = [{"field": name, "written": a, "read_back": b}
                            for name, a, b in e.lost]
@@ -573,7 +574,10 @@ class LabServer:
             "choices": list(p.choices) if p.choices else None,
             "minimum": p.minimum,
             "maximum": p.maximum,
-            "required": p.default is fields.NO_DEFAULT,
+            # From `REQUIRED`, never from `default`: see that table's note.
+            "required": p.name in fields.REQUIRED,
+            "required_when": list(fields.REQUIRED[p.name])
+                             if fields.REQUIRED.get(p.name) else None,
             "belongs_to": ([p.belongs_to[0], p.belongs_to[1]]
                            if p.belongs_to else None),
         } for p in fields.FIELDS],

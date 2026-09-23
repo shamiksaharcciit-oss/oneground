@@ -517,3 +517,43 @@ def test_a_served_module_that_writes_stops_the_session_starting():
             assert "compose.py" in str(caught.value)
     finally:
         guard.check_write_path = real
+
+def test_required_is_its_own_declaration_and_not_the_family_default():
+    """`Param.default is NO_DEFAULT` means *the family has no default for
+    this key*. It does not mean *required*, and reading it that way labelled
+    every optional field required -- `ids_path` was marked required directly
+    above an explanation beginning "Optional."
+
+    docs/PRACTICE.md section 4: a key whose meaning differs by file. The
+    field was present, well-formed and plausible, which is why it took a
+    browser to see.
+    """
+    optional = [p for p in fields.FIELDS
+                if p.name not in fields.REQUIRED]
+    assert optional, "every field cannot be required"
+    # the field whose own note says it is optional is not required
+    assert "corpus.sample.vectors.ids_path" not in fields.REQUIRED
+    assert fields.BY_NAME["corpus.sample.vectors.ids_path"].note         .startswith("Optional")
+    # and the ones intake actually refuses when absent are
+    for name in ("run.seed", "corpus.sample.queries.path",
+                 "corpus.declared.size_now", "corpus.declared.dimension"):
+        assert name in fields.REQUIRED, name
+
+
+def test_every_required_condition_is_written_in_one_vocabulary():
+    """`REQUIRED` and `belongs_to` are read by one evaluator in the form, so
+    a condition in one must be a condition the other could hold."""
+    for name, when in fields.REQUIRED.items():
+        assert name in fields.BY_NAME, name
+        owner, wanted = when
+        assert isinstance(owner, str) and owner
+        assert wanted in fields.SENTINELS or isinstance(wanted, tuple), name
+
+
+def test_the_required_field_of_a_block_is_offered_from_empty():
+    """A form that hides the one field a user must fill, while showing the
+    optional ones beside it, is internally consistent and wrong. Found in a
+    browser: `queries.path` was conditional on the block being non-empty."""
+    for name in ("corpus.sample.vectors.path", "corpus.sample.text.path",
+                 "corpus.sample.queries.path"):
+        assert fields.BY_NAME[name].belongs_to is None, name

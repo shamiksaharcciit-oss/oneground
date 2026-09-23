@@ -111,6 +111,11 @@ FIELDS = (
     _p("run.workdir", str,
        "Where the receipts are written. Defaults to ./runs/<name>."),
 
+    _p("corpus.sample.target_sample_size", int,
+       "How many vectors to draw from the file, if you want fewer than it "
+       "holds. Omit to use all of them.",
+       minimum=1),
+
     _p("corpus.sample.vectors.path", str,
        "An (n, dim) float32 array of your own vectors -- ten to twenty "
        "thousand, not your whole corpus. The exact answer key is computed by "
@@ -132,20 +137,23 @@ FIELDS = (
        "measurement means, so there is no default and no guess.",
        belongs_to=("corpus.sample.text.path", PRESENT)),
 
+    # No `belongs_to`. It was conditional on `corpus.sample` being present,
+    # which hid the one REQUIRED field in the block while the two optional
+    # ones beside it stayed visible -- a browser pass found it, because the
+    # form was internally consistent and simply wrong about which fields a
+    # person starting from empty needs to see. `queries.path` is part of the
+    # sample block exactly as `vectors.path` is; that it is required is the
+    # separate question `REQUIRED` answers.
     _p("corpus.sample.queries.path", str,
        "Real queries. The ambiguity rate and the ground truth are measured "
-       "against these, and there is no useful substitute for them.",
-       belongs_to=("corpus.sample", PRESENT)),
+       "against these, and there is no useful substitute for them."),
+    # The knob, once there is something for it to be a floor on.
     _p("corpus.sample.queries.count_min", int,
        "Below this many queries the ambiguity rate is reported "
        "couldn't-check rather than computed. A rate over twelve queries is a "
        "number you can compute and should not report.",
-       default=50, minimum=1),
-
-    _p("corpus.sample.target_sample_size", int,
-       "How many vectors to draw from the file, if you want fewer than it "
-       "holds. Omit to use all of them.",
-       minimum=1),
+       default=50, minimum=1,
+       belongs_to=("corpus.sample.queries.path", PRESENT)),
 
     _p("corpus.declared.size_now", int,
        "Your real corpus size today. The capacity arithmetic is arithmetic "
@@ -173,9 +181,15 @@ FIELDS = (
        "does not run extractors, so what produced it cannot be inferred -- "
        "name the tool, or `unknown` with a reason below.",
        belongs_to=("corpus.documents", PRESENT)),
+    # Shown only once a tool is named. *Required* when the tool is anything
+    # but `unknown` is the negation this table cannot carry -- that one stays
+    # in `OUTSIDE_THE_TABLE` -- but *belonging* is a presence question and is
+    # declarable, so the form no longer offers an extractor version on a file
+    # that declares no extraction at all.
     _p("extraction.version", str,
        "The extractor's version. An extractor's output changes between "
-       "releases, so a result is conditional on which one ran."),
+       "releases, so a result is conditional on which one ran.",
+       belongs_to=("extraction.tool", PRESENT)),
     _p("extraction.reason", str,
        "Why the tool is unknown. Unknown with no reason is "
        "indistinguishable from nobody having asked.",
@@ -184,6 +198,36 @@ FIELDS = (
 
 #: name -> Param.
 BY_NAME = {p.name: p for p in FIELDS}
+
+#: Which fields `intake` refuses when they are absent, and under what
+#: condition. A separate declaration, and the reason is a defect this table
+#: shipped with for one afternoon.
+#:
+#: `Param.default is NO_DEFAULT` means *the family has no default for this
+#: key, so a configuration must name it*. The form read that as **required**,
+#: which is the same words and a different fact: most intake fields have no
+#: default and are entirely optional. Every field declared here without an
+#: explicit default was marked `required` in the form, so `ids_path` — whose
+#: own explanation begins "Optional." — was labelled required directly above
+#: the sentence saying it is not.
+#:
+#: That is `docs/PRACTICE.md` §4 exactly: a key whose meaning differs by file.
+#: `default` means one thing in a family table and would have to mean another
+#: here, so requiredness gets its own declaration rather than borrowing one
+#: that nearly fits. The tell was the one §4 names: **the field was present,
+#: well-formed and plausible**, and it took a browser to see it, because it
+#: reads as a wrong value rather than as an error.
+#:
+#: The condition uses the same vocabulary as `belongs_to`: a value set, or
+#: `PRESENT`/`ABSENT` for the presence question. `None` means unconditionally.
+REQUIRED = {
+    "run.seed": ("corpus.sample", PRESENT),
+    "corpus.sample.queries.path": ("corpus.sample", PRESENT),
+    "corpus.declared.size_now": ("corpus.declared", PRESENT),
+    "corpus.declared.dimension": ("corpus.declared", PRESENT),
+    "extraction.tool": ("corpus.documents", PRESENT),
+    "extraction.reason": ("extraction.tool", ("unknown",)),
+}
 
 #: The eleven refusals this table cannot express, each named with the reason
 #: and the line that raises it. Named rather than missing: an implementer who

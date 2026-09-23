@@ -74,8 +74,19 @@
   // is the whole of the difference in code: one asks whether anything is
   // there, the other asks what it is.
   function shown(field) {
-    if (!field.belongs_to) return true;
-    const [owner, wanted] = field.belongs_to;
+    return conditionHolds(field.belongs_to);
+  }
+
+  // One helper, two callers. `belongs_to` decides whether a field is offered
+  // at all; `REQUIRED` decides whether it must be filled. They are written
+  // in the same vocabulary -- a value set, or PRESENT/ABSENT for the
+  // presence question -- so one function answers both, and the two cannot
+  // drift into reading the same declaration two ways. `shown()` called its
+  // own copy of this for about ten minutes, which is warning 2 arriving
+  // inside the file that cites it.
+  function conditionHolds(when) {
+    if (!when) return true;
+    const [owner, wanted] = when;
     const held = ownerValue(owner);
     if (wanted === PRESENT) return held !== '' && held !== undefined;
     if (wanted === ABSENT) return held === '' || held === undefined;
@@ -147,7 +158,14 @@
     const lab = el('label', null, field.name.split('.').pop());
     lab.setAttribute('for', 'f-' + field.name);
     head.appendChild(lab);
-    if (field.required) head.appendChild(el('span', 'required', 'required'));
+    // Required is conditional: `run.seed` is required of a Tier-1 file and
+    // meaningless in a Tier-2 one. The declaration carries the condition, so
+    // the badge appears when it actually applies rather than always, which
+    // is what it did until a browser showed `ids_path required` sitting
+    // directly above an explanation beginning "Optional."
+    if (field.required && conditionHolds(field.required_when)) {
+      head.appendChild(el('span', 'required', 'required'));
+    }
     row.appendChild(head);
     row.appendChild(control(field));
     // The explanation, from the declaration. This is the same string the
@@ -175,10 +193,31 @@
 
   // --- what this form cannot refuse, said out loud ------------------------
   // Eleven of intake's twenty-five refusals are outside the field table, and
-  // the page says so rather than leaving a user to discover at save that the
-  // form was never going to catch them. An incomplete table is a timing
-  // defect, not a correctness one -- the guard refuses all eleven at save --
-  // and this paragraph is what makes the timing honest instead of a surprise.
+  // the page names all eleven with the reason each is out.
+  //
+  // IF YOU ARE HERE TO ADD CLIENT-SIDE VALIDATION, READ THIS FIRST. You will
+  // be about to improve the form and you will be removing the only thing
+  // that makes it honest.
+  //
+  // This disclosure is what stands between the form and the inference *the
+  // form did not stop me, so this is valid*. Without it a user types, sees
+  // nothing complain, and reasonably concludes the document is good -- and
+  // for eleven refusals it may not be. Naming them converts silence from a
+  // claim into a stated gap, which is the difference between a form that is
+  // incomplete and one that is misleading.
+  //
+  // Adding checks here does not shrink the list. It creates a second
+  // implementation of rules that live in `oneground/intake/__init__.py`, and
+  // the two disagree the first time either is fixed -- which is the defect
+  // this whole design exists to prevent, arriving in the one place it looks
+  // like a courtesy. The list shrinks by moving a refusal INTO the
+  // declaration in `oneground/intake/fields.py`, where the form and the
+  // command line read the same one. If it cannot be declared, it stays here
+  // and it stays named.
+  //
+  // An incomplete table is a timing defect, not a correctness one -- the
+  // write guard refuses all eleven at save, in the CLI's words -- and this
+  // paragraph is what makes the timing honest rather than a surprise.
   function outsideTheTable() {
     const box = el('details', 'outside');
     box.appendChild(el('summary', null,

@@ -77,10 +77,14 @@ class WriteRefused(Exception):
     the form rather than the user.
     """
 
-    def __init__(self, message, refusal=None, lost=None):
+    def __init__(self, message, refusal=None, lost=None, field=None):
         super().__init__(message)
         self.refusal = refusal
         self.lost = lost
+        #: Which declared field the refusal is about, where one can be
+        #: named. Both doors set it, because the same refusal arriving by
+        #: upload and by save should point at the same box.
+        self.field = field
 
 
 # --------------------------------------------------------------- the fold
@@ -266,6 +270,18 @@ def _yaml_refusal(error):
     return f"line {mark.line + 1}, column {mark.column + 1}: {problem}"
 
 
+def _without_path_prefix(message, path):
+    """`intake` names the file it was reading before every refusal.
+
+    Useful at a terminal, noise in a form, and an absolute path in a form is
+    a slice-1 finding in its own right. The prefix is removed by the path
+    that produced it rather than by a general rule, so a message that happens
+    to contain a colon keeps it.
+    """
+    prefix = path + ": "
+    return message[len(prefix):] if message.startswith(prefix) else message
+
+
 def _field_named_in(refusal):
     """Which declared field a refusal is about, or None.
 
@@ -321,9 +337,16 @@ def write(doc, path):
         try:
             loaded = intake.load(tmp)
         except intake.RequirementsError as e:
+            # `intake` prefixes every message with the file it was reading,
+            # which here is a temp file nobody asked about. Printing the
+            # target instead just swaps one absolute path for another --
+            # slice 1's own finding, arriving again -- so the prefix comes
+            # off entirely. The form knows which file it is writing; the
+            # sentence is about a field.
             raise WriteRefused(
                 "the document this form built is one the tool refuses",
-                refusal=str(e).replace(tmp, path)) from None
+                refusal=_without_path_prefix(str(e), tmp),
+                field=_field_named_in(str(e))) from None
         if loaded.data != doc:
             raise WriteRefused(
                 "the file did not read back as the document that was built",
