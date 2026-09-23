@@ -278,6 +278,46 @@ which runs out of memory recomputing the 256-shard reference over 150,000
 vectors. That is recorded as couldn't-check with its reason, and closes on a
 CPU-pod session. It is not rounded up.
 
+## Why the published values are frozen
+
+The obvious reason is reproducibility: a frozen value lets anyone check that
+their installation computes what this project says it computes. That is true
+and it is not the strongest reason.
+
+**The strongest reason is that the frozen values are the only instrument here
+that has ever caught a certain class of error — and they have caught it
+twice, neither time by anyone reading code.**
+
+Tasks 044 and 044b each needed a rule for deciding when a measurement has
+stopped meaning anything: when a count at a fixed threshold has become a
+near-zero, or a rate a near-one, that says more about the threshold than about
+the corpus. Three rules were written. Two were wrong, and each was wrong in
+the same direction — it declared a working measurement broken:
+
+| rule | what it claimed | what refuted it |
+|---|---|---|
+| threshold above the distribution's 95th percentile | `arxiv-150k` and `stackexchange-150k` are non-discriminating, under the anchor model | their own published crispness values |
+| fewer than 30 vectors on the informative side | `arxiv-smoke`'s ambiguity of 0.935 cannot be read | its own published value, over 200 queries at 3.7σ from 1.0 |
+| fewer than 3 standard errors from the degenerate value | *(all known cases correct)* | — |
+
+Neither wrong rule was caught by review, by writing its tests, or by thinking
+harder about the definition. Each was caught by running it against numbers
+this project had already published and watching it contradict them. A rule
+that calls a working measurement broken is a worse defect than the one it was
+written for, and **a published value is the only thing in this repository that
+can say so.**
+
+That is what a frozen value buys beyond reproducibility: it is a fixed point
+that new code can be wrong about. Code can be reviewed against intentions and
+tests against expectations, but a number measured on a real corpus and
+committed before the code existed can only be agreed with or contradicted.
+The second is the useful outcome and it is not available from anything else
+here.
+
+It is also why **a fixture is never a leaderboard**: its value is that it is
+an unmoving thing to be checked against, and a number under pressure to rank
+well is a number under pressure to move.
+
 ## Getting the artifacts
 
 The small artifacts are in the repository. The large ones — `vectors.npy`,
