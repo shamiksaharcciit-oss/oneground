@@ -93,19 +93,57 @@ why its guard was settled before the brief existed.
 
    | | |
    |---|---|
-   | plain type, range, enum, required | **~11** — derive directly |
-   | value-conditional | **4** — fit `belongs_to` exactly |
+   | plain type, range, enum, required | **11** — derive directly |
+   | conditional on another field's **value** | **1** — fits
+     `belongs_to` exactly |
+   | conditional on another field's **presence** | **3** — fit with the
+     two sentinels below |
+   | conditional on a **negated** value set | **1** — **cannot** |
    | relational: xor, one-of, implies, uniqueness | **6** — **cannot** |
    | not about a declared field at all | **4** — a missing file, a
      non-mapping, a wrong schema version, an *unknown* stray key |
 
-   `belongs_to` is one key and one value set. Exclusive-or, one-of and
-   implies are none of those, and they are the mistakes a user makes
-   while filling a form: `vectors.path` xor `text.path`, `model` xor
-   `models`, `text` implying one of them. **An implementer who does not
-   know they are excluded will believe the table is finishable, stop at
-   eleven, and leave the form re-expressing fourteen refusals it was
-   ruled must execute.**
+   **The totals above were right from the first draft; the
+   characterisation of the four was not — this is a correction of the
+   second, and the first needs no re-deriving.** The 25 is the parsed
+   figure, confirmed by AST against a grep count of 27, and the four
+   value-conditional refusals are exactly `_validate_text_corpus`
+   (`oneground/intake/__init__.py` lines 159, 164, 166 and 170). What the
+   draft got wrong is that all four "fit `belongs_to` exactly". One does:
+   `extraction.reason` is required when `extraction.tool == "unknown"`,
+   which is one key and one value set. The other three are not that
+   shape, and the split above is the measurement.
+
+   **`belongs_to` keeps its family meaning exactly and `Param` gains
+   nothing.** It is `(owner, wanted)` evaluated as `chosen in
+   tuple(wanted)` — a positive membership test over one key's value. The
+   intake registry's resolver accepts two sentinels in the owner
+   position, **present** and **absent**, alongside a value set.
+
+   **That is not a widening, and the distinction is the point.**
+   *Presence is a different question from membership, not a broader
+   version of it.* Whether a key was written at all and which value it
+   holds are two questions, and a declaration that says which one it is
+   asking is more honest than one that blurs them. The next reader will
+   see sentinels as the thin end of a predicate; they are not, and the
+   test is that each sentinel answers a question with no value in it.
+
+   **The alternative, rejected and recorded so it is not re-proposed.** A
+   real predicate in the declaration buys the one remaining refusal
+   (`extraction.version` required when `tool != "unknown"`, a negated set
+   over an open string domain) and costs the property that the table is
+   **data rather than code** — which is what the shared-string test rests
+   on, because a predicate cannot be rendered into a comment.
+
+   **So eleven refusals are outside the table, not six**, and every one
+   of them is named: the six relational, the four not about a declared
+   field, and the one negation. `belongs_to` is one key and one value
+   set; exclusive-or, one-of and implies are none of those, and they are
+   the mistakes a user makes while filling a form: `vectors.path` xor
+   `text.path`, `model` xor `models`, `text` implying one of them. **An
+   implementer who does not know they are excluded will believe the table
+   is finishable, stop at eleven, and leave the form re-expressing
+   eleven refusals it was ruled must execute.**
 
    **An incomplete table is a timing defect, not a correctness one.** The
    write guard already refuses every relational violation at write time:
@@ -194,8 +232,9 @@ why its guard was settled before the brief existed.
 - Validation is `intake`'s, invoked; a refusal is the CLI's words.
 - The file carries its explanations; the example files are generated or
   gone; explanation and refusal come from one declaration **for every
-  field in the table's scope**, with the relational refusals named as
-  outside it rather than silently missing.
+  field in the table's scope**, with the **eleven** refusals outside it
+  named rather than silently missing — the six relational, the four not
+  about a declared field, and the one negation.
 - Jobs record their invocation, and replay matches under §2's rule.
 - The supervisor survives a closed tab and a server restart; its crash
   does not kill a job; cancellation leaves a receipt and partial outputs
