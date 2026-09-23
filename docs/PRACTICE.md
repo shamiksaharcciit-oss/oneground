@@ -383,6 +383,32 @@ Nothing was standing on a boundary here; the setup was and remained legal.
 cared about two of its members**, so a legitimate change to a third broke it
 for a non-reason.
 
+**And a third shape, which is the setup half again and easy to miss because
+nothing about it looks like a setup.** Task 046 moved `producing_version` to a
+leaf module and left a re-export behind, so every caller was unaffected. Four
+tests in `test_provenance.py` went red: they patch `_build_stamp` and
+`_run_git` on the module they import from, and the function reads those names
+from the module that **defines** it. The patch now landed on a name nothing
+looks at.
+
+They were right to go red — the assertions still held and the setup had
+stopped reaching the code under test — and the repair was the patch target,
+not the assertion. But the interesting half is what the failure would have
+looked like if the move had gone the other way, and the function had started
+reading the patched name by accident:
+
+> **A patch applied to a name nothing looks at is a test that passes for a
+> reason unrelated to its subject.** It is warning 3 wearing a setup's
+> clothes: the test runs, the assertion is true, and the thing it believes it
+> is controlling is untouched. The same shape as a wait condition that is
+> already satisfied before the code under test has run — in both cases the
+> check's answer is **independent of its subject**, which is the property that
+> makes a green result worthless rather than merely weak.
+>
+> The tell: **after a move or a rename, run the tests that patch the thing
+> that moved before you trust any of them.** A re-export keeps callers
+> working and silently breaks patchers, and those are the same import line.
+
 > The rule: **assert the facts the test is about, not the collection they
 > happen to sit in**, and say in the docstring which facts and why. A set
 > equality over a result is a tally, and a tally is a current state — §1 of
@@ -604,6 +630,39 @@ was not being obstructive about a name; it was objecting to a dependency, and
 the dependency was the design problem. `Param` moved to a leaf module, the
 table went to `intake` beside the refusals, and the served package stopped
 loading a simulator.
+
+**And a second relocation, in the same slice, which is what turns one
+decision into a rule.** The server had to be able to say which build it was
+serving. `producing_version` already existed in `oneground.receipts`, which
+imports torch; `checkout_root` already existed in `oneground.environment`,
+which imports faiss and sklearn. Both are refused to every served module.
+
+Two exemptions were available and either would have taken one line. The
+alternative to taking them was a second implementation of *what commit is
+this*, which is the outcome §2 warning 2 exists to prevent — so on the face of
+it the exemption was the lesser evil.
+
+It was not, and the pair with `Param` is why. Both times the guard was not
+objecting to a **name** the module happened to use; it was objecting to a
+**dependency the module would acquire**, and in both cases that dependency was
+real: the served package would have loaded a simulator, or torch, to reach a
+dataclass and a git call. The third option was the right one both times, and
+it is the one an exemption hides: **move the thing being reached for**.
+`oneground/param.py` and `oneground/provenance.py` are leaves, both old homes
+re-export, every importer is unaffected, and there is still exactly one of
+each.
+
+> So the rule, now that it has happened twice: **a guard refusing a served
+> module an import is usually a statement about where the thing belongs, not
+> a statement about the guard.** The question it is really asking is *why does
+> this small thing live behind that large thing?* — and when the answer is
+> "no reason, it was declared next to its first caller", the repair is a leaf
+> module and not a line in an allowlist.
+>
+> Two data points are not a law, and the exemption above is the case where
+> this does not apply: a name rule firing on a name. But note which way the
+> two cases split. **The exemptions that were right were about names. The
+> exemptions that were wrong were about imports.**
 
 > The test, when you cannot tell which case you are in: **would the exemption
 > still be right if the guard did not exist?** Intake would still name those
