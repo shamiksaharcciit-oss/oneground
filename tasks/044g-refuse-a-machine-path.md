@@ -4,7 +4,31 @@
 `task-044g` from `main`. A behaviour change on the write path, which is why it
 is its own task and not folded into 044f.
 
-## Why, and the specification is 044f's own gap
+## Two of this project's rules are in direct conflict
+
+> **A receipt does not name the filesystem it was produced on** (task 043).
+>
+> **A later command must be able to reopen what the run used**
+> (`proposals/propose.py`, which reads `requirements_file.path` back out of
+> `simulate_info.json`).
+
+Both are right. `requirements_file.path` has been **satisfying the second by
+violating the first since the field existed**, on every run, and nobody had
+noticed the two rules could not both hold — because the violation is silent
+and the satisfaction is invisible until something moves.
+
+It was found only because a refusal forced the question. 044f fixed the four
+writers, `propose` could no longer find the file, and 30 tests said so. A
+guard that repairs, warns, or is scoped around the awkward case would have
+left both rules standing and the conflict undiscovered.
+
+**That is this task's opening, not its problem statement.** The refusal in
+step 1 is what makes the conflict unavoidable rather than perpetual, and
+resolving it is the substance of the work. The three-checks argument below is
+why the refusal belongs at the serialisation boundary; the conflict is what
+the refusal is for.
+
+## Why the refusal goes where it goes — 044f's own gap is the specification
 
 044f built a static guard over receipt write sites. It found four live
 sites writing an absolute path and it **cannot reach the instance that
@@ -83,18 +107,33 @@ the checkout. 30 tests in `test_propose.py`, measured.
 > field has been satisfying the second by violating the first, on every run,
 > and nobody had noticed the two rules were in conflict.
 
-This is the first field where the conflict is explicit, and the refusal in
-step 1 makes it unavoidable: once `write_json_stable` refuses, this field
-cannot stay as it is. So it is not a detail of the blast radius, it is the
-design question the task has to answer. Options, to be judged rather than
-assumed:
+Once `write_json_stable` refuses, this field cannot stay as it is. Options, to
+be judged rather than assumed:
 
-- the public path plus the digest already recorded, with `propose` resolving
-  against the repo root and falling back to `--requirements` (whose error
-  message already exists);
+- **the digest plus the repo-relative path, resolved against the workdir.**
+  The receipt records what it already records — `sha256` — and a path that
+  names no filesystem; `propose` resolves it relative to the workdir rather
+  than reopening an absolute path. **Satisfies both rules, and makes a run
+  portable**: the workdir and its receipts can move to another machine and
+  still resolve. Its cost is the case below;
 - a public `path` for the record and a separate, non-published field for
   resolution, which splits one fact into two and needs a reason;
 - the field is only ever resolvable inside a checkout, declared as such.
+
+**The developer's inclination is the first, argued rather than imposed, and it
+turns on one measurement.** Resolving against the workdir breaks when a
+workdir has been moved away from the checkout it was produced beside.
+
+> **Measure that case before deciding. If it is common, say so and the ruling
+> changes.**
+
+What to measure, on real workdirs rather than by reasoning: how the existing
+`runs/*` relate to the checkout, whether any workdir here sits outside it,
+what `propose` does today when the recorded absolute path is missing (the
+`--requirements` remedy already exists and its message is already written),
+and what a pod session's fetched workdir looks like — a run produced on a pod
+and extracted here is precisely a workdir that has moved, so it may be the
+common case rather than the edge one.
 
 `oneground/receipts/test_pathguard.py:KNOWN_OPEN` holds the four sites and
 asserts the set is exactly those four, so closing them here fails that test
@@ -124,6 +163,9 @@ in a payload, that is a finding about the test.
 - **`requirements_file.path` settled**, with the option chosen and the other
   two said to be refused and why; `KNOWN_OPEN` emptied and its assertion
   updated in the same commit.
+- **The moved-workdir case measured, not reasoned about**, with the count and
+  where it was taken. A ruling that rests on it being rare must say how rare,
+  and a pod-fetched workdir counted as the case it is.
 - The blast radius measured and reported before the behaviour changed.
 - The rediscovery tally reported, including `price_table.path`.
 - Both existing checks present and passing, unmodified.
