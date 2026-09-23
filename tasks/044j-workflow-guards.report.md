@@ -1,5 +1,62 @@
 # Report: 044j-workflow-guards
 
+## A tool's coverage is a claim, and nobody checks it
+
+**Leading, because it is the fourth instance of one failure and the first to
+occur inside the pass written to end that exact failure.**
+
+Four tools in this project have each been correct about what they examined and
+silent about what they did not reach:
+
+| | the tool | what it could not see |
+|---|---|---|
+| 1 | a grep | — |
+| 2 | a `var()` check | — |
+| 3 | an `atexit` test | — |
+| 4 | **an enumeration of a page's claims** | the options table's outcome badges |
+
+*The first three are named as the developer named them; the fourth is the one
+this task produced and the one described below in detail.*
+
+**The fourth.** Core found a self-contradiction on the workspace mockup and the
+instruction was explicit: read the whole page before editing, not the section
+the finding names, because that scoping failure had already produced a second
+pass three times. So the page was enumerated — every section header, every
+figure cell, every decision-log entry, every drawer — and five edits were
+applied in one pass.
+
+The enumeration had no pattern for the options table's outcome badges. So the
+decision-log entry became *couldn't check* and the table row stating the same
+verdict stayed *meets*. Sweeping afterwards for everything that had to move
+because one verdict moved then found the tally at the top of the page still
+reading *1 meets · 6 fails · 1 couldn't check*.
+
+> **Reading the whole page is not enough if the reading is done by a pattern
+> list. The pattern list is itself a claim about where claims live — and it
+> was incomplete.**
+
+### The general form
+
+> **A tool's coverage is a claim, and a claim nobody checked is what all four
+> have in common.**
+
+Each of these tools reported a result and, silently alongside it, a second
+proposition: *these are all of them*. The first is tested, argued about and
+believed on evidence. The second is never stated, so it is never doubted — and
+it is the one that fails.
+
+This is why a zero from a search is the least trustworthy result it can give,
+and it is the same shape as `docs/PRACTICE.md`'s rule that a survey which
+cannot rediscover its own motivating case is not evidence. That rule asked a
+tool to prove it could find one known thing. The general form asks the harder
+question: **what kind of thing can this tool not find at all?**
+
+The cheap check is to state the coverage claim out loud beside the result —
+*"patterns: section headers, figure cells, log entries, drawers"* — because a
+list written down invites the question *what else is there?* and a list left
+implicit does not.
+
+
 Four guards, built against a tree that was already correct so each could be
 seen to fail. Core proposed two of them, added the third, and the fourth is
 their second option made code.
