@@ -172,7 +172,15 @@ def _module_ast(mod):
 # collected, because the tier-2 log still uses `add` for sentences that are
 # not about rows.
 LOG_BUILDERS = ("decision_claims", "_declared_log", "compare_engine_claims",
-                "_verdict_claim", "_meets_claim", "qps_max_claims")
+                "_verdict_claim", "_meets_claim", "qps_max_claims",
+                # Task 045, finding 4. The no-comparison claim moved out of
+                # `compare_engine_claims` so that rows citing the same facts
+                # could be gathered before any of them was emitted. The walk
+                # noticed within one run: `no_engine_comparison` went from
+                # derived to stale, and the staleness half of this test --
+                # the half that has nothing to catch on most days -- is what
+                # said so.
+                "no_comparison_claim")
 
 # Helpers whose FIRST POSITIONAL argument is the kind. `_verdict_claim` takes
 # it as a parameter, so the literal lives at the call site rather than in the

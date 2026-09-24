@@ -606,7 +606,68 @@ def check(claim, rows=None, tolerance=1e-9, workdir=None):
     if workdir is not None:
         bad.extend(_citation_problems(claim, workdir, tolerance))
 
+    # 9. A COLLAPSED CLAIM STATES ONE FACT, ONCE. Task 045, finding 4.
+    #
+    #    One sentence standing in for several rows prints the facts those rows
+    #    share EXACTLY ONCE. That is the whole economy of the collapse, and it
+    #    is also the way it can lie: if the rows do not agree, the single
+    #    printed fact is true of some of them and lent to the rest -- which is
+    #    the defect this module is named for, at a new grain.
+    #
+    #    On the arXiv report fifteen `no_engine_comparison` claims read as one
+    #    sentence fifteen times. Fourteen cite two engines that produced no
+    #    value; the fifteenth cites pgvector at 316.87 with `fails`. Grouping
+    #    on the sentence shape puts all fifteen together and says "fewer than
+    #    two engines produced a value -- qdrant (couldn't-check), pgvector
+    #    (couldn't-check)" of a row where pgvector produced 316.87. This rule
+    #    refuses that grouping; step 5b, on each part, is what ties every
+    #    member to its own rows.
+    if claim.extra.get("collapsed"):
+        labels = tuple(p.text for p in claim.parts)
+        if len(labels) < 2:
+            bad.append(
+                "collapsed claim has %d part(s): a sentence standing in for "
+                "several rows names each row it stands for" % len(labels))
+        if tuple(claim.scope) != labels:
+            bad.append("collapsed claim is over %s but its parts are %s"
+                       % (list(claim.scope), list(labels)))
+        if tuple(claim.holds_for) != labels:
+            bad.append(
+                "collapsed claim holds for %s but stands in for %s -- a row "
+                "the sentence does not hold of is a row it may not state"
+                % (list(claim.holds_for), list(labels)))
+        shapes = [tuple((c.member, c.value, c.outcome) for c in p.cites)
+                  for p in claim.parts]
+        odd = [labels[i] for i, s in enumerate(shapes) if s != shapes[0]]
+        if odd:
+            bad.append(
+                "collapsed claim states one set of engine facts for %d rows, "
+                "but %s do not share it: %s against %s"
+                % (len(labels), odd,
+                   [s for s in shapes if s != shapes[0]][0], shapes[0]))
+
     return bad
+
+
+def _cites_of(claim):
+    """Every cite in a claim and its parts, once each.
+
+    Step 8 reads the artifact behind a cite. A composite's parts usually carry
+    the same cites as their parent, so checking them again through the
+    recursion at step 4 would print each problem twice; a collapsed claim's
+    parts carry cites the parent does not have at all, so not checking them
+    would leave finding 1 short of the rows it exists for. Gathering them here
+    and leaving the recursion to pass `workdir=None` gets both.
+    """
+    out = []
+    stack = [claim]
+    while stack:
+        c = stack.pop(0)
+        for cite in c.cites:
+            if cite not in out:
+                out.append(cite)
+        stack.extend(c.parts)
+    return out
 
 
 def _citation_problems(claim, workdir, tolerance=1e-9):
@@ -614,7 +675,7 @@ def _citation_problems(claim, workdir, tolerance=1e-9):
     from .. import cites as C
 
     out, cache = [], {}
-    for c in claim.cites:
+    for c in _cites_of(claim):
         if c.derived or c.value is None or not c.source:
             continue
         kind, got, note = C.resolve(workdir, c.source, member=c.member,
@@ -768,11 +829,21 @@ def rows_from_options(options):
 # outcome, an engine, a verdict or a measured value into a string.
 
 def part(predicate, quantifier, text, scope=(), holds_for=(), cites=(),
-         constraint=None):
-    """One assertion inside a sentence, with the fragment that states it."""
+         constraint=None, subject=None, asserts_outcome=None,
+         holds_rule="any"):
+    """One assertion inside a sentence, with the fragment that states it.
+
+    `subject`, `asserts_outcome` and `holds_rule` exist for the same reason
+    they exist on a `Claim`: a part that names its own option and the outcome
+    it asserts is checked against that option's rows by 5b, instead of
+    inheriting its parent's subject and being believed. Task 045, finding 4 --
+    a collapsed claim's members are its parts, so the parts are where the
+    per-row derivation has to happen.
+    """
     return Claim(kind="part", predicate=predicate, quantifier=quantifier,
-                 constraint=constraint, scope=tuple(scope),
-                 holds_for=tuple(holds_for), cites=tuple(cites), text=text)
+                 constraint=constraint, subject=subject, scope=tuple(scope),
+                 holds_for=tuple(holds_for), cites=tuple(cites), text=text,
+                 asserts_outcome=asserts_outcome, holds_rule=holds_rule)
 
 
 def _members(names):
@@ -963,18 +1034,35 @@ def _r_engine_comparison(c):
     return ("%s %s %s %s" % (head, measured, verdicts, c.detail)).rstrip()
 
 
-def _r_no_engine_comparison(c):
+def _nc_engines(cites):
     # Task 045, finding 3: `outcome_label`, not the raw outcome. This printed
     # "qdrant (couldnt_check), pgvector (couldnt_check)" -- a machine token
     # in the middle of an English sentence, in 16 of the arXiv report's 37
     # claim sentences. The translation already existed, three hundred lines
     # below, and this site did not call it.
+    return ", ".join("%s (%s)" % (x.member, outcome_label(x.outcome))
+                     for x in cites)
+
+
+def _r_no_engine_comparison(c):
+    """One row, or the rows that cite the same thing. Task 045, finding 4.
+
+    Fifteen of the arXiv report's 37 claims were this sentence, differing only
+    in the configuration and the constraint: one fact occupying more of the
+    page than every verdict in the report combined. Rows citing the same
+    engine facts are one sentence with its members listed; rows citing
+    anything else stay apart, and step 9 is what enforces that.
+    """
+    if c.extra.get("collapsed"):
+        return ("%d rows were not compared across engines because fewer than "
+                "two engines produced a value -- %s in each. A comparison "
+                "here would be between a number and an absence. The rows: %s"
+                % (len(c.parts), _nc_engines(c.parts[0].cites),
+                   "; ".join(p.text for p in c.parts)))
     return ("%s: %s was not compared across engines because fewer than two "
             "engines produced a value -- %s. A comparison here would be "
             "between a number and an absence"
-            % (c.subject, c.constraint,
-               ", ".join("%s (%s)" % (x.member, outcome_label(x.outcome))
-                         for x in c.cites)))
+            % (c.subject, c.constraint, _nc_engines(c.cites)))
 
 
 def _r_engines_meeting(c):

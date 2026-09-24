@@ -765,6 +765,11 @@ def compare_engine_claims(options, env_id, verify_info=None):
     of phrase, so `check()` can refuse it.
     """
     out = []
+    # Task 045, finding 4. The no-comparison claims are gathered rather than
+    # emitted, because rows that cite the same facts are one sentence. The
+    # placeholder keeps each group where its first row appeared, so the
+    # decision log's order is the order the options were judged in.
+    pending = {}
     for opt in options:
         scoped = [v for v in opt.verdicts if v.engine is not None]
         if len({v.engine for v in scoped}) < 2:
@@ -774,23 +779,11 @@ def compare_engine_claims(options, env_id, verify_info=None):
             usable = [v for v in group
                       if v.outcome != COULDNT_CHECK and v.value is not None]
             if len(usable) < 2:
-                c = cl.Claim(
-                    kind="no_engine_comparison",
-                    predicate="was not compared across engines",
-                    # A denial: it says a comparison was NOT made. Checking it
-                    # as the assertion it contains is the 017f mistake.
-                    quantifier=cl.NEGATION,
-                    subject=opt.config, constraint=constraint,
-                    scope=tuple(v.engine for v in group),
-                    holds_for=(),
-                    cites=tuple(cl.Cite(member=v.engine, value=v.value,
-                                        outcome=v.outcome,
-                                        constraint=constraint,
-                                        source=v.source, reason=v.reason)
-                                for v in group),
-                    source="verify.json:engines[*]")
-                cl.render(c)
-                out.append(c)
+                key = _no_comparison_substance(group)
+                if key not in pending:
+                    pending[key] = []
+                    out.append(_NoComparison(key))
+                pending[key].append((opt.config, constraint, tuple(group)))
                 continue
             lower_is_better = constraint in ("latency_p95",)
             best = (min(usable, key=lambda v: float(v.value))
@@ -851,7 +844,106 @@ def compare_engine_claims(options, env_id, verify_info=None):
                     if v.engine is not None))})
             cl.render(c)
             out.append(c)
-    return out
+    return [no_comparison_claim(pending[item.key])
+            if isinstance(item, _NoComparison) else item
+            for item in out]
+
+
+class _NoComparison:
+    """A slot in the claim list, held until every row that shares it is in."""
+
+    def __init__(self, key):
+        self.key = key
+
+
+def _no_comparison_substance(group):
+    """What a no-comparison row cites, as a key two rows can be equal on.
+
+    The sentence prints the engines and their outcomes; the `reason` and the
+    `source` are the quotation behind them. Two rows may be stated as one only
+    if all four agree, which is stricter than the rule step 9 enforces -- step
+    9 forbids printing a fact that is false of a row, and this also keeps rows
+    whose *explanations* differ from being merged into a sentence that carries
+    neither. hash_sharded's reason names hash_sharded; semantic_sharded's names
+    semantic_sharded; they are two facts and stay two sentences.
+    """
+    return tuple((v.engine, v.value, v.outcome, v.source, v.reason)
+                 for v in group)
+
+
+def no_comparison_claim(members):
+    """One claim for rows that cite the same engine facts. Task 045, find. 4.
+
+    `members` is `[(config, constraint, verdicts)]`. One member is the claim
+    this function has always produced. Several are one sentence with each row
+    as a part: the part carries that row's own citations and its own subject,
+    so 5b derives its membership from that option's rows rather than taking
+    the collapse's word for it.
+    """
+    def cites_of(constraint, verdicts):
+        return tuple(cl.Cite(member=v.engine, value=v.value, outcome=v.outcome,
+                             constraint=constraint, source=v.source,
+                             reason=v.reason)
+                     for v in verdicts)
+
+    if len(members) == 1:
+        config, constraint, verdicts = members[0]
+        c = cl.Claim(
+            kind="no_engine_comparison",
+            predicate="was not compared across engines",
+            # A denial: it says a comparison was NOT made. Checking it
+            # as the assertion it contains is the 017f mistake.
+            quantifier=cl.NEGATION,
+            subject=config, constraint=constraint,
+            scope=tuple(v.engine for v in verdicts),
+            holds_for=(),
+            cites=cites_of(constraint, verdicts),
+            source="verify.json:engines[*]")
+        cl.render(c)
+        return c
+
+    parts = tuple(
+        # The part's predicate is the machine-side one, because that is what
+        # its `holds_for` is a set of: the engines that produced no value.
+        # "was not compared" is true of the ROW and is the parent's sentence.
+        cl.part("produced no value for this constraint", cl.NEGATION,
+                "%s: %s" % (config, constraint),
+                scope=tuple(v.engine for v in verdicts),
+                # Computed from the verdicts, never assumed to be every
+                # engine: a row where one engine failed and the other could
+                # not be checked is still a row with no comparison, and 5b
+                # would refuse the claim that both could not be checked.
+                holds_for=tuple(v.engine for v in verdicts
+                                if v.outcome == COULDNT_CHECK),
+                cites=cites_of(constraint, verdicts),
+                constraint=constraint, subject=config,
+                asserts_outcome=COULDNT_CHECK, holds_rule="any")
+        for config, constraint, verdicts in members)
+    labels = tuple(p.text for p in parts)
+    c = cl.Claim(
+        kind="no_engine_comparison",
+        predicate="was not compared across engines",
+        # UNIVERSAL, where the one-row form is a NEGATION, and the difference
+        # is the grain rather than the sentence. One row is a denial about
+        # engines: no comparison was made. Many rows are a universal about
+        # ROWS of that same denial, and its members are the rows, so step 3
+        # has something to check -- which a negation quantifying over nothing
+        # never did.
+        quantifier=cl.UNIVERSAL,
+        subject=None, constraint=None,
+        scope=labels, holds_for=labels,
+        # One cite per row, so the members the sentence quantifies over are
+        # the members it cites. No outcome: the row label is a reference, and
+        # a reference that also asserts something is a place to lend one. The
+        # engine facts are cited by the parts, where they can be checked
+        # against the option that produced them.
+        cites=tuple(cl.Cite(member=label, source="verify.json:engines[*]")
+                    for label in labels),
+        parts=parts,
+        source="verify.json:engines[*]",
+        extra={"collapsed": True})
+    cl.render(c)
+    return c
 
 
 def _calibration_footer(verify_info, recommended, history_path=None):
