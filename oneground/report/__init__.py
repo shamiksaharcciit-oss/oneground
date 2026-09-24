@@ -716,9 +716,13 @@ def _tuning_note(verify_info, engines):
     if declared_none:
         parts.append("; ".join(declared_none))
     if unknown:
+        # Task 045, finding 3. The outcome constant belongs in the machine
+        # field, not in the sentence: this is task 035's caption rule one
+        # layer in -- a value that exists so a machine can compare it had
+        # been printed where a sentence belongs.
         parts.append(f"how {', '.join(unknown)} was configured is not "
-                     f"recorded in this run, so it is couldnt_check rather "
-                     f"than assumed to be default")
+                     f"recorded in this run, so it could not be checked "
+                     f"rather than assumed to be default")
     return (". ".join(parts) + ".") if parts else ""
 
 

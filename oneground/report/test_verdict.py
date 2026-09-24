@@ -735,7 +735,14 @@ def test_the_indistinguishable_log_entry_states_overall_outcomes():
     assert entry, [e["kind"] for e in log]
     text = entry[0]["text"]
     assert "Overall:" in text, text
-    assert "couldnt_check" in text, text
+    # Task 045, finding 3. This asserted `"couldnt_check" in text` -- it was
+    # pinning the defect: the machine token printed inside the sentence a
+    # reader reads. The subject of the test is right and unchanged, that the
+    # runner-up's differing overall outcome is stated; only the spelling was
+    # wrong. Asserting the reader's word AND the token's absence turns the
+    # test from one that preserved the defect into one that forbids it.
+    assert "couldn't-check" in text, text
+    assert "couldnt_check" not in text, text
     assert "not indistinguishable overall" in text, text
 
 

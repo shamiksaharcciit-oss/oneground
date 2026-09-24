@@ -838,6 +838,20 @@ def classify_couldnt_checks(option, coverages):
     from ..adapters import index_families as IF
     from ..models.base import HNSW
 
+    def _decisions_for(verdict, all_decisions):
+        """The decisions that belong to this verdict's engine.
+
+        A verdict with no engine legitimately spans them all -- a constraint
+        that is not per-engine has no one engine's coverage to cite -- so it
+        keeps the whole set rather than being given an empty remedy, which
+        would turn a real obstacle into silence.
+        """
+        eng = getattr(verdict, "engine", None)
+        if not eng:
+            return list(all_decisions)
+        mine = [d for d in all_decisions if getattr(d, "engine", None) == eng]
+        return mine or list(all_decisions)
+
     family = str((option.params or {}).get("index") or HNSW)
     decisions = [IF.buildability(cov, family) for cov in (coverages or [])]
     can = [d for d in decisions if d.state == IF.VERIFIABLE]
@@ -845,14 +859,35 @@ def classify_couldnt_checks(option, coverages):
     for v in option.verdicts:
         if v.outcome != COULDNT_CHECK or v.constraint not in ENGINE_CONSTRAINTS:
             continue
-        if decisions and not can and not unknown:
+        # Task 045, finding 2. THE REMEDY IS THIS ENGINE'S, NOT EVERY ENGINE'S.
+        #
+        # These verdicts are already one per engine -- `v.engine` is set where
+        # each is constructed. The remedy was built by joining every engine's
+        # decision onto each of them, so a per-engine verdict carried a
+        # sentence spanning both: "pgvector has not been asked ...; qdrant has
+        # not been asked ...". The claim built from it then cited
+        # `verify_info.json:engine_facts.index_params` with no member, because
+        # there was no single engine whose value the sentence rested on.
+        #
+        # 041's interface rendered that as `unresolved`, correctly. The
+        # obvious repair -- rewriting the source as `engines[].engine_facts`
+        # -- would have made the entry resolve while still not saying which
+        # engine's value it rests on: a link that looks right and answers
+        # nothing, which is worse than one that says it cannot answer.
+        #
+        # So the sentence narrows to the verdict that carries it, and the
+        # structure needs no change: the claims were always two.
+        mine = _decisions_for(v, decisions)
+        can_mine = [d for d in mine if d.state == IF.VERIFIABLE]
+        unknown_mine = [d for d in mine if d.state == IF.COVERAGE_UNRESOLVED]
+        if mine and not can_mine and not unknown_mine:
             v.couldnt_check_kind = IF.NOT_VERIFIABLE_HERE
             v.remedy = "; ".join(
-                f"{d.reason}. {d.remedy}" for d in decisions)
-        elif unknown and not can:
+                f"{d.reason}. {d.remedy}" for d in mine)
+        elif unknown_mine and not can_mine:
             v.couldnt_check_kind = IF.COVERAGE_UNRESOLVED
             v.remedy = "; ".join(
-                f"{d.reason}. {d.remedy}" for d in unknown)
+                f"{d.reason}. {d.remedy}" for d in unknown_mine)
         else:
             v.couldnt_check_kind = NOT_VERIFIED
             v.remedy = ""

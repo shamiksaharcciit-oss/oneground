@@ -354,13 +354,20 @@ def _derive_holds(rule, outcome, outcomes):
     raise ClaimViolation("unknown holds_rule %r" % rule)
 
 
-def check(claim, rows=None, tolerance=1e-9):
+def check(claim, rows=None, tolerance=1e-9, workdir=None):
     """Every way a claim can fail to follow from its rows. Returns a list.
 
     `rows` is `{member: {constraint: {"value":, "outcome":, "source":}}}` --
     the same per-member facts the claim was built from. Passing it is what
     turns "the claim is internally consistent" into "the claim is true of the
     run", and the second is the one that matters.
+
+    `workdir` turns on step 7, which reads each cite's `source` out of the
+    run's receipts and compares it with the cited value. It is optional for
+    the same reason `rows` is -- a caller with no run on disk can still check
+    everything that does not need one -- and for the same reason it should be
+    passed wherever a run exists. **Task 045 finding 1: until it did, the
+    invariant never once verified that a citation was true.**
     """
     bad = []
     q = claim.quantifier
@@ -580,14 +587,74 @@ def check(claim, rows=None, tolerance=1e-9):
                     bad.append(
                         "prose prints %s beside %s, but the claim cites %r "
                         "for it" % (printed, c.member, c.value))
+
+    # 8. THE CITATION ITSELF IS TRUE. Task 045, finding 1.
+    #
+    #    Every rule above checks that the sentence follows from what it
+    #    cites. Not one of them opened the file a cite names. So a `Cite`
+    #    could carry `source="verify.json:load.completed"` and
+    #    `value=119.1` while that field held 35731, and the invariant, two
+    #    real-report tests, a published fixture and the teaser all passed --
+    #    until a UI was asked to render the two side by side.
+    #
+    #    Four shapes are legitimately not a scalar field and are CLASSIFIED,
+    #    not failed: a rule, a requirements input, a wildcard over every
+    #    option, and a container whose cited value is one of its members. A
+    #    check that failed those would be wrong three times to catch one.
+    #    A source naming a field that is not there is a violation, and a
+    #    distinct one.
+    if workdir is not None:
+        bad.extend(_citation_problems(claim, workdir, tolerance))
+
     return bad
 
 
-def check_all(claims, rows=None):
+def _citation_problems(claim, workdir, tolerance=1e-9):
+    """What the receipts say about each cite's source. Task 045, finding 1."""
+    from .. import cites as C
+
+    out, cache = [], {}
+    for c in claim.cites:
+        if c.derived or c.value is None or not c.source:
+            continue
+        kind, got, note = C.resolve(workdir, c.source, member=c.member,
+                                    cache=cache)
+        if kind in C.NOT_A_FIELD:
+            continue
+        if kind == C.UNRESOLVED:
+            out.append("cited %s names %s, which is not there: %s"
+                       % (_fmt(c.value), c.source, note))
+            continue
+        if _same(got, c.value, tolerance):
+            continue
+        # A source naming a CONTAINER whose cited value is one of its members
+        # is under-specified rather than wrong, and saying which member it is
+        # tells the author how to tighten it.
+        where = C.contains(got, c.value)
+        if where is not None:
+            out.append(
+                "cited %s names the container %s; the value is its %r. The "
+                "source should name the field it cites."
+                % (_fmt(c.value), c.source, where))
+            continue
+        out.append("cited %s for %s but %s holds %s"
+                   % (_fmt(c.value), c.member, c.source, _fmt(got)))
+    return out
+
+
+def _same(got, want, tolerance):
+    if isinstance(got, bool) or isinstance(want, bool):
+        return got == want
+    if isinstance(got, (int, float)) and isinstance(want, (int, float)):
+        return abs(float(got) - float(want)) <= tolerance
+    return got == want
+
+
+def check_all(claims, rows=None, workdir=None):
     """[(claim, [problem])] for every claim that violates the invariant."""
     out = []
     for c in claims:
-        problems = check(c, rows)
+        problems = check(c, rows, workdir=workdir)
         if problems:
             out.append((c, problems))
     return out
@@ -825,7 +892,8 @@ def _r_meets(c):
 def _r_indistinguishable(c):
     vals = "; ".join("%s %.4f" % (cite.member, float(cite.value))
                      for cite in c.cites)
-    overall = "; ".join("%s %s" % (cite.member, cite.outcome)
+    # Task 045, finding 3: the reader's word, not the machine's constant.
+    overall = "; ".join("%s %s" % (cite.member, outcome_label(cite.outcome))
                         for cite in c.cites)
     head = ("These options are indistinguishable on recall: %s. Their recall "
             "differs by less than the calibration tolerance (%s), which is "
@@ -896,11 +964,17 @@ def _r_engine_comparison(c):
 
 
 def _r_no_engine_comparison(c):
+    # Task 045, finding 3: `outcome_label`, not the raw outcome. This printed
+    # "qdrant (couldnt_check), pgvector (couldnt_check)" -- a machine token
+    # in the middle of an English sentence, in 16 of the arXiv report's 37
+    # claim sentences. The translation already existed, three hundred lines
+    # below, and this site did not call it.
     return ("%s: %s was not compared across engines because fewer than two "
             "engines produced a value -- %s. A comparison here would be "
             "between a number and an absence"
             % (c.subject, c.constraint,
-               ", ".join("%s (%s)" % (x.member, x.outcome) for x in c.cites)))
+               ", ".join("%s (%s)" % (x.member, outcome_label(x.outcome))
+                         for x in c.cites)))
 
 
 def _r_engines_meeting(c):

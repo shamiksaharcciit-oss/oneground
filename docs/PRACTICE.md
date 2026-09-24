@@ -1083,10 +1083,12 @@ three sizes:
 | a **dataclass** (`Param`) from `oneground.models` | allowlist the import | `oneground/param.py`, a leaf |
 | a **function** (`producing_version`) from `oneground.receipts` | allowlist the import | `oneground/provenance.py`, a leaf |
 | a **module** (the job record) from the served package | allow a second writer | outside it: the server reads jobs, the supervisor writes them |
+| a **new shared module** (`cites.py`) placed in `oneground.receipts` | allowlist the import | `oneground/cites.py`, a package root that imports nothing |
 
-A dataclass, a function, a whole module. Each time the guard was describing
-the architecture rather than obstructing it, and each time the exemption
-would have been the cheapest possible way to not hear it.
+A dataclass, a function, a whole module, and a module that had not existed
+until that morning. Each time the guard was describing the architecture rather
+than obstructing it, and each time the exemption would have been the cheapest
+possible way to not hear it.
 
 > The test, when you cannot tell which case you are in: **would the exemption
 > still be right if the guard did not exist?** Intake would still name those
@@ -1101,6 +1103,49 @@ this rule does not apply here, nobody re-reads it, and the next module to want
 the same exemption has a precedent. Every entry in an allowlist is a small
 permanent hole, so each one earns its place by being *true about the world*
 rather than *true about today's diff*.
+
+**The fourth entry is the one that changes the rule**, because it is the only
+one where the wrong home passed every reasonable test.
+
+> **A module's neutrality is a property of everything its package pulls in,
+> not of the module.**
+
+Task 045 needed a path grammar that both `oneground/report/claims.py` and
+`oneground/lab/citations.py` could import. The lab's guard lists
+`oneground.report` in `MEASURING` and `citations.py` is a transport module, so
+the shared part could not live in `report/`. It went into
+`oneground/receipts/cites.py`, and every reason for that home was sound:
+`oneground.receipts` is not in `MEASURING`; `oneground.report` already depends
+on it, so no new edge was created; resolving a citation genuinely *is* reading
+a receipt; and the module itself imports nothing but `json` and `os`.
+
+The guard refused it. Importing `oneground.receipts.cites` runs
+`oneground/receipts/__init__.py`, and that file contains `import torch` inside
+`library_versions()`, where it records the torch version for a build stamp.
+The import is lazy, correct and inside a function; the guard reads the AST and
+does not care, which is right, because a lazy import is still an import the
+module can perform. So the package was neutral in every sense anyone had
+thought to check, and its `__init__` was not. The module moved to
+`oneground/cites.py` — a package root that imports nothing at all.
+
+The other three entries were caught doing something that looked wrong on
+inspection. This one survived four independent arguments in its favour, and
+the only thing in the project capable of contradicting them was a guard
+computing the transitive import closure — which no person does by eye, because
+doing it by eye means reading every `__init__.py` on the path and every
+function inside them.
+
+> **You cannot choose a module's home by reading the module. Its cost is
+> whatever its package already imports, and that is a fact about files you did
+> not open.**
+
+The practical form: when a shared helper is extracted, prefer the shallowest
+home that has no `__init__` work at all, and let the guard confirm it rather
+than reasoning about whether a package *feels* heavyweight. A package root
+that imports nothing is the only home whose cost is visible from the module.
+This is *remove the moment of choice* in a small key — the guard is consulted
+instead of the developer's judgement about what a package pulls in. Nobody had
+to remember that `receipts/__init__` touches torch, and nobody did.
 
 ### 5.1 What a guard is telling you when it does not move
 
