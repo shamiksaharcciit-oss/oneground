@@ -1,7 +1,7 @@
-# Task 046 — the six times this slice wanted to change a contract
+# Task 046 — the seven times this slice wanted to change a contract
 
-*Collected rather than raised one at a time, because six of them is a
-finding about the seam and not six findings about a UI slice. To be ruled on
+*Collected rather than raised one at a time, because seven of them is a
+finding about the seam and not seven findings about a UI slice. To be ruled on
 as a shape when 046 closes.*
 
 *The fifth arrived after this note was written, and **it arrived from
@@ -145,10 +145,55 @@ nobody opens after a job has failed.
 One character fixes it. The cost of not fixing it is that the most important
 refusal in the tool is the one most likely to be mistaken for a bug.
 
-## What the six have in common, which is the thing to rule on
+## 7. 58 of the 74 fields a requirements file can carry are validated by nothing — **pending**
 
-They are not six defects in two modules. They are **one seam**, hit from six
-angles: the boundary where `intake`'s refusals stop being `intake`'s problem.
+Measured while answering step 2's instruction to generate the example files
+from the field table. `requirements.example.yaml` has **74** leaf fields;
+`intake` validates **21**.
+
+    constraints.latency.p95_ms: fourty
+
+loads without a word. So do `cost.error_band: "a lot"`, a `simulate.families`
+naming a family that does not exist, and a `constraints.monthly_budget` with
+no currency. They are read later by whatever consumes them, or not at all.
+
+**This one changes the shape of the decision rather than lengthening the
+list.** The first six are all about how a refusal *travels* — printed as a
+traceback, carried by a type that means two things, exiting under the wrong
+number, arriving where a classifier reads it as a crash. Every one of them
+presupposes a refusal that exists and is correct.
+
+This is about refusals that **do not exist**. Not a message that arrives
+badly: no message, no check, no field named, for three quarters of the
+document that starts every run.
+
+Which reframes the question the other six ask. *Who owns a refusal after it
+is raised* has an answer worth ruling on — but underneath it sits *what does
+`intake` owe a refusal for at all*, and today the answer is: whatever someone
+wrote a check for, with no statement of what the set should be. The 25
+refusals are excellent and nobody has ever written down why there are 25
+rather than 74.
+
+**Why it is not this slice's to take**, beyond its size: adding validation
+changes which files load. A requirements file that works today and is refused
+tomorrow is a contract change of the loudest kind, and some of those 58 are
+fields whose absence of a check may be deliberate — `nearest_fixture: auto`
+and a `deployment` block with one endpoint are both documented as tolerant.
+Sorting the deliberate from the unexamined is the work, and it is a reading
+of intent rather than of code.
+
+**What I would want to know first**, and it is one measurement: of the 58,
+how many are read by anything? A field nothing validates and nothing reads is
+a different problem from one that is read and trusted. The second kind is
+where a wrong value becomes a wrong number in a report, which is the thing
+this project exists to refuse.
+
+Full account: `tasks/finding-the-table-and-the-example-describe-different-things.md`.
+
+## What the seven have in common, which is the thing to rule on
+
+Six of them are **one seam**, hit from six angles, and the seventh is the
+floor that seam sits on: the boundary where `intake`'s refusals stop being `intake`'s problem.
 
 - Inside `intake`, all twenty-five refusals are correct: named field, stated
   remedy, refuse rather than guess. The module honours its own header.
