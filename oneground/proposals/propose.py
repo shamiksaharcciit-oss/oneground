@@ -609,7 +609,12 @@ def build_card(plan, prediction, pred_sha, changed_row, judgement,
     rows = card_mod.build_rows(judgement, plan.baseline_row, changed_row,
                                from_label, to_label)
     from ..report import claims as cl
-    cl.raise_on_violation(claims, rows, where="the proposal card")
+    # Task 045. The workdir turns on step 8 here too, so a card's citation
+    # into `simulate.json` is read rather than trusted. `card.json` itself is
+    # `pending`: it is the file this check is a precondition for writing.
+    cl.raise_on_violation(claims, rows, where="the proposal card",
+                          workdir=plan.workdir,
+                          pending=(card_mod.CARD_NAME,))
     card["claims"] = [c.as_dict() for c in claims]
     card["text"] = [c.text for c in claims]
     violations = card_mod.card_violations(card)

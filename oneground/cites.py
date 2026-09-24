@@ -27,10 +27,13 @@ lab cite that -- required the shared part to sit outside `oneground.report`
 anyway, which is this module; (b) collapses into (a) as soon as the guard is
 read.
 
-**Why `oneground.receipts` is the home.** It is not in `MEASURING`, so a
-transport module may import it; `oneground.report` already depends on it; and
-resolving a citation *is* reading a receipt, which is what this package is
-for. A new neutral package would have been a third place to look.
+**Why the package root is the home.** This went first to
+`oneground/receipts/cites.py` and the lab's guard refused it: importing that
+package runs `receipts/__init__.py`, which contains `import torch` inside
+`library_versions()`. Every argument for that home was sound and the package
+was neutral in every sense anyone had thought to check; its `__init__` was
+not. `oneground/` imports nothing at all, which is the only home whose cost is
+visible from the module. `docs/PRACTICE.md` §5 records the rule.
 
 **There must be one grammar.** 041 chose the grammar `report.json` already
 cites with, so a view's declared `reads` and a claim's `source` never need
@@ -71,12 +74,22 @@ REQUIREMENTS = "requirements"
 EVERY_OPTION = "every_option"
 NOT_RUN = "not_run"
 COST_MODEL = "cost_model"
+PENDING = "pending"
 UNRESOLVED = "unresolved"
 
 #: Kinds that mean the citation named no single field **and that is correct**.
 #: Distinguished from `UNRESOLVED`, which means it named one and it was not
 #: there -- the distinction finding 1 turns on.
-NOT_A_FIELD = (RULE, REQUIREMENTS, EVERY_OPTION, NOT_RUN, COST_MODEL)
+#:
+#: `PENDING` is the fifth, and it arrived when step 8 was wired into the gate
+#: that writes a report rather than into tests alone (task 045). A report's
+#: claims cite `report.json:options[...]`, and a proposal card's cite
+#: `card.json:measured...` -- **the document the check is a precondition for
+#: writing.** It cannot be read at the moment it is checked because the check
+#: is why it does not exist yet, and that is a different fact from a path
+#: naming nothing. Nothing is lost: those values come from the rows the claim
+#: was built from, and step 5 checks them there.
+NOT_A_FIELD = (RULE, REQUIREMENTS, EVERY_OPTION, NOT_RUN, COST_MODEL, PENDING)
 
 
 class PathError(ValueError):
@@ -254,11 +267,17 @@ def _load(workdir, filename, cache):
     return data
 
 
-def resolve(workdir, source, member=None, cache=None):
+def resolve(workdir, source, member=None, cache=None, pending=()):
     """Read what a citation names. `(kind, value, note)`.
 
     `kind` is one of the constants above. `value` is meaningful only for
     `field` and `within`; for everything else it is None and `note` says why.
+
+    `pending` names the files this caller is about to write and is being
+    checked in order to write -- `("report.json",)` for the report's gate,
+    `("card.json",)` for a proposal card's. A source naming one of them is
+    `PENDING` rather than `UNRESOLVED`, because the file's absence is the
+    caller's own doing and says nothing about the citation.
 
     This is deliberately **not** a comparison: it answers *what is at that
     path*, and the caller decides what a disagreement means. The lab renders
@@ -269,6 +288,11 @@ def resolve(workdir, source, member=None, cache=None):
         return kind, None, note
 
     filename, path = split_source(source)
+    if filename in tuple(pending or ()):
+        return PENDING, None, (
+            "%s is the document this check is a precondition for writing, so "
+            "it does not exist yet. The value is checked against the rows it "
+            "was built from instead." % filename)
     data = _load(workdir, filename, cache)
     if data is None:
         return UNRESOLVED, None, "%s is not in this run" % filename

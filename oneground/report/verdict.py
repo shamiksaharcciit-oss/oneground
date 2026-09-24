@@ -524,20 +524,31 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
         runs_txt = ", ".join(f"{v:.2f}" for v in per_run)
         src = (f"verify.json:searches[{row_key}]."
                "latency_shape_single_client.p95_across_runs")
+        # Task 045, finding 1, found by step 8 on the published arXiv bundle.
+        #
+        # All three branches used to cite `src` -- the whole spread object --
+        # and two of them carry a value that is one FIELD of it: `meets` is
+        # decided by the worst run and `fails` by the best. A citation naming
+        # the container is under-specified rather than wrong, which is the
+        # gentlest way for a receipt to be unfollowable: the link resolves, a
+        # reader lands on a dict, and nothing says which number was used.
+        #
+        # The couldn't-check branch below keeps `src`, and that is not an
+        # oversight: it cites no value, and what it is about IS the spread.
         if hi <= cap:
             return Verdict(
                 "latency_p95", MEETS,
                 f"p95 <= {cap} ms in all {n} runs (worst {hi:.2f} ms){env} "
                 f"-- runs {runs_txt}; spread {width:.2f} ms "
                 f"(from {row_key}: {how})",
-                source=src, value=hi, threshold=cap, engine=engine)
+                source=src + ".max", value=hi, threshold=cap, engine=engine)
         if lo > cap:
             return Verdict(
                 "latency_p95", FAILS,
                 f"p95 > {cap} ms in all {n} runs (best {lo:.2f} ms){env} "
                 f"-- runs {runs_txt}; spread {width:.2f} ms "
                 f"(from {row_key}: {how})",
-                source=src, value=lo, threshold=cap, engine=engine)
+                source=src + ".min", value=lo, threshold=cap, engine=engine)
         return Verdict(
             "latency_p95", COULDNT_CHECK,
             f"meets in {meets_in} of {n} runs, spread {width:.2f} ms "

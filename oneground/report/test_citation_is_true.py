@@ -97,7 +97,7 @@ def test_the_mutant_verdict_670(tmp_path):
     assert "not there" in " ".join(problems), problems
 
 
-# =============================== the four shapes that are NOT violations
+# =============================== the five shapes that are NOT violations
 @pytest.mark.parametrize("source,why", [
     ("(rule)", "the conclusion follows from a rule, not a row"),
     ("requirements:constraints", "an input the user wrote"),
@@ -159,3 +159,103 @@ def test_a_derived_cite_is_left_to_step_4b(tmp_path):
     before = cl.Cite(member=MEMBER, value=0.8500, source="(rule)")
     d = cl.derive(cl.DIFFERENCE, after, before)
     assert cl.check(_claim(d), workdir=wd) == []
+
+
+# ========================== the fifth shape, and the gate that needed it
+#
+# Step 8 shipped with a test suite and no caller: every production path goes
+# through `raise_on_violation`, which took no workdir. A rule exercised only
+# by its own test is a test and not a guard -- finding 5's defect one layer
+# along -- and wiring it required naming one more legitimate shape.
+
+def test_the_document_being_written_is_pending_not_unresolved(tmp_path):
+    """The fifth shape. A report's claims cite `report.json:...`, and the
+    gate runs *before* the report is written, because that is what the gate
+    is for. The file's absence is the caller's own doing.
+
+    Distinguished from `test_a_missing_receipt_is_a_violation_not_a_skip`
+    above by exactly one thing: whether the caller declared it. An undeclared
+    absence stays a violation, which is what stops this from being a way to
+    silence step 8.
+    """
+    wd = tmp_path / "empty"
+    wd.mkdir()
+    c = cl.Cite(member=MEMBER, value="meets",
+                source="report.json:options[%s].judgement.outcome" % MEMBER)
+
+    undeclared = cl.check(_claim(c), workdir=str(wd))
+    assert undeclared and "not in this run" in " ".join(undeclared)
+
+    assert cl.check(_claim(c), workdir=str(wd),
+                    pending=("report.json",)) == []
+
+
+def test_pending_names_one_file_and_not_the_rest(tmp_path):
+    """Declaring the document being written does not excuse the receipts."""
+    wd = tmp_path / "empty"
+    wd.mkdir()
+    c = cl.Cite(member=MEMBER, value=1.0,
+                source="simulate.json:rows[x].recall_at_10")
+    problems = cl.check(_claim(c), workdir=str(wd), pending=("report.json",))
+    assert problems and "simulate.json" in " ".join(problems), problems
+
+
+def test_the_gate_that_writes_a_report_now_reads_the_citation(tmp_path):
+    """The point of the whole wiring: `raise_on_violation` refuses.
+
+    This calls it with the arguments `report/__init__.py` calls it with, so a
+    pass here is a statement about the path a report is actually written
+    through rather than about `check()` in isolation.
+    """
+    wd = _run(tmp_path)
+    honest = _claim(cl.Cite(member=MEMBER, value=35731,
+                            source="verify.json:load.completed"))
+    honest.text = "%s completed 35731" % MEMBER
+    cl.raise_on_violation([honest], None, where="report x", workdir=wd,
+                          pending=("report.json",))     # must not raise
+
+    mutant = _claim(cl.Cite(member=MEMBER, value=119.1,
+                            source="verify.json:load.completed"))
+    mutant.text = "%s completed 119.10" % MEMBER
+    with pytest.raises(cl.ClaimViolation) as e:
+        cl.raise_on_violation([mutant], None, where="report x", workdir=wd,
+                              pending=("report.json",))
+    assert "35731" in str(e.value) and "119.1" in str(e.value)
+
+    # And without the workdir the same gate lets it through, which is what it
+    # did at every production call site until this task.
+    cl.raise_on_violation([mutant], None, where="report x")
+
+
+def test_the_tracked_arxiv_bundle_passes_the_gate_it_will_be_written_through():
+    """Every citation in a real report, read, on a tracked bundle.
+
+    The other half of the mutant above: a gate that refuses a bad citation is
+    only useful if it admits the good ones. These are the arXiv report's 25
+    claims, **judged from the receipts** rather than read out of the stored
+    `report.json` -- which still carries the two container sources this task
+    tightened and would report the fix as not working.
+
+    This raises rather than skips, so switching the gate on cannot be green
+    only where nobody has a workdir.
+    """
+    from oneground import report as rep
+    from oneground.report import verdict as vd
+    from .test_remedy_is_not_the_obstacle import (FIXTURE, fixture_json,
+                                                  judged_from_receipts)
+
+    verify = fixture_json("verify.json")
+    options = judged_from_receipts(vd.coverages_from(verify, FIXTURE))
+    vd.mark_indistinguishable(options)
+    claims = list(rep.decision_claims(
+        options, [], vd.recommend(options),
+        fixture_json("report.json")["constraints"],
+        fixture_json("verify_info.json")))
+    claims += list(rep.qps_max_claims(verify))
+    assert len(claims) == 25, len(claims)
+
+    bad = cl.check_all(claims, cl.rows_from_options(options), workdir=FIXTURE,
+                       pending=("report.json",))
+    assert bad == [], "\n".join(
+        "  [%s] %s\n      %s" % (c.kind, (c.text or "")[:120], "; ".join(p))
+        for c, p in bad)

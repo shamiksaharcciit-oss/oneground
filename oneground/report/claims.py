@@ -354,7 +354,7 @@ def _derive_holds(rule, outcome, outcomes):
     raise ClaimViolation("unknown holds_rule %r" % rule)
 
 
-def check(claim, rows=None, tolerance=1e-9, workdir=None):
+def check(claim, rows=None, tolerance=1e-9, workdir=None, pending=()):
     """Every way a claim can fail to follow from its rows. Returns a list.
 
     `rows` is `{member: {constraint: {"value":, "outcome":, "source":}}}` --
@@ -362,12 +362,15 @@ def check(claim, rows=None, tolerance=1e-9, workdir=None):
     turns "the claim is internally consistent" into "the claim is true of the
     run", and the second is the one that matters.
 
-    `workdir` turns on step 7, which reads each cite's `source` out of the
+    `workdir` turns on step 8, which reads each cite's `source` out of the
     run's receipts and compares it with the cited value. It is optional for
     the same reason `rows` is -- a caller with no run on disk can still check
     everything that does not need one -- and for the same reason it should be
     passed wherever a run exists. **Task 045 finding 1: until it did, the
     invariant never once verified that a citation was true.**
+
+    `pending` names the files the caller is about to write and is being
+    checked in order to write. See `cites.PENDING`.
     """
     bad = []
     q = claim.quantifier
@@ -604,7 +607,7 @@ def check(claim, rows=None, tolerance=1e-9, workdir=None):
     #    A source naming a field that is not there is a violation, and a
     #    distinct one.
     if workdir is not None:
-        bad.extend(_citation_problems(claim, workdir, tolerance))
+        bad.extend(_citation_problems(claim, workdir, tolerance, pending))
 
     # 9. A COLLAPSED CLAIM STATES ONE FACT, ONCE. Task 045, finding 4.
     #
@@ -670,7 +673,7 @@ def _cites_of(claim):
     return out
 
 
-def _citation_problems(claim, workdir, tolerance=1e-9):
+def _citation_problems(claim, workdir, tolerance=1e-9, pending=()):
     """What the receipts say about each cite's source. Task 045, finding 1."""
     from .. import cites as C
 
@@ -679,7 +682,7 @@ def _citation_problems(claim, workdir, tolerance=1e-9):
         if c.derived or c.value is None or not c.source:
             continue
         kind, got, note = C.resolve(workdir, c.source, member=c.member,
-                                    cache=cache)
+                                    cache=cache, pending=pending)
         if kind in C.NOT_A_FIELD:
             continue
         if kind == C.UNRESOLVED:
@@ -711,18 +714,33 @@ def _same(got, want, tolerance):
     return got == want
 
 
-def check_all(claims, rows=None, workdir=None):
+def check_all(claims, rows=None, workdir=None, pending=()):
     """[(claim, [problem])] for every claim that violates the invariant."""
     out = []
     for c in claims:
-        problems = check(c, rows, workdir=workdir)
+        problems = check(c, rows, workdir=workdir, pending=pending)
         if problems:
             out.append((c, problems))
     return out
 
 
-def raise_on_violation(claims, rows=None, where=""):
-    bad = check_all(claims, rows)
+def raise_on_violation(claims, rows=None, where="", workdir=None, pending=()):
+    """The gate. Task 045: `workdir` turns on step 8 HERE, not only in tests.
+
+    Step 8 arrived with a test suite and no caller. Every production call went
+    through this function, this function took no `workdir`, and so the check
+    that reads the file a citation names did not run when a report was
+    written. **That is finding 5's defect one layer along** -- a rule whose
+    only exercise is its own test is a test, not a guard -- and it is the
+    shape the whole of task 045 was about, so leaving it would have been the
+    task reproducing its own subject.
+
+    Passing a workdir is therefore the default at every call site that has
+    one, and the parameter is optional only for the callers that genuinely do
+    not: a claim set built without a run on disk can still be checked against
+    everything that does not need one.
+    """
+    bad = check_all(claims, rows, workdir=workdir, pending=pending)
     if not bad:
         return
     lines = []

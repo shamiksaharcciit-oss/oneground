@@ -236,7 +236,8 @@ def test_the_coverage_routing_still_wins_where_it_applies():
 # tracked, so it fails for everyone or for no one
 # --------------------------------------------------------------------------
 
-def _fixture(name):
+def fixture_json(name):
+    """One of the tracked bundle's receipts. Raises rather than skips."""
     p = os.path.join(FIXTURE, name)
     if not os.path.isfile(p):
         raise AssertionError(
@@ -246,9 +247,19 @@ def _fixture(name):
         return json.load(f)
 
 
-def _judged(coverages):
-    report, simulate = _fixture("report.json"), _fixture("simulate.json")
-    verify, verify_info = _fixture("verify.json"), _fixture("verify_info.json")
+def judged_from_receipts(coverages):
+    """The arXiv bundle's rows, judged by today's rules.
+
+    Public, because two other test modules need the same thing and there must
+    be one of it. **Judged, not rebuilt**: `report.json`'s stored verdicts
+    carry the source strings and kinds the artifact was written with, and
+    reading those to check today's code is how a fix gets reported as not
+    working -- or as working when only the artifact happened to be clean.
+    """
+    report, simulate = fixture_json("report.json"), fixture_json(
+        "simulate.json")
+    verify = fixture_json("verify.json")
+    verify_info = fixture_json("verify_info.json")
     return [vd.judge_option(r, verify, report["constraints"],
                             verify_env=(verify_info or {}).get("environment"),
                             costs=report.get("costs") or None,
@@ -277,7 +288,7 @@ def test_the_tracked_bundle_exercises_the_mismatch_branch():
     written before the change -- which would measure the artifact, not the
     code.
     """
-    options = _judged(coverages=None)
+    options = judged_from_receipts(coverages=None)
     mismatched = [(o.config, v) for o in options for v in o.verdicts
                   if v.outcome == vd.COULDNT_CHECK
                   and v.reason.startswith("this configuration was not the one "
@@ -298,8 +309,8 @@ def test_the_tracked_bundle_exercises_the_mismatch_branch():
 
 def test_the_tracked_arxiv_bundle_routes_every_couldnt_check():
     """And with the coverage this run records, nothing is left unrouted."""
-    verify = _fixture("verify.json")
-    options = _judged(vd.coverages_from(verify, FIXTURE))
+    verify = fixture_json("verify.json")
+    options = judged_from_receipts(vd.coverages_from(verify, FIXTURE))
     unchecked = [v for opt in options for v in opt.verdicts
                  if v.outcome == vd.COULDNT_CHECK]
     assert unchecked, "the arXiv report has couldn't-checks; this one has none"

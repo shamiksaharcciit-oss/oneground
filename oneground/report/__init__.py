@@ -1195,9 +1195,16 @@ def qps_max_claims(verify_data):
             quantifier=cl.NONE, constraint="qps_max",
             scope=((engine,) if engine else ()),
             holds_for=((engine,) if engine else ()),
+            # Task 045: the CITE names the field, the claim names the block.
+            # `verify.json:qps_max` is a dict holding the rate, the
+            # concurrency, the p99 and the stop reason, and the cite carries
+            # only the rate -- so the cite naming the container was
+            # under-specified, found by step 8 the moment the gate was given a
+            # workdir. The claim's own `source` still names the block, because
+            # the block is what the sentence is about.
             cites=(cl.Cite(member=engine, value=ceiling["qps_max"],
                            constraint="qps_max",
-                           source="verify.json:qps_max"),),
+                           source="verify.json:qps_max.qps_max"),),
             source="verify.json:qps_max",
             detail=ceiling.get("caveat", ""),
             extra={"concurrency": ceiling["at_concurrency"],
@@ -1324,8 +1331,13 @@ def run(requirements_path, log_fn=log, env_stamp=None):
     # as refusing to write a fixture whose digests do not match -- the report
     # is a receipt for the prose, and a receipt that is not checked is a
     # decoration.
+    # `workdir` is what turns step 8 on: every cite's source is read out of
+    # this run's receipts and compared with the value cited. Task 045 -- the
+    # check existed for a day with no caller, because this line did not pass
+    # one and every production path goes through it.
     cl.raise_on_violation(claims, cl.rows_from_options(options),
-                          where="report %s" % getattr(req, "name", "run"))
+                          where="report %s" % getattr(req, "name", "run"),
+                          workdir=workdir, pending=("report.json",))
     dlog = [c.as_entry() for c in claims]
 
     inputs = _input_digests(workdir)
