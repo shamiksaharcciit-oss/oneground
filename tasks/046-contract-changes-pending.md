@@ -192,8 +192,11 @@ Full account: `tasks/finding-the-table-and-the-example-describe-different-things
 
 ## What the seven have in common, which is the thing to rule on
 
-Six of them are **one seam**, hit from six angles, and the seventh is the
-floor that seam sits on: the boundary where `intake`'s refusals stop being `intake`'s problem.
+Six of them are **one seam**, hit from six angles: the boundary where
+`intake`'s refusals stop being `intake`'s problem. The seventh is the floor
+that seam sits on, and it is a different kind of question — the six ask what
+happens to a refusal once it exists, and the seventh asks which refusals
+exist at all.
 
 - Inside `intake`, all twenty-five refusals are correct: named field, stated
   remedy, refuse rather than guess. The module honours its own header.
@@ -207,21 +210,31 @@ rather than a coincidence. `intake`'s tests assert that `load()` raises
 above is about what happens to that exception *after* it leaves, and nothing
 owned that question until a supervisor had to classify one.
 
-> So the question worth ruling on is not any of the four. It is: **who owns a
-> refusal after it is raised, and where is that written down?** Today the
-> answer is `oneground/refusals.py`, which task 046 wrote for its own needs
-> and which now carries a sixteen-entry table nobody outside this slice has
-> agreed to.
+> So the question worth ruling on is not any of the seven on its own. For
+> the six it is: **who owns a refusal after it is raised, and where is that
+> written down?** Today the answer is `oneground/refusals.py`, which task 046
+> wrote for its own needs and which now carries a sixteen-entry table nobody
+> outside this slice has agreed to.
+>
+> And underneath it, from the seventh: **what does `intake` owe a refusal
+> for?** The six all assume the refusal happened. For 58 of the 74 fields it
+> does not, so the ownership question never gets asked — there is nothing to
+> own. A seam can only be as good as the floor it sits on, and an excellent
+> answer to *who carries this refusal* is worth nothing for a field nobody
+> checks.
 
-The three smaller questions that follow from it, for the same ruling:
+The three smaller questions that follow, for the same ruling:
 
 1. Should `refusals.py`'s table live where the refusals do — a declaration in
    each module, rather than one list that has to know sixteen dotted names?
 2. Is `exit 2` the contract, or an implementation detail this slice promoted?
    **My reading, asked for and measured, is below.**
 3. Does `intake` owe a refusal for every way a requirements file can be
-   unusable, or only for every way its *contents* can be? Number 4 above is
-   that question with a concrete instance.
+   unusable, or only for every way its *contents* can be? Number 4 is that
+   question about the container and number 7 is it about the contents, which
+   is why they read as one question asked twice. The answer that would settle
+   both is a written statement of what the checked set is — today there are
+   25 checks and no sentence saying why 25.
 
 
 ---
