@@ -1,8 +1,81 @@
 # Task 046 — the seven times this slice wanted to change a contract
 
 *Collected rather than raised one at a time, because seven of them is a
-finding about the seam and not seven findings about a UI slice. To be ruled on
-as a shape when 046 closes.*
+finding about the seam and not seven findings about a UI slice.*
+
+---
+
+# The ruling
+
+*Given on the seven as one shape, after 046 merged at `940ca44`. Recorded
+here rather than left in a thread, because a ruling that lives only in the
+conversation that produced it is the staleness defect with extra steps.*
+
+## The seam has an owner, and it needs ratifying rather than inventing
+
+**`oneground/refusals.py` is the answer to *who owns a refusal after it is
+raised*.** It is correct. Its only defect is the one it was born with: one
+slice wrote it for its own needs and nobody outside agreed to it.
+
+That settles the shape of the question. It is not *what should own this* —
+that is answered and the answer works. It is **ratification**: the table
+stops being 046's private arrangement and becomes the thing the tree is held
+to. Nothing about the design changes; what changes is who it binds.
+
+## 4, 5 and 6 are taken — as one thing, not three
+
+Not three fixes. **Three places where the table already says the answer and
+the code does not obey it.**
+
+- **4** — a refusal that is never raised. `intake.load` accepts a directory
+  and fails later as something else.
+- **5** and **6** — a finding travelling in an exit code, twice, against the
+  rule this slice wrote down: **an exit code says whether a command ran, and
+  never what it found.**
+
+Reading them as three defects invites three patches. Reading them as three
+disobediences of one ratified table is what makes the repair a single piece
+of work with a single test: the table is the contract, and these are the
+three places the code disagrees with it.
+
+## 7 is not rulable, and that is the right answer
+
+**Take the measurement first: of the 58, how many are read by anything?**
+
+The two halves are different findings with different repairs, and the 58 is
+an unseparated mixture:
+
+- a field **nothing validates and nothing reads** is dead weight in an
+  example file, and the repair is deletion — a documentation defect;
+- a field **nothing validates and something reads** is where `fourty` becomes
+  a number in a report, which is the thing this project exists to refuse.
+
+No ruling is possible across a set that contains both, and any recommendation
+built on the bare number would be a proposal dressed as a measurement.
+
+## What closes 4 and 7 together
+
+**A written statement of the checked set.** Twenty-five checks and no
+sentence saying why twenty-five is the finding — not the directory, not the
+58, but the absence of the statement that would make either judgeable.
+
+It is the coverage claim arriving in **the thing every run begins with**,
+which is why it outranks the four instances of the same shape already on
+`docs/PRACTICE.md` §4. Those are checks whose coverage is unstated. This is
+the validator's.
+
+## On `exit 2`
+
+**The correction stands and is the answer.** Exit 2 was already a contract —
+an undocumented one that three parts of the tree depended on — and 046
+extended it to the place it was missing and wrote it down for the first time.
+This slice did not promote an implementation detail; it finished a promotion
+that had already happened silently.
+
+## Where this goes
+
+The report-code work and everything downstream of this ruling sits with the
+**proposals stream**. 046 is closed.
 
 *The fifth arrived after this note was written, and **it arrived from
 building the test for a rule rather than from reading the code the rule is
@@ -62,7 +135,7 @@ are hard to tell from its preconditions is a module worth looking at, and
 three of four wanting a change while the fourth looked like one is part of
 the evidence.
 
-## 4. `intake.load` accepts a directory — **pending**
+## 4. `intake.load` accepts a directory — **ruled, taken**
 
 `os.path.exists` where `isfile` was meant, so a directory reaches `open()`
 and raises `PermissionError` on Windows — a message that is misleading rather
@@ -71,7 +144,7 @@ than merely unhelpful, since the file is readable and simply is not a file.
 One line, written out in
 `tasks/finding-a-path-check-that-accepts-a-directory.md`. Not taken.
 
-## 5. `simulate` reports a finding through its exit code — **pending**
+## 5. `simulate` reports a finding through its exit code — **ruled, taken**
 
 Found by building the test for the exit-code rule, which is what the test was
 for. `_cmd_simulate` returns **1** when configurations were planned and not
@@ -96,7 +169,7 @@ weakened. `oneground/test_exit_contract.py` holds it.
 Not taken: it is `simulate`'s contract, a script may depend on the code, and
 changing it is not a UI slice's to do unasked.
 
-## 6. `pod plan` returns 1 for a refusal — **pending**
+## 6. `pod plan` returns 1 for a refusal — **ruled, taken**
 
 Found the same way as the fifth, one step further: by widening the test built
 for the rule. The first version read only `oneground/cli.py` and so checked
@@ -145,7 +218,7 @@ nobody opens after a job has failed.
 One character fixes it. The cost of not fixing it is that the most important
 refusal in the tool is the one most likely to be mistaken for a bug.
 
-## 7. 58 of the 74 fields a requirements file can carry are validated by nothing — **pending**
+## 7. 58 of the 74 fields a requirements file can carry are validated by nothing — **not rulable; measure first**
 
 Measured while answering step 2's instruction to generate the example files
 from the field table. `requirements.example.yaml` has **74** leaf fields;

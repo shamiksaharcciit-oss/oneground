@@ -306,8 +306,11 @@ EXIT_CONTRACT = {
     # receipt makes better.
     #
     # Left as it is, declared, and raised as the fifth contract change in
-    # `tasks/046-contract-changes-pending.md`: it is `simulate`'s contract,
-    # scripts may depend on it, and it is not a UI slice's to change unasked.
+    # `tasks/046-contract-changes.report.md` -- which has since been
+    # RULED and TAKEN: a finding travelling in an exit code, against the
+    # rule that an exit code says whether a command ran and never what it
+    # found. The repair belongs to the proposals stream and is not a UI
+    # slice's to make unasked.
     # Its cost is visible here: it is the sole reason `EXIT_MEANING[1]` has
     # two meanings and `classify` has to consult the workdir at all.
     ("simulate", 1): "configurations were planned and not measured; the rows "
@@ -328,9 +331,10 @@ EXIT_CONTRACT = {
     # refusal is the most useful thing that command produces.
     #
     # Declared rather than fixed: `pod` is the module this slice has now
-    # wanted to reach into six times, and it is raised as the sixth entry in
-    # `tasks/046-contract-changes-pending.md` rather than changed here. The
-    # repair is one character -- `return 2` -- and it is not a UI slice's.
+    # wanted to reach into six times, and it is the sixth entry in
+    # `tasks/046-contract-changes.report.md` -- RULED and TAKEN, for the
+    # same reason as the fifth. The repair is one character, `return 2`,
+    # and it belongs to the proposals stream rather than here.
     ("pod plan", 1): "the resolved price exceeds the cost cap, so `up` "
                      "would not proceed; a refusal returning the code for "
                      "did-not-finish, recorded as contract change six",
