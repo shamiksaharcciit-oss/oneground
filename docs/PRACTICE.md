@@ -1279,6 +1279,39 @@ repairs the new caller is not a fix, it is a workaround with a test.**
 The tell: *the thing that needs to recognise this is not the thing that
 raised it, and there is already one that does.*
 
+### 7.4.2 A defect recurs in whatever is newest, written by whoever just fixed it
+
+**The rule.** When you remove a defect, the next place it appears is the code
+written **after** the removal, by **you**. Not old code that escaped the
+sweep — new code, from the hand that had just learned the lesson.
+
+**The instance, and the interval is the point.** Task 045's finding is one
+fact stated fifteen times where once would do. In slice 2 it was repaired in
+the jobs page's withheld list on a Monday: nine paragraphs saying five things,
+grouped into five. On the Tuesday, in **the same file, by the same author**,
+the job rows shipped three verbatim copies of one sentence about the product.
+A day apart. Nobody had forgotten anything.
+
+It has now been seen from three streams in one week — the report code, the
+interface, and the proposals stream — which is what makes it a property of
+the work rather than of a person.
+
+> Why it happens, because the obvious explanation is wrong: this is not
+> forgetting. The check that finds the defect is applied to **the thing being
+> repaired**, and the surface written an hour later is not that thing. It is
+> new, it is where attention is, and it has never been checked at all — so
+> the sweep passes over it precisely because it did not exist when the sweep
+> was designed.
+
+> The rule: **a freshly written surface deserves the check that was just
+> applied to the old one**, and nobody thinks to apply it, because the check
+> feels like history and the new code feels like present work.
+>
+> The cheap version, and it takes a minute: **after fixing an instance, grep
+> the diff you are about to commit for the same shape.** Not the codebase —
+> the diff. The defect you just removed and the code you just wrote are in
+> the same commit more often than not.
+
 ### 7.5 To prove a classifier reads an input, vary only that input
 
 **The form.** A classifier that takes several inputs and returns a verdict
@@ -1316,6 +1349,39 @@ This is warning 3 with the subject narrowed. *A passing check must be able to
 fail* asks whether the check can go red at all; this asks whether it can go
 red **for the reason it claims**. A classifier is exactly where those two come
 apart, because its verdict is right for many wrong reasons.
+
+### 7.6 A rule that names one prerequisite is satisfied by a thing that lacks a different one
+
+**The rule.** A condition of the form *offered when X*, *valid when X*,
+*ready when X* will be read as *offered when it works* — whatever X is. If X
+is a **subset** of what working requires, the rule hides its own gap, and the
+gap stays invisible until something inside it fails.
+
+**The instance.** Slice 2's jobs page offers a stage only when it can name
+what the stage would run **against**, and withholds the rest with the reason.
+It works: five of six pipeline stages are correctly withheld in a directory
+with no requirements file.
+
+`propose` passes it — nine runs to choose from — and then refuses every time,
+for every one of the nine, because the page cannot supply `--policy` and
+`--prediction`. The rule was satisfied and the stage was unrunnable. It
+distinguished one kind of argument and the command has two: what a stage runs
+*against*, and what it runs *with*.
+
+**What made it hard to see is that it failed identically nine times.** Nine
+choices, one outcome, the same message — which reads as a defect in `propose`
+rather than in the offering. A rule with a partial prerequisite does not
+produce varied failures that invite investigation; it produces one failure
+repeated, which invites blaming the thing being offered.
+
+> The tell when writing one: **say the rule, then say "and then it works" out
+> loud.** *Offered when the target can be named — and then it works.* The
+> sentence is obviously false as soon as it is spoken, and it is what every
+> reader will assume.
+>
+> The repair is to name the general prerequisite and let the specific one be
+> a case of it: *offered when the page can name everything it would run
+> with*, of which the target is one thing.
 
 ### What to do when an exemption is demanded
 

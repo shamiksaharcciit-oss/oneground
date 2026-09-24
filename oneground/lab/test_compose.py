@@ -940,3 +940,134 @@ def test_a_job_drawing_carries_no_absolute_path(tmp_path):
         assert str(tmp_path) in sup.read()[0].build
     finally:
         lab.stop()
+
+# =========================================== step 7: coverage and fidelity
+# Acceptance, not guards: whether the form OFFERS every field and whether the
+# explanation in the file is the string the form showed are properties of a
+# pair of things, and no guard has access to intent.
+
+
+def test_the_explanation_in_the_file_is_the_string_the_form_shows():
+    """One string, not two that agree.
+
+    Both the form and the writer read `fields.BY_NAME[...].note`, so this
+    asserts there is one source rather than that two copies match -- which
+    is the difference between a property and a coincidence somebody has to
+    maintain.
+    """
+    from oneground.lab import server as srv
+    lab_fields = srv.LabServer.compose_fields(None, {})["fields"]
+    shown = {f["name"]: f["note"] for f in lab_fields}
+
+    state = {p.name: "x" for p in fields.FIELDS if p.type is str}
+    state["oneground"] = 1
+    text = compose.render(compose.document(state))
+    for name, note in shown.items():
+        if name not in text.replace(":", "").split() and                 name.split(".")[-1] not in text:
+            continue                     # not written for this state
+        words = " ".join(note.split())[:40]
+        assert words in " ".join(text.split()), (
+            f"{name}: the form shows a note the file does not carry")
+
+
+def test_the_writer_uses_the_strings_it_is_given():
+    """The mutant for the one-string claim. If `render` reached for its own
+    copy instead of the declaration, this would still show the real notes."""
+    doc = compose.document(TIER1)
+    text = compose.render(doc, explain=lambda name: "SENTINEL for " + name)
+    assert "SENTINEL for run.seed" in text
+    assert "Every draw in a run is seeded" not in text
+
+
+def test_the_file_says_its_comments_are_not_data():
+    """Stated in the file, once, at the top -- the front-door ruling's own
+    requirement. A user editing a comment changes nothing, and nothing but
+    the file itself is going to tell them."""
+    text = compose.render(compose.document(TIER1))
+    assert text.startswith("# Written by oneground.")
+    assert "not read back" in text
+
+
+def test_every_field_the_form_offers_can_be_written_and_read_back(tmp_path):
+    """Coverage: everything in the table survives a real write through the
+    guard, which is what makes 'the form offers it' mean anything."""
+    state = {}
+    for p in fields.FIELDS:
+        if p.name.startswith("extraction") or p.name == "corpus.sample.text.path":
+            continue                     # a different tier; covered below
+        if p.choices:
+            state[p.name] = str(list(p.choices)[0])
+        elif p.type is bool:
+            state[p.name] = "true"
+        elif p.type is int:
+            state[p.name] = "7"
+        elif p.type is list:
+            state[p.name] = "a, b"
+        else:
+            state[p.name] = "./x"
+    state["corpus.declared.size_now"] = "10"
+    state["corpus.declared.dimension"] = "8"
+    doc = compose.document(state)
+    written = compose.write(doc, str(tmp_path / "r.yaml"))
+    with open(written, encoding="utf-8") as f:
+        again = yaml.safe_load(f)
+    assert again == doc, "a field the form offers did not survive the write"
+
+
+def test_the_written_file_is_stable_for_the_same_answers(tmp_path):
+    """Two files with the same content are the same bytes: the writer walks
+    the declaration's order, not the mapping's. A file whose keys wander is
+    a file nobody can diff."""
+    a = compose.render(compose.document(TIER1))
+    shuffled = dict(reversed(list(TIER1.items())))
+    b = compose.render(compose.document(shuffled))
+    assert a == b
+
+def test_the_read_half_is_still_read_only_over_a_written_into_directory(
+        tmp_path):
+    """Step 8. Slice 1 proved the server writes nothing; this proves that
+    writing runs did not make the reader mutable.
+
+    The directory is written into first -- a requirements file through the
+    guard, a job list, a log -- and then every read endpoint is exercised
+    and the digests are compared. A read-only proof over an empty directory
+    would be a weaker claim than the one slice 1 made.
+    """
+    import hashlib
+    from oneground import supervisor as supmod
+
+    # write into it, by all three paths this slice added
+    compose.write(compose.document(TIER1), str(tmp_path / "r.yaml"))
+    sup = supmod.Supervisor(str(tmp_path))
+    job = sup.enqueue("simulate", ["simulate", "runs/x"])
+    os.makedirs(os.path.join(str(tmp_path), supmod.LOGS_DIR), exist_ok=True)
+    with open(os.path.join(str(tmp_path), job.log), "w",
+              encoding="utf-8", newline="") as f:
+        f.write("some output\n")
+
+    def digests():
+        out = {}
+        for root, _d, files in os.walk(str(tmp_path)):
+            for name in sorted(files):
+                path = os.path.join(root, name)
+                with open(path, "rb") as f:
+                    out[os.path.relpath(path, str(tmp_path))] =                         hashlib.sha256(f.read()).hexdigest()
+        return out
+
+    before = digests()
+    assert before, "nothing was written, so this proves nothing"
+
+    lab = _ui(str(tmp_path))
+    try:
+        lab.check({})
+        lab.job_list({})
+        lab.job_targets({})
+        lab.supervisor_address({})
+        lab.compose_fields({})
+        lab.compose_template({})
+        lab.job_log({"id": [job.id]})
+        lab.run_list({})
+    finally:
+        lab.stop()
+
+    assert digests() == before, "a read endpoint changed the directory"

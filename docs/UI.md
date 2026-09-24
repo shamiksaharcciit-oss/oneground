@@ -338,6 +338,14 @@ Every field's explanation is written into the file as a comment, from the
 same declaration the form renders itself from
 (`oneground/intake/fields.py`), so the two cannot drift.
 
+**The form offers what the table declares, which is 21 of the 74 fields a
+requirements file can carry.** The other 53 -- most of `constraints`,
+`simulate` and `cost` -- are in the schema and are validated by nothing, so
+there is no refusal for their explanation to share a declaration with. The
+number is here rather than an impression, and
+`tasks/finding-the-table-and-the-example-describe-different-things.md` has
+the measurement and what it would cost to close.
+
 **And the form validates nothing**, which is the part most likely to be
 "improved" later. Eleven of `intake`'s twenty-five refusals are relational or
 not about a field at all, and a form re-expressing them would be the second

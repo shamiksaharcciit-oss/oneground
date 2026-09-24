@@ -300,22 +300,97 @@ def _field_named_in(refusal):
 
 
 # ------------------------------------------------------------- the render
-def render(doc, explain=None):
-    """`D` to bytes.
+#: Written once at the top of every file this produces. The front-door
+#: ruling says comments are never read back as data, and a file that leaves
+#: the tool should say so in itself rather than relying on a reader knowing.
+PREAMBLE = (
+    "# Written by oneground. Every explanation below is generated from the\n"
+    "# same declaration the form shows, so the two cannot drift.\n"
+    "#\n"
+    "# The comments are not read back. Editing one changes nothing about the\n"
+    "# run, and saving through the form rewrites them from the current text.\n"
+)
 
-    `explain` is the hook step 2 fills: a callable taking a dotted path and
-    returning the explanation to write above it, which is the same string the
-    form showed. It is separate from this function because the guard's
-    identity is over the parsed document, so comments cannot change what this
-    round-trips to -- and a renderer that could not have comments added to it
-    later would have to be rewritten to gain them.
+
+def _comment(text, indent):
+    """One explanation, wrapped, as YAML comment lines at `indent`.
+
+    Wrapped here rather than left to the writer of the declaration: a note
+    is one sentence in a table and a paragraph in a file, and asking every
+    author to hard-wrap for an indentation they cannot see is asking them to
+    maintain a layout.
     """
-    if explain is not None:                        # pragma: no cover - step 2
-        raise NotImplementedError(
-            "comment rendering is task 046 step 2; the hook is here so that "
-            "adding it does not rewrite the writer")
-    return yaml.safe_dump(doc, sort_keys=False, default_flow_style=False,
-                          allow_unicode=True)
+    import textwrap
+    pad = " " * indent
+    return "".join(
+        pad + "# " + line + "\n"
+        for line in textwrap.wrap(" ".join(text.split()),
+                                  width=max(30, 74 - indent)))
+
+
+def render(doc, explain=None):
+    """`D` to bytes, with each field's explanation above it.
+
+    **The comments come from the same strings the form shows**, because both
+    read `fields.BY_NAME[...].note`. That is what makes the one-string test
+    a property rather than an agreement between two places: there is one
+    place.
+
+    `explain` overrides the source of those strings and exists for the test
+    that proves the writer uses what it is given rather than reaching for a
+    second copy. It takes a dotted path and returns the text, or None.
+
+    Comments cannot change what this round-trips to, which is why the guard's
+    identity is over the parsed document. That was settled before this
+    function had comments in it; adding them changed nothing about the guard,
+    which is the strongest evidence the rule was drawn in the right place.
+    """
+    if explain is None:
+        def explain(name):
+            param = fields.BY_NAME.get(name)
+            return param.note if param else None
+
+    lines = [PREAMBLE]
+    lines.extend(_emit(doc, explain, prefix="", indent=0))
+    return "".join(lines)
+
+
+def _emit(node, explain, prefix, indent):
+    """The document, in the declaration's order, each leaf explained.
+
+    Ordered by `fields.FIELDS` rather than by the mapping, so two files with
+    the same content are the same bytes -- a file whose keys wander is a file
+    nobody can diff. Anything the table does not declare is written after, in
+    its own order, rather than dropped: the guard would catch a loss, and a
+    file the form cannot fully explain is still a file it must write whole.
+    """
+    out = []
+    pad = " " * indent
+    declared = [p.name for p in fields.FIELDS]
+
+    def rank(key):
+        full = prefix + key
+        for i, name in enumerate(declared):
+            if name == full or name.startswith(full + "."):
+                return i
+        return len(declared)
+
+    for key in sorted(node, key=rank):
+        value = node[key]
+        full = prefix + key
+        if isinstance(value, dict):
+            out.append("%s%s:\n" % (pad, key))
+            out.extend(_emit(value, explain, full + ".", indent + 2))
+            continue
+        note = explain(full)
+        if note:
+            out.append(_comment(note, indent))
+        scalar = yaml.safe_dump(value, default_flow_style=True,
+                                allow_unicode=True).strip()
+        if scalar.endswith("\n..."):                    # pragma: no cover
+            scalar = scalar[:-4].strip()
+        out.append("%s%s: %s\n" % (pad, key, scalar))
+    return out
 
 
 # -------------------------------------------------------------- the guard
