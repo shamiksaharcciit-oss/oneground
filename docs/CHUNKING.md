@@ -244,6 +244,69 @@ At full corpus — all 10,000 filings — the three produce 5,294,400 chunks,
 about 7.5 hours of embedding alone, 9 to 10 hours and roughly $7. That is the
 reason the published comparison is on 10%.
 
+### What the 10% comparison establishes, and what it does not (task 052)
+
+A comparison run on a subsample earns one more question before it earns a
+citation: does the conclusion hold at full scale, and does it hold across
+a fair chunking-parameter choice. Answered once here rather than assembled
+on demand, because the 241× result is the strongest thing this document
+reports and a reader will ask about the subsample first.
+
+**The `% of ceiling` figure is immune to chunk-count differences by
+construction, not merely by observation.** `alignment_rate = aligned /
+starts` and `alignment_ceiling = ceiling_units / starts` share the same
+denominator, so `% of ceiling = alignment_rate / alignment_ceiling =
+aligned / ceiling_units` — `starts` cancels algebraically. Whatever a
+strategy's total chunk count is, `structure`'s 61.4% of ceiling does not
+move because of it. The raw 241× ratio (0.0723 / 0.0003) is the one figure
+with `starts` still in its denominator, uncancelled — and `structure`
+produces *more* total chunks than `fixed` (182,361 against 158,341), so if
+chunk count moves this number at all, the raw ratio is **understated, not
+inflated**: the true gap is at least 241×.
+
+**`span_survival` already counts every span, matched or not — nothing is
+excluded.** `structure`'s 75 spans with no containing chunk (Items longer
+than `max_size`, which no single chunk respecting `max_size` can contain
+by construction) are scored as `split`, the same as any other unsurvived
+span, and are already inside the reported 0.6386. They are not a
+methodological gap in the number; they are a known, structural ceiling
+below 1.0 that exists independent of cutting quality, on top of whatever
+the real cutting quality contributes.
+
+**Chunking below the floor is real and unquantified — `sentence` and
+`structure` write roughly 7,400 orphan chunks each (under 64 tokens)
+against `fixed`'s 60.** This is not evidence `fixed` handles a size floor
+better than the other two; the three strategies implement a size floor
+three different ways, which is its own defect and is tracked separately
+rather than folded into this statement (`tasks/054-one-min-size-three-
+meanings.md`). What it means for *this* comparison: `self_recall@5` /
+`containing_hit@5` are where the exposure is real. The project's own bias
+caption already tells a reader to check orphan count and length
+distribution alongside self-retrieval, and the `fragmented` flag exists
+for exactly this — but the flag keys on `p50` (391 and 389 here, both
+unremarkable), which cannot see a long tail of thousands of small chunks
+sitting below the median. So the machinery is aimed at this bias and does
+not currently measure it: **not silently biased, genuinely
+unquantified.** Closing it needs the three strategies re-chunked under a
+matched floor, which needs the floor parameter to mean one thing first.
+
+**The near-duplicate measure at full scale is `couldnt_check`, not
+"probably fine."** It ran 257-300 s per strategy over 158k-186k chunk
+texts at 10%; nobody has run it at full corpus. There is no specific
+reason to expect the rate to move qualitatively at ten times the sample —
+it is a large-N proportion estimate over an LSH-based near-duplicate
+count — and that is not the same claim as asserting it would not. Full
+corpus, it would be the largest single line inside the projected 9-10 h /
+~$7 run.
+
+**None of the above moves the headline.** `structure` still wins boundary
+alignment and span survival by a wide margin and still loses
+`self_recall@5` to `fixed`; the one open question is how much of that
+retrieval loss is the genuine cost of structure-aware cutting and how much
+is the unmatched orphan floor — which is a question about the *margin*,
+not about the *direction* two readers would draw opposite, confident, wrong
+conclusions from either column alone.
+
 ## 8. What is written down now, and nothing else
 
 This document; a `chunking:` section in `docs/CHARTER.md` under v0.2 with the four
