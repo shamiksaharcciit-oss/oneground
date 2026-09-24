@@ -692,7 +692,7 @@ class LabServer:
             found = jobsmod.read(self.runs_dir)
         except jobsmod.JobError as e:
             raise ValueError(str(e)) from None
-        return {"jobs": [j.to_dict() for j in found],
+        return {"jobs": [self._drawable_job(j) for j in found],
                 "stages": list(jobsmod.STAGES),
                 "not_a_job": [{"stage": k, "why": v}
                               for k, v in jobsmod.NOT_A_JOB.items()]}
@@ -789,6 +789,27 @@ class LabServer:
                                           "directory",
                           "workdir": "a run in this directory",
                           "session": "a pod session spec in this directory"}}
+
+    @staticmethod
+    def _drawable_job(job):
+        """One job as a page may see it: no absolute paths.
+
+        `runs.shown_dir`'s own rule, applied one artifact further out --
+        *keeping the absolute path out of the drawing means no renderer can
+        leak it*. The record on disk keeps the real path, because that is
+        evidence about where the work happened; what crosses to a page is
+        the last two segments.
+
+        It was the build footer that made this necessary: every job row
+        printed the full package directory, so a developer's home directory
+        appeared in every screenshot of the jobs page -- which is slice 1's
+        header leak, in the newest surface, three weeks later.
+        """
+        out = job.to_dict()
+        for field in ("build", "workdir"):
+            if out.get(field):
+                out[field] = runsmod.shown_dir(out[field])
+        return out
 
     def job_log(self, params):
         """One job's log: the CLI's own output, unchanged.

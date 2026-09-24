@@ -518,3 +518,15 @@ body.mode-runs .cannot-run { color: var(--warn); }
 .handover-command { margin: 0; padding: 8px 10px; font-size: 12.5px;
   background: var(--panel); border: 1px solid var(--rule);
   border-radius: 4px; overflow-x: auto; white-space: pre; }
+
+/* The row's identity: the target, beside the stage rather than buried in
+   the invocation a reader reaches last. */
+.job-target { font-family: var(--font-mono); font-size: 12.5px;
+  color: var(--ink); background: var(--field); padding: 1px 7px;
+  border: 1px solid var(--rule); border-radius: 4px; }
+.shared-why { margin: 0 0 12px; padding: 8px 10px; border-radius: 4px;
+  background: var(--panel); border: 1px solid var(--rule); }
+/* A placeholder must not be set in a command's face: it was read as a
+   default once, which is the defect the chooser exists to remove. */
+.chooser-preview.placeholder { font-family: inherit; font-style: italic;
+  color: var(--ink-soft); background: transparent; border-style: dashed; }

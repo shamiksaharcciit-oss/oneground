@@ -701,6 +701,7 @@ def test_an_offset_past_the_end_says_the_log_was_replaced(tmp_path):
     """Empty and replaced are different answers. Returning nothing for a
     stale offset would draw as "no output" over a log that exists."""
     from oneground import supervisor as supmod
+    from oneground.lab import runs as runsmod
     sup = supmod.Supervisor(str(tmp_path))
     job = sup.enqueue("simulate", ["simulate", "runs/x"])
     os.makedirs(os.path.join(str(tmp_path), supmod.LOGS_DIR), exist_ok=True)
@@ -902,3 +903,40 @@ def test_a_forward_that_works_returns_the_supervisors_own_answer(tmp_path):
             lab.stop()
     finally:
         channel.stop()
+
+def test_a_job_drawing_carries_no_absolute_path(tmp_path):
+    """`runs.shown_dir`'s rule one artifact further out: keeping the
+    absolute path out of the DRAWING means no renderer can leak it.
+
+    The job record on disk keeps the real path -- that is evidence about
+    where the work happened -- and what crosses to a page is the tail. It
+    was the build footer that made this necessary: every row printed the
+    full package directory, so a developer's home directory appeared in
+    every screenshot of the page. Slice 1's header leak, in the newest
+    surface, three weeks later.
+    """
+    from oneground import supervisor as supmod
+    from oneground.lab import runs as runsmod
+    sup = supmod.Supervisor(str(tmp_path))
+    job = sup.enqueue("simulate", ["simulate", "runs/x"])
+    job.build = str(tmp_path / "deep" / "oneground")
+    sup._replace(job)
+
+    lab = _ui(str(tmp_path))
+    try:
+        drawn = lab.job_list({})["jobs"][0]
+        for field in ("build", "workdir"):
+            assert drawn[field], field
+            # The property, not the format: the absolute path is absent and
+            # what remains is a tail `shown_dir` produced. Asserting a slash
+            # count instead would have been asserting the helper's spelling,
+            # which is not what this test is about -- and the first version
+            # did, and failed on `.../deep/oneground`.
+            assert str(tmp_path) not in drawn[field], (
+                field + " carries the absolute path into the drawing")
+            assert drawn[field] == runsmod.shown_dir(drawn[field]), (
+                field + " is not a shown path")
+        # and the record itself still has it, because that is evidence
+        assert str(tmp_path) in sup.read()[0].build
+    finally:
+        lab.stop()

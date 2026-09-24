@@ -92,12 +92,34 @@
     return chip;
   }
 
+  // Reasons that appear on more than one visible row. Computed per draw,
+  // because two rows sharing a reason today may not tomorrow.
+  let shared = new Set();
+
+  function sharedReasons(jobs_) {
+    const seen = new Map();
+    jobs_.forEach((j) => {
+      if (!j.why) return;
+      seen.set(j.why, (seen.get(j.why) || 0) + 1);
+    });
+    return new Set(Array.from(seen.entries())
+      .filter(([_w, n]) => n > 1).map(([w]) => w));
+  }
+
   function jobRow(job) {
     const row = el('section', 'job');
     row.dataset.job = job.id;
 
     const head = el('div', 'job-head');
     head.appendChild(el('span', 'job-stage', job.stage));
+    // THE ROW'S IDENTITY IS ITS TARGET. Three `propose` jobs at the same
+    // state with the same prose are indistinguishable at a glance, and the
+    // only thing that differs -- which run -- was buried in the invocation
+    // below, where it is read last. It is what a person is scanning for, so
+    // it is in the head beside the stage.
+    const target = (job.invocation || []).slice(1).filter(
+      (a) => a.indexOf('--') !== 0)[0];
+    if (target) head.appendChild(el('span', 'job-target', target));
     head.appendChild(stateChip(job));
     head.appendChild(el('span', 'job-when',
       job.ended || job.started || 'not started'));
@@ -109,10 +131,18 @@
       'oneground ' + (job.invocation || []).join(' '));
     row.appendChild(inv);
 
-    // Why it is in the state it is in. Shown for every terminal job, not
-    // only the interesting ones: a state without its reason hands over the
-    // conclusion and keeps the evidence.
-    if (job.why) row.appendChild(el('p', 'job-why', job.why));
+    // Why it is in the state it is in -- unless every row says the same
+    // thing, in which case it is a fact about the product and not about
+    // this job, and it is stated once above the list.
+    //
+    // Three refused jobs carried three verbatim copies of "the tool
+    // declined, with a reason and a remedy. Every stage uses this code..."
+    // That is task 045's one fact stated many times, in the surface where
+    // the same repair was made two days ago -- the shape recurs in whatever
+    // is newest, which is the thing worth remembering about it.
+    if (job.why && !shared.has(job.why)) {
+      row.appendChild(el('p', 'job-why', job.why));
+    }
 
     // The pod card is the CLI's own card: `pod plan` prints it and the log
     // shows it verbatim. The UI computes nothing about a session -- the
@@ -291,11 +321,18 @@
 
     // The command this would run, before it runs. Nothing is enqueued from
     // this page that the page has not already shown whole.
-    const shown = el('pre', 'chooser-preview',
-      'oneground ' + stage + ' <' + spec_.kind + '>');
+    //
+    // At rest it must NOT look like a command. `oneground propose <workdir>`
+    // rendered identically to a real one and was read as a default -- which
+    // is exactly the defect the chooser exists to remove, reappearing as a
+    // typographic one. So the resting state is a sentence, and only a real
+    // command is ever set in the command's face.
+    const shown = el('pre', 'chooser-preview placeholder',
+      'pick one above to see the command this would run');
     box.appendChild(shown);
     Array.prototype.forEach.call(list.querySelectorAll('.door'), (b, i) => {
       b.addEventListener('mouseenter', () => {
+        shown.classList.remove('placeholder');
         shown.textContent = 'oneground ' + stage + ' '
           + spec_.choices[i].arg;
       });
@@ -500,6 +537,14 @@
       list.appendChild(el('p', 'note',
         'Nothing has been run from this directory yet.'));
     }
+    shared = sharedReasons(out.jobs);
+    shared.forEach((why) => {
+      const p = el('p', 'note shared-why');
+      p.appendChild(document.createTextNode('Several of these say the same '
+        + 'thing, so it is said once: '));
+      p.appendChild(el('span', null, why));
+      list.appendChild(p);
+    });
     out.jobs.slice().reverse().forEach((job) => {
       list.appendChild(jobRow(job));
     });
