@@ -133,4 +133,4 @@ def test_every_receipt_writer_records_it_beside_the_version():
                 assert "invocation" in keys, (
                     f"{os.path.relpath(path, REPO)}:{node.lineno} writes the "
                     "oneground block and no invocation beside it")
-    assert sites == 12, f"expected 12 writer sites, found {sites}"
+    assert sites == 14, f"expected 14 writer sites, found {sites}"
