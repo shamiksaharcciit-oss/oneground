@@ -36,6 +36,71 @@ rounding couldn't-check up to verified.
 | drift cutoff | `2019-01-01` | `2017-01-01` | `2024-01-01` |
 | ships | — | — | section offsets per document; pre-chunking duplicate rate |
 
+### `built` vs `verified` (task 053)
+
+**The rule already lived in code, not in writing, and checking it against
+how `arxiv-150k` actually got `status: verified` finds the two disagree —
+stated first, because that outranks anything this section goes on to
+recommend.**
+
+`oneground/fixture/verify.py`'s own summary logic says, when every value
+it recomputed reproduced and nothing published was left outside that set:
+*"Every published value reproduced (N of N). This fixture's status may be
+set to `verified`."* That is the only place this project has ever stated
+a promotion condition. Checked against `arxiv-150k`, the one fixture
+carrying `status: verified` today: **the condition has never, until this
+task, been true for it.** `semantic_sharded.routing_ceiling`,
+`.p50_copies`, `.p95_copies` and `.p99_copies_per_vector` were published
+in `arxiv-150k.fixture.yaml` from the repository's first commit — the
+same commit that already carried `status: verified` — and `verify.py`'s
+coverage table never named them, so they sat in `uncovered` from day one.
+Re-running `oneground fixture verify arxiv-150k` before this task's fix
+confirmed it: *"8 verified... 4 published values are not recomputed by
+this command."* The code's own condition for `verified` could not have
+been what produced `arxiv-150k`'s status, because the code has never once
+been able to say yes.
+
+**What actually produced it, in the spec's own words** (`arxiv-150k.
+fixture.yaml`, the `values_survive_a_library_version_change` finding):
+*"The status was set only after a run in the pinned environment,"*
+reproducing *"the same eight values"* — the eight `REPRODUCIBLE`/`REF_ROWS`
+fields this command already recomputed, under pinned library versions,
+each within its published tolerance. That is a real, checkable condition,
+and it held then and holds now — re-verified in the course of this task.
+It is simply a **narrower** rule than the one `verify.py`'s message
+states today: *declared coverage reproduces*, not *nothing published is
+left uncovered*.
+
+**This task closes the gap that made the two rules different.** Task
+053's item 3 adds the four missing fields to `REF_ROWS` — no new
+computation, `ref_semantic_sharded()` already returned all six from the
+one call `verify_values()` was already making for the two it read.
+Re-running `oneground fixture verify arxiv-150k` **after** the fix:
+*"12 verified... Every published value reproduced (12 of 12). This
+fixture's status may be set to `verified`."* For the first time, the
+code's stated condition is actually true of the fixture it names —
+not because the historical promotion is now reproducible under the rule
+that (per the spec's own words) governed it, but because that rule and
+the code's stricter one have, as of this fix, become the same rule: with
+`uncovered` empty, *declared coverage reproduces* and *nothing published
+is left uncovered* say the same thing.
+
+**The rule, stated where a reader of a fixture spec meets the word:**
+`status: verified` means every value the spec publishes as a number
+reproduces, within its own tolerance, under the pinned environment — not
+merely the values `oneground fixture verify` happened to recompute. A
+`built` fixture may satisfy this and not yet be checked against it; a
+`verified` one has been, and `verify.py`'s own summary line is how a
+reader confirms it without re-deriving the condition from source.
+
+**`sec-filings-10k` now has the same empty `uncovered` set** — this
+task's item 3 fix applies to every spec publishing `semantic_sharded`
+results, not only `arxiv-150k` — but its status stays `built`: the
+release assets (`vectors.npy`, `queries.npy`) were not present in the
+environment this task ran in, so the twelve values could not be
+recomputed here at all (`couldnt_check`, honestly, not assumed).
+Promoting it is the developer's call, on a machine that has them.
+
 ### The five measures
 
 | measure | tolerance | arxiv-150k | stackexchange-150k | sec-filings-10k |

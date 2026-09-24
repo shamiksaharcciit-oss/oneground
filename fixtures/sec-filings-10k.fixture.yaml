@@ -691,6 +691,7 @@ artifacts:
     - documents.jsonl.zst
     - section_statistics.json
     - near_duplicates.json
+    - accessions.json
   files:
     - documents.jsonl.zst        # 10,000 filings: text, sections with offsets, digest
     - chunks.jsonl.zst           # the sampled 150,000 chunks, with their spans

@@ -1287,16 +1287,22 @@ def test_every_published_value_is_said_only_when_the_published_set_is_covered():
     assert not any("may be set to `verified`" in s for s in said), said
 
 
-def test_the_shipped_150k_specs_publish_values_this_command_does_not_recompute():
-    """Not synthetic. Found by task 022: `semantic_sharded` publishes its
-    routing ceiling and copy percentiles, which no row recomputes, so "every
-    published value reproduced" was never true of these specs."""
+def test_the_shipped_150k_specs_leave_nothing_uncovered():
+    """Task 022 found `semantic_sharded` publishing its routing ceiling and
+    copy percentiles with no row recomputing them, so "every published value
+    reproduced" was never true of these specs -- not because the values
+    disagreed, but because REF_ROWS never named them (verify_values already
+    computed all four as part of the one call it makes for recall_at_10 and
+    storage_amplification; task 053 added the four names and four more
+    _compare() calls, at zero extra cost, to read what was already there).
+
+    That gap is what `uncovered` reported for both shipped specs. Now empty:
+    the coverage table matches everything `ref_semantic_sharded` returns."""
     for name in ("arxiv-150k.fixture.yaml", "stackexchange-150k.fixture.yaml"):
         spec = _shipped(name)
         uncovered = (set(fv.published_value_names(spec))
                      - set(fv.value_names(spec)))
-        assert "semantic_sharded.routing_ceiling" in uncovered, (name,
-                                                                 uncovered)
+        assert uncovered == set(), (name, uncovered)
 
 
 def test_the_three_different_sentences_stay_different():

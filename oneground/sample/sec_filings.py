@@ -771,6 +771,14 @@ def collect_documents(source, spec, log=None, receipt=None):
         by_acc, snapshot, selection = resolve_source(spec, log=log)
 
     order = sorted(by_acc)
+    # Task 053: the only thing that survived resolve_source() was a single
+    # digest over this exact list (selection_sha256). A moved EDGAR
+    # selection correctly refuses a rebuild against that digest -- and then
+    # leaves a rebuilder with no way to reconstruct what the digest was
+    # over. Captured sorted, before the seeded shuffle below reorders it,
+    # so it matches what was hashed rather than the sampling order.
+    if receipt is not None:
+        receipt["accessions"] = list(order)
     random.Random(seed).shuffle(order)
 
     docs, rejected, examined, bytes_read = [], {}, 0, 0
@@ -904,9 +912,10 @@ def section_statistics(docs):
 def sample_records(source, spec, n_total, seed, log=None, receipt=None):
     """The reader `oneground.sample.READERS` dispatches to.
 
-    Documents in, chunk records out. The three artifacts this fixture ships
+    Documents in, chunk records out. The four artifacts this fixture ships
     that the others do not -- the documents with their section offsets, the
-    section statistics, and the pre-chunking duplicate rate -- are written
+    section statistics, the pre-chunking duplicate rate, and the accession
+    list the selection digest was computed over (task 053) -- are written
     here, because each is a property of the corpus BEFORE chunking and
     nothing downstream could reconstruct them afterwards.
     """
@@ -920,6 +929,19 @@ def sample_records(source, spec, n_total, seed, log=None, receipt=None):
 
     docs, stats = collect_documents(source, spec, log=log, receipt=receipt)
 
+    # --- accessions.json: what selection_sha256 was computed over -----------
+    # Task 053. ~100 KB compressed, small enough to commit directly rather
+    # than route through the release-asset path documents.jsonl.zst and the
+    # vectors/queries files use. A rebuilder who has only this file and a
+    # moved EDGAR index can now see what the original selection was, even
+    # though resolve_source() will still correctly refuse to rebuild against
+    # a selection whose digest no longer matches.
+    if receipt is not None and receipt.get("accessions") is not None:
+        write_json_stable(os.path.join(outdir, "accessions.json"),
+                          receipt["accessions"])
+        _say(log, f"accessions.json: {len(receipt['accessions']):,} "
+                  "accessions")
+
     # --- documents.jsonl.zst: the corpus, with its section offsets ----------
     dpath = os.path.join(outdir, "documents.jsonl.zst")
     with open(dpath, "wb") as f, \
@@ -929,9 +951,14 @@ def sample_records(source, spec, n_total, seed, log=None, receipt=None):
     _say(log, f"documents.jsonl.zst: {os.path.getsize(dpath) / 1e6:.1f} MB")
 
     # --- section statistics -------------------------------------------------
+    # Written after chunking, task 053: chunks_total/chunks_per_document/
+    # chunks_crossing_a_boundary were computed below and handed to `receipt`
+    # for the build log alone -- the full-corpus figures existed nowhere a
+    # reader of this file could find them. Nothing between here and the
+    # chunking block reads this file back, so the write can wait for the
+    # numbers it is meant to carry rather than being redone twice.
     ss = section_statistics(docs)
     ss["extraction"] = stats
-    write_json_stable(os.path.join(outdir, "section_statistics.json"), ss)
 
     # --- the pre-chunking duplicate rate ------------------------------------
     nd = spec["near_duplicates"]
@@ -978,14 +1005,21 @@ def sample_records(source, spec, n_total, seed, log=None, receipt=None):
 
     crossing = sum(1 for i, c in index
                    if sections_spanned(c, docs[i]["sections"])["crosses_boundary"])
+    chunking = dict(
+        chunks_total=len(index),
+        chunks_per_document=round(len(index) / max(len(docs), 1), 2),
+        chunks_crossing_a_boundary=crossing,
+        crossing_rate=round(crossing / max(len(index), 1), 4))
     if receipt is not None:
-        receipt["chunking"] = dict(
-            chunks_total=len(index),
-            chunks_per_document=round(len(index) / max(len(docs), 1), 2),
-            chunks_crossing_a_boundary=crossing,
-            crossing_rate=round(crossing / max(len(index), 1), 4))
+        receipt["chunking"] = chunking
     _say(log, f"  {crossing:,} of {len(index):,} chunks cross a section "
               f"boundary ({crossing / max(len(index), 1):.1%})")
+
+    # Task 053: the same numbers just printed to the build log, now in the
+    # published record rather than only in it. `ss` was built before this
+    # block ran and its write deferred to here for exactly this key.
+    ss["chunking"] = chunking
+    write_json_stable(os.path.join(outdir, "section_statistics.json"), ss)
 
     if len(index) < n_total:
         raise SourceError(

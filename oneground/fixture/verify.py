@@ -495,7 +495,17 @@ def _anything_published(published, refs, wanted, ref_rows):
 
 REF_ROWS = (("single_node_hnsw.recall_at_10", "single_node_hnsw"),
             ("semantic_sharded.recall_at_10", "semantic_sharded"),
-            ("semantic_sharded.storage_amplification", "semantic_sharded"))
+            ("semantic_sharded.storage_amplification", "semantic_sharded"),
+            # Task 053. `ref_semantic_sharded` already returns these four
+            # alongside the two above, in the one call `verify_values` was
+            # already making -- they were published from arxiv-150k's first
+            # commit and never covered by this table, so `uncovered` has
+            # named them ever since without anyone adding four lines to say
+            # why. There was no reason; only the omission.
+            ("semantic_sharded.routing_ceiling", "semantic_sharded"),
+            ("semantic_sharded.p50_copies", "semantic_sharded"),
+            ("semantic_sharded.p95_copies", "semantic_sharded"),
+            ("semantic_sharded.p99_copies_per_vector", "semantic_sharded"))
 
 
 def value_names(spec):
@@ -686,9 +696,23 @@ def verify_values(fixture_id, fixture_dir, spec, assets_dir,
                 r.get("storage_amplification"),
                 ss.get("storage_amplification"),
                 ss.get("tolerance")), unpinned))
+            # Task 053: the same call above already returns these four: no
+            # extra index build, no extra cost. `_compare` reports
+            # couldnt_check/UNPUBLISHED on its own if a spec does not
+            # publish one of them, so this is safe for a fixture whose
+            # semantic_sharded block predates these fields too.
+            for field in ("routing_ceiling", "p50_copies", "p95_copies",
+                         "p99_copies_per_vector"):
+                rows.append(_downgrade(_compare(
+                    f"semantic_sharded.{field}", r.get(field),
+                    ss.get(field), ss.get("tolerance")), unpinned))
         except Exception as e:                        # reported, not raised
             for name in ("semantic_sharded.recall_at_10",
-                         "semantic_sharded.storage_amplification"):
+                         "semantic_sharded.storage_amplification",
+                         "semantic_sharded.routing_ceiling",
+                         "semantic_sharded.p50_copies",
+                         "semantic_sharded.p95_copies",
+                         "semantic_sharded.p99_copies_per_vector"):
                 rows.append(ValueRow(name, COULDNT_CHECK,
                                      recompute_failed(e)))
     return rows
