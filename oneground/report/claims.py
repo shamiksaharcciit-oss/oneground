@@ -1440,39 +1440,36 @@ def runner_up_lines(recommended, options, meets="meets",
     return out
 
 
-def how_to_resolve(name, verdict, verify_info):
-    """What is missing. Specific, not generic."""
-    reason = verdict.reason
-    # Task 034. For a not-verifiable-here row what would settle it is not a
-    # command: it is a different engine, or an adapter that does not exist.
-    # Printing "run `oneground verify`" here would be false, and it is the
-    # one case where the remedy is a contribution rather than an action.
-    remedy = getattr(verdict, "remedy", "")
-    kind = getattr(verdict, "couldnt_check_kind", None)
-    if remedy and kind in ("not_verifiable_here", "coverage_unresolved"):
-        return f"To decide {name}: {remedy}."
-    if name == "latency_p95":
-        if "no verify run" in reason:
-            return ("To decide latency_p95: run `oneground verify` against a "
-                    "real engine in the environment the constraint targets. "
-                    "Latency is never taken from simulation.")
-        if "could not attribute" in reason:
-            env = (verify_info or {}).get("platform", "this machine")
-            return ("To decide latency_p95: re-run `oneground verify` where "
-                    "the round trip to the engine is small relative to the "
-                    "query. On " + env + " the baseline RTT was a large "
-                    "fraction of the query p95, so the number measured the "
-                    "path rather than the engine. A pod session with the "
-                    "client and engine in the same environment is the way to "
-                    "settle it (task 011).")
-        if "constraint targets" in reason:
-            return ("To decide latency_p95: measure in the environment the "
-                    "constraint names. " + reason + ".")
-        return "To decide latency_p95: %s." % reason
-    if name == "monthly_budget":
-        return ("To decide monthly_budget: a cost model with error bands is "
-                "not in this build (task 011). Nothing here estimates cost, "
-                "because a confident number from list prices would be "
-                "fiction.")
-    return "To decide %s: %s." % (name, reason)
+def how_to_resolve(name, verdict, verify_info=None):
+    """What would settle this, or a visible statement that nothing recorded
+    here would. Task 045, finding 5.
+
+    **Every kind that carries a remedy is routed, not two of three.** This
+    used to name `not_verifiable_here` and `coverage_unresolved` and route
+    only those, so `not_verified` -- the one kind whose remedy is always an
+    action -- fell past it even after someone filled the field in. Routing on
+    the presence of the remedy rather than on a list of kinds means a new kind
+    arrives routed, which is the difference between a rule and a table
+    somebody has to remember.
+
+    **The fall-through no longer dresses a reason as a remedy.** It used to
+    end `return "To decide %s: %s." % (name, reason)`, which begins with the
+    grammar of an instruction and then states the obstacle. A reader skimming,
+    or a reviewer checking that remedies exist, sees a sentence shaped like an
+    action; only someone who reads to the end finds there is nothing to do in
+    it. That is worse than a blank, because a blank is obviously missing --
+    so when no remedy is recorded, the absence is now the sentence.
+
+    `verify_info` is no longer read: the one branch that needed it composed
+    the environment-noise remedy here, from a substring of the reason, and
+    that remedy now lives on the verdict that knows it. The parameter stays
+    for the callers that pass it positionally.
+    """
+    remedy = (getattr(verdict, "remedy", "") or "").strip()
+    if remedy:
+        return "To decide %s: %s" % (name, remedy if remedy.endswith(".")
+                                     else remedy + ".")
+    return ("Nothing recorded in this run settles %s, and no remedy for it "
+            "is recorded either. The obstacle was: %s."
+            % (name, (verdict.reason or "not stated").rstrip(".")))
 

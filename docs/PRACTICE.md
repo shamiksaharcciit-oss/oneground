@@ -312,7 +312,10 @@ failing beside it saying something else.
 Task 045 then found the general form. A test asserting that every
 couldn't-check claim carries a remedy reads a local workdir. In CI there is
 none, so it **skips**, and the suite is green. It is red only on a machine
-that happens to hold that workdir.
+that happens to hold that workdir. *(Repaired in the same task: the rule now
+has a tracked subject in `fixtures/arxiv-150k/report/` that raises rather than
+skips, and the local-workdir arm skips only on a report whose own provenance
+block says it predates the field — a reason, rather than an absence.)*
 
 > **A check that passes everywhere it runs, and only runs where nobody looks,
 > reported nothing for as long as it existed.**

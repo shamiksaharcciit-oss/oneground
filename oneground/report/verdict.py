@@ -153,7 +153,12 @@ def recall_floor(sim_row, constraints):
         return Verdict("recall_at_k", COULDNT_CHECK,
                        f"the sweep did not report {key}; it reported "
                        f"{', '.join(have) or 'nothing'}",
-                       source=f"simulate.json:rows[{sim_row.get('config')}]")
+                       source=f"simulate.json:rows[{sim_row.get('config')}]",
+                       couldnt_check_kind=NOT_VERIFIED,
+                       remedy=f"re-run `oneground simulate` with {k} among "
+                              "the k values the sweep reports. Recall at a k "
+                              "the sweep did not measure cannot be recovered "
+                              "from one it did.")
     got, floor = float(sim_row[key]), float(c["min"])
     outcome = MEETS if got >= floor else FAILS
     return Verdict(
@@ -173,7 +178,12 @@ def storage_amplification(sim_row, constraints):
     if got is None:
         return Verdict("storage_amplification", COULDNT_CHECK,
                        "the sweep row has no storage_amplification",
-                       source=f"simulate.json:rows[{sim_row.get('config')}]")
+                       source=f"simulate.json:rows[{sim_row.get('config')}]",
+                       couldnt_check_kind=NOT_VERIFIED,
+                       remedy="re-run `oneground simulate`: this row was "
+                              "written before the sweep reported "
+                              "storage_amplification, and nothing recovers "
+                              "the field from the row that lacks it.")
     got, cap = float(got), float(c["storage_amplification_max"])
     outcome = MEETS if got <= cap else FAILS
     return Verdict(
@@ -199,7 +209,12 @@ def memory_budget(sim_row, constraints):
     if got is None:
         return Verdict("memory_budget", COULDNT_CHECK,
                        "the sweep row has no est_memory_bytes",
-                       source=f"simulate.json:rows[{sim_row.get('config')}]")
+                       source=f"simulate.json:rows[{sim_row.get('config')}]",
+                       couldnt_check_kind=NOT_VERIFIED,
+                       remedy="re-run `oneground simulate`: the row carries "
+                              "no est_memory_bytes, and a memory figure taken "
+                              "from anywhere else would not be this "
+                              "architecture's.")
     gb = float(got) / 1e9
     cap = float(c["memory_budget_gb"])
     outcome = MEETS if gb <= cap else FAILS
@@ -231,6 +246,21 @@ _PARAM_SOURCES = {
     # would let a row with a different efSearch claim this measurement.
     "efSearch": ("engine_params", "hnsw_ef"),
 }
+
+
+def mismatch_remedy(sim_row):
+    """What settles a row the verify run did not build. Task 045, finding 5.
+
+    The obstacle -- *this configuration was not the one verified* -- was the
+    whole of what the reader got, wearing a remedy's opening words. The action
+    is to build this row's architecture and measure it, and naming the family
+    is what makes it an instruction rather than a restatement.
+    """
+    family = sim_row.get("family") or "this row's architecture"
+    return (f"verify this configuration, built as {family}, on a real "
+            f"engine: `oneground verify` against a deployment that is a "
+            f"{family} one. The run this report reads built something else, "
+            "so no measurement in it settles this row.")
 
 
 def verified_config_mismatch(sim_row, verify_info):
@@ -348,11 +378,19 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
     row_key = f"k={k}_under_load" if under_load else f"k={k}"
 
     if not verify_data:
+        # Task 045, finding 5. The action used to sit in the reason -- "run
+        # `oneground verify` against a real engine" -- where nothing looking
+        # for a remedy would find it. Right words, wrong field, and worse than
+        # absent, because a reviewer reading the reason sees an instruction
+        # and concludes the remedy exists.
         return Verdict(
             "latency_p95", COULDNT_CHECK,
-            "no verify run in this workdir. Latency is never taken from "
-            "simulation; run `oneground verify` against a real engine.",
-            source="verify.json (absent)", threshold=cap, kind="declared", engine=engine)
+            "no verify run in this workdir, and latency is never taken from "
+            "simulation",
+            source="verify.json (absent)", threshold=cap, kind="declared",
+            engine=engine, couldnt_check_kind=NOT_VERIFIED,
+            remedy="run `oneground verify` against a real engine in the "
+                   "environment the constraint targets.")
 
     # A measurement belongs to the configuration that produced it. Checked
     # before any row is read, so a mismatch is never reported as a latency
@@ -363,7 +401,9 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             "latency_p95", COULDNT_CHECK,
             f"this configuration was not the one verified -- {mismatch}",
             source="verify_info.json:engine_facts.index_params",
-            threshold=cap, kind="declared", engine=engine)
+            threshold=cap, kind="declared", engine=engine,
+            couldnt_check_kind=NOT_VERIFIED,
+            remedy=mismatch_remedy(sim_row))
 
     searches = verify_data.get("searches") or {}
     row = searches.get(row_key)
@@ -380,25 +420,37 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
                 f"this constraint names {' and '.join(asked)}, so it is a "
                 f"statement about latency under load and only a row measured "
                 f"under load can settle it. This verify run measured "
-                f"{measured}, and no {row_key}. Run `oneground verify` with "
-                "verify.target: runpod and a load phase; the sequential row "
-                "is not a substitute, because it measures a different thing.",
-                source="verify.json:searches", threshold=cap, kind="declared", engine=engine)
+                f"{measured}, and no {row_key}",
+                source="verify.json:searches", threshold=cap, kind="declared",
+                engine=engine, couldnt_check_kind=NOT_VERIFIED,
+                remedy="run `oneground verify` with verify.target: runpod and "
+                       "a load phase. The sequential row is not a substitute, "
+                       "because it measures a different thing.")
         return Verdict(
             "latency_p95", COULDNT_CHECK,
             f"the verify run measured {measured}, not {row_key}",
-            source="verify.json:searches", threshold=cap, kind="declared", engine=engine)
+            source="verify.json:searches", threshold=cap, kind="declared",
+            engine=engine, couldnt_check_kind=NOT_VERIFIED,
+            remedy=f"run `oneground verify` so that it measures {row_key}.")
 
     shape = row.get("latency_shape_single_client")
     if isinstance(shape, str):
         # verify already refused to attribute this number. Carry its reason.
+        where = (verify_info or {}).get("platform", "this machine")
         return Verdict(
             "latency_p95", COULDNT_CHECK,
             f"the verify run could not attribute latency in {row_key}: "
             f"{shape}",
             source=f"verify.json:searches[{row_key}]."
                    "latency_shape_single_client",
-            threshold=cap, kind="declared", engine=engine)
+            threshold=cap, kind="declared", engine=engine,
+            couldnt_check_kind=NOT_VERIFIED,
+            remedy="re-run `oneground verify` where the round trip to the "
+                   f"engine is small relative to the query. On {where} the "
+                   "baseline RTT was a large fraction of the query p95, so "
+                   "the number measured the path rather than the engine. A "
+                   "pod session with the client and the engine in the same "
+                   "environment is the way to settle it (task 011).")
 
     want_env = c.get("environment")
     if want_env and verify_env and str(want_env) != str(verify_env):
@@ -406,7 +458,9 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             "latency_p95", COULDNT_CHECK,
             f"measured on {verify_env}, constraint targets {want_env}",
             source="verify_info.json:environment", threshold=cap,
-            kind="declared", engine=engine)
+            kind="declared", engine=engine, couldnt_check_kind=NOT_VERIFIED,
+            remedy=f"run `oneground verify` on {want_env}, which is the "
+                   "environment the constraint names.")
 
     # Same-environment rule. Two rows measured on different pods are two
     # different machines with two different neighbours, and comparing their
@@ -421,7 +475,9 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             f"targets {want_eid}. Latency rows from different environments "
             "are never compared: they are different machines.",
             source="verify.json:environment_id", threshold=cap,
-            kind="declared", engine=engine)
+            kind="declared", engine=engine, couldnt_check_kind=NOT_VERIFIED,
+            remedy=f"run `oneground verify` in environment {want_eid}. No "
+                   "row from another environment settles this one.")
 
     conc = int(shape.get("concurrency", 1) or 1)
     want_conc = c.get("concurrency")
@@ -434,7 +490,10 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             "number.",
             source=f"verify.json:searches[{row_key}]."
                    "latency_shape_single_client.concurrency",
-            threshold=cap, kind="declared", engine=engine)
+            threshold=cap, kind="declared", engine=engine,
+            couldnt_check_kind=NOT_VERIFIED,
+            remedy=f"run `oneground verify` with a load phase at concurrency "
+                   f"{want_conc}.")
 
     got = float(shape["p95_ms"])
     env = f" on {verify_env}" if verify_env else ""
@@ -488,7 +547,14 @@ def latency_p95(sim_row, verify_data, constraints, verify_env=None,
             "side of it. Reported as couldn't-check rather than picked from "
             f"one run (from {row_key}: {how})",
             source=src, value=None, threshold=cap, kind="declared",
-            engine=engine)
+            engine=engine, couldnt_check_kind=NOT_VERIFIED,
+            # Not "raise the cap". The threshold is the reader's and this
+            # project does not move one to make a row decide; what is missing
+            # is resolution, and more runs are how you buy it.
+            remedy=f"re-run `oneground verify` for more than {n} runs on a "
+                   "quieter host. The cap sits inside the spread, so what is "
+                   "missing is resolution rather than another single "
+                   "measurement.")
 
     outcome = MEETS if got <= cap else FAILS
     return Verdict(
@@ -516,25 +582,32 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
         return Verdict("qps", COULDNT_CHECK,
                        "no verify run in this workdir",
                        source="verify.json (absent)", threshold=target,
-                       kind="declared", engine=engine)
+                       kind="declared", engine=engine,
+                       couldnt_check_kind=NOT_VERIFIED,
+                       remedy="run `oneground verify` with a load phase "
+                              "against a real engine. A simulator has no "
+                              "throughput to report.")
     mismatch = verified_config_mismatch(sim_row, verify_info)
     if mismatch:
         return Verdict(
             "qps", COULDNT_CHECK,
             f"this configuration was not the one verified -- {mismatch}",
             source="verify_info.json:engine_facts.index_params",
-            threshold=target, kind="declared", engine=engine)
+            threshold=target, kind="declared", engine=engine,
+            couldnt_check_kind=NOT_VERIFIED,
+            remedy=mismatch_remedy(sim_row))
 
     load = verify_data.get("load")
     if not load:
         return Verdict(
             "qps", COULDNT_CHECK,
             "this verify run measured a single-client latency shape and no "
-            "load phase, so it has no throughput to report. Run "
-            "`oneground verify` with verify.target: runpod, which puts the "
-            "load generator and the engine in the same environment.",
+            "load phase, so it has no throughput to report",
             source="verify.json:load (absent)", threshold=target,
-            kind="declared", engine=engine)
+            kind="declared", engine=engine, couldnt_check_kind=NOT_VERIFIED,
+            remedy="run `oneground verify` with verify.target: runpod, which "
+                   "puts the load generator and the engine in the same "
+                   "environment.")
 
     want_eid = c.get("environment_id")
     got_eid = verify_data.get("environment_id")
@@ -542,6 +615,9 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
         return Verdict("qps", COULDNT_CHECK,
                        f"measured in environment {got_eid or 'unrecorded'}, "
                        f"constraint targets {want_eid}",
+                       couldnt_check_kind=NOT_VERIFIED,
+                       remedy=f"run `oneground verify` with a load phase in "
+                              f"environment {want_eid}.",
                        source="verify.json:environment_id", threshold=target,
                        kind="declared", engine=engine)
 
@@ -554,6 +630,9 @@ def qps_target(sim_row, verify_data, constraints, verify_env=None,
             f"measured at concurrency {conc}, constraint specifies "
             f"{want_conc}. Throughput at one concurrency does not transfer "
             "to another.",
+            couldnt_check_kind=NOT_VERIFIED,
+            remedy=f"run `oneground verify` with a load phase at concurrency "
+                   f"{want_conc}.",
             source="verify.json:load.concurrency", threshold=target,
             kind="declared", engine=engine)
 
@@ -662,11 +741,20 @@ def monthly_budget_from_cost(sim_row, constraints, costs):
     if not entry:
         return Verdict("monthly_budget", COULDNT_CHECK,
                        "no cost model in this run", source="(not run)",
-                       threshold=amount, kind="declared")
+                       threshold=amount, kind="declared",
+                       couldnt_check_kind=NOT_VERIFIED,
+                       remedy="re-run the report with a price table this run "
+                              "can read, so the cost model has prices to "
+                              "work from.")
     if "couldnt_check" in entry:
         return Verdict("monthly_budget", COULDNT_CHECK,
                        entry["couldnt_check"], source="cost",
-                       threshold=amount, kind="declared")
+                       threshold=amount, kind="declared",
+                       couldnt_check_kind=NOT_VERIFIED,
+                       remedy=entry.get("remedy")
+                       or "the cost model declined this row and recorded why; "
+                          "what settles it is a price table that covers the "
+                          "resources this configuration needs.")
     high = float(entry["monthly_high"])
     outcome = MEETS if high <= float(amount) else FAILS
     return Verdict(
@@ -699,7 +787,15 @@ def monthly_budget(sim_row, constraints, cost_model=None):
             "monthly_budget", COULDNT_CHECK,
             f"no cost model in this build, so {amount} {cur}/month cannot be "
             "judged. Cost with error bands is task 011.",
-            source="(not implemented)", threshold=amount, kind="declared")
+            source="(not implemented)", threshold=amount, kind="declared",
+            # NOT_VERIFIABLE_HERE, not `not_verified`: no run settles this,
+            # because the thing that would is a cost model this build does
+            # not have. Task 034's distinction, and the one case in this
+            # module where the remedy is a contribution rather than a command.
+            couldnt_check_kind=NOT_VERIFIABLE_HERE,
+            remedy="a cost model with error bands, which this build does not "
+                   "have (task 011). No re-run settles it; what would is the "
+                   "model.")
     raise NotImplementedError("cost model is task 011")
 
 
@@ -794,6 +890,24 @@ def engines_meeting(verdicts):
 ENGINE_CONSTRAINTS = ("latency_p95", "qps")
 
 NOT_VERIFIED = "not_verified"
+NOT_VERIFIABLE_HERE = "not_verifiable_here"
+
+# Task 045, finding 5. Why the coverage classification below runs over
+# `ENGINE_CONSTRAINTS` and nothing else.
+#
+# It asks one question -- can any engine in this run build this index family
+# -- and that question has no meaning for a constraint no engine answers. A
+# recall figure the sweep did not report is not waiting on an adapter.
+#
+# What was wrong was not the narrowness; it was that this loop was the ONLY
+# place a remedy was ever set, so a couldn't-check on any other constraint
+# reached a reader with `couldnt_check_kind: None`, `remedy: ""` and a
+# fall-through sentence that restated its obstacle. Every construction site in
+# this module now sets its own remedy, so the narrowness costs nothing, and
+# `test_every_couldnt_check_names_its_remedy` holds the line for the ones this
+# loop never sees.
+OFF_ENGINE_CONSTRAINTS = ("recall_at_k", "storage_amplification",
+                          "memory_budget", "monthly_budget")
 
 
 def coverages_from(verify_data, workdir=None):
@@ -889,8 +1003,21 @@ def classify_couldnt_checks(option, coverages):
             v.remedy = "; ".join(
                 f"{d.reason}. {d.remedy}" for d in unknown_mine)
         else:
+            # Task 045, finding 5. This used to read `v.remedy = ""`, and
+            # `not_verified` is the one kind of couldn't-check that always has
+            # an action: task 034's own docstring says so -- "a run that could
+            # have happened and did not -- remedy: run it". The empty string
+            # sent every verdict on this branch to `how_to_resolve`'s
+            # fall-through, which printed the obstacle wearing a remedy's
+            # opening words: *To decide latency_p95: this configuration was
+            # not the one verified.* A reader skimming, or a reviewer checking
+            # that remedies exist, sees an instruction; only someone who reads
+            # to the end finds there is nothing to do in it.
+            #
+            # The action was already written, in `reason`, at the site that
+            # built the verdict -- right words, wrong field. It now goes in
+            # `remedy` there, and this branch keeps it rather than erasing it.
             v.couldnt_check_kind = NOT_VERIFIED
-            v.remedy = ""
     return option
 
 

@@ -205,14 +205,21 @@ def test_a_family_no_engine_builds_is_not_verifiable_here_synthetic():
 
 def test_a_family_the_engine_builds_is_merely_not_verified_synthetic():
     """The control. Same constraint, same absence of a verify run, and a
-    completely different remedy: run it."""
+    completely different remedy: run it.
+
+    Task 045, finding 5. This ended `assert v.remedy == ""`, one line under a
+    docstring naming the remedy as *run it* -- a test pinning the absence of
+    the thing it describes, which is how the empty string survived from 034 to
+    045. `not_verified` now carries the action the verdict's own construction
+    site knows.
+    """
     c = {"recall_at_k": {"k": 10, "min": 0.5}, "latency": {"p95_ms": 40}}
     opt = vd.judge_option(row(), None, c,
                           coverages=[_coverage(["hnsw"])])
     v = _latency(opt)
     assert v.outcome == CC
     assert v.couldnt_check_kind == vd.NOT_VERIFIED, v.as_dict()
-    assert v.remedy == ""
+    assert "oneground verify" in v.remedy, v.as_dict()
 
 
 def test_an_unresolved_coverage_is_its_own_state_synthetic():

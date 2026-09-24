@@ -211,10 +211,45 @@ def test_agrees_is_none_when_there_is_nothing_to_compare_synthetic():
 
 
 # ------------------------------------------------------------- couldn't-check
+def test_every_couldnt_check_claim_carries_a_remedy_tracked():
+    """The same rule, on a bundle that is in the repository.
+
+    Task 045, finding 5. The version below reads workdirs under `runs/`. In CI
+    there are none, so it skips and the suite is green; it is red only on a
+    machine that happens to hold one. **A check that passes everywhere it runs,
+    and only runs where nobody looks, reported nothing for as long as it
+    existed** -- `docs/PRACTICE.md` section 2, warning 6.
+
+    So the rule gets a tracked subject, and this one raises rather than skips.
+    """
+    d = _draw(FIXTURE, required=True)
+    assert d.figures["couldnt_check_claims"]
+    assert d.figures["couldnt_check_without_remedy"] == []
+
+
 def test_every_couldnt_check_claim_carries_a_remedy():
     """Selecting a couldn't-check is meant to be the most informative click on
-    the page, and a reason without a remedy ends in nothing to do."""
+    the page, and a reason without a remedy ends in nothing to do.
+
+    A report written before `couldnt_check_kind` and `remedy` existed cannot
+    satisfy this and never could: the rule is about the code, and reading a
+    stale artifact to judge it is measuring the wrong thing. The provenance
+    block is the marker -- a report.json with no `oneground` key was produced
+    before this build recorded one -- and the skip names the command that
+    replaces it rather than passing quietly. The tracked case above is what
+    keeps the rule from depending on any of this.
+    """
     for wd in (TIER1, TIER2):
+        path = os.path.join(wd, "report.json")
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding="utf-8") as f:
+            if "oneground" not in json.load(f):
+                pytest.skip(
+                    "%s was written before the report recorded its own "
+                    "provenance, so it predates `remedy` as well. Re-run "
+                    "`oneground report` in that workdir to judge the current "
+                    "code against it." % path)
         d = _draw(wd)
         assert d.figures["couldnt_check_claims"], wd
         assert d.figures["couldnt_check_without_remedy"] == [], wd
