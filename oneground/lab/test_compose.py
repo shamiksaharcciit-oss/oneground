@@ -1071,3 +1071,132 @@ def test_the_read_half_is_still_read_only_over_a_written_into_directory(
         lab.stop()
 
     assert digests() == before, "a read endpoint changed the directory"
+
+# ============================================ what this session says it can do
+# Task 046. Every sentence the server says about its own powers is composed
+# from `CAPABILITY`, keyed by the write routes `answer_write` mounts. These
+# tests are the reason that is a guarantee rather than a convention.
+
+
+def test_every_write_route_has_a_phrase_and_no_phrase_lacks_a_route():
+    """**The structural half, and the whole point of the repair.**
+
+    A route added without a phrase fails here, so describing a new capability
+    is part of adding one. This is what the previous repair lacked: that one
+    split the sentence by mode, which made mode changes visible and left
+    every other kind of change invisible in a slightly more convincing way.
+    """
+    from oneground.lab import server as srv
+    assert set(srv.WRITE_ENDPOINTS) == set(srv.CAPABILITY), (
+        "a write route with no phrase, or a phrase with no route: "
+        f"{set(srv.WRITE_ENDPOINTS) ^ set(srv.CAPABILITY)}")
+
+
+def test_a_new_write_route_changes_the_sentence_with_nothing_else_edited():
+    """**The mutant.** Adding a route and its phrase, and touching no
+    sentence anywhere, changes both sentences -- which is the claim the
+    repair makes and the one that was false of its predecessor.
+    """
+    from oneground.lab import server as srv
+    before_check = srv.can_sentence("runs", "nothing")
+    before_warn = srv.check_host("0.0.0.0", i_know=True, runs_dir="runs")
+    assert "delete a run" not in before_check
+    assert "delete a run" not in before_warn
+
+    srv.WRITE_ENDPOINTS["/api/runs/delete"] = "run_delete"
+    srv.CAPABILITY["/api/runs/delete"] = "delete a run"
+    try:
+        assert "delete a run" in srv.can_sentence("runs", "nothing")
+        assert "delete a run" in srv.check_host("0.0.0.0", i_know=True,
+                                                runs_dir="runs")
+    finally:
+        del srv.WRITE_ENDPOINTS["/api/runs/delete"]
+        del srv.CAPABILITY["/api/runs/delete"]
+
+    assert srv.can_sentence("runs", "nothing") == before_check
+    assert srv.check_host("0.0.0.0", i_know=True, runs_dir="runs") == \
+        before_warn
+
+
+def test_the_network_warning_names_what_exposing_a_ui_session_hands_over():
+    """The sentence read at the moment someone is asked to type `--i-know`.
+
+    It said *"It still writes nothing and runs nothing"* for the whole of the
+    slice that gave `ui` both -- the one place this claim could cost
+    something, because it is the sentence that answers *is this safe to
+    expose*. It is asserted by content rather than by wording: the powers
+    have to be named, and the read-only claim must be gone.
+    """
+    from oneground.lab import server as srv
+    warning = srv.check_host("0.0.0.0", i_know=True, runs_dir="runs")
+    assert "writes nothing" not in warning
+    assert "runs nothing" not in warning
+    assert "not read-only" in warning
+    for power in srv.CAPABILITY.values():
+        if power is not None:
+            assert power in warning, power
+
+
+def test_a_lab_session_over_one_run_still_says_it_writes_and_runs_nothing():
+    """And says it because no write route is mounted, not because the
+    sentence says so. The claim is true for `oneground lab` and stays."""
+    from oneground.lab import server as srv
+    warning = srv.check_host("0.0.0.0", i_know=True, runs_dir=None)
+    assert "It writes nothing and runs nothing." in warning
+    assert srv.capabilities(None) == ()
+
+
+def test_the_check_panel_agrees_with_the_routes_that_are_mounted(tmp_path):
+    """Asked of a running server, both ways round.
+
+    A `ui` session serves the enqueue route and must not say no job is
+    created from the page; a `lab` session serves neither and must say so.
+    Measured by asking the server rather than by reading the constant, since
+    the defect being fixed was a constant that disagreed with the server.
+    """
+    lab = _ui(str(tmp_path))
+    try:
+        said = lab.check({})
+        assert "/api/jobs/run" in _server_module().WRITE_ENDPOINTS
+        assert "nothing" not in said["runs"], said["runs"]
+        assert "start stages" in said["runs"]
+        assert "requirements files" in said["writes"]
+    finally:
+        lab.stop()
+
+
+def test_the_claim_that_went_stale_is_not_written_down_anywhere(tmp_path):
+    """The sentence itself, as a string, in the served package.
+
+    It had six homes and two of them were gained inside the slice that made
+    it false. This is the check that would have caught that -- and it is
+    scoped to what the code says about itself, not to prose about history,
+    because `docs/PRACTICE.md` and the report both quote the dead sentence
+    on purpose.
+    """
+    import os
+    import re
+    root = os.path.dirname(os.path.dirname(os.path.abspath(
+        _server_module().__file__)))
+    # Assembled rather than written, so this scan does not find itself.
+    # A check whose only hit is the check is warning 1's `atexit` instance,
+    # which is on the page three entries above the one this test is for.
+    dead = re.compile(" ".join(
+        ["no", "job,", "no", "session", "is", "created"]))
+    guilty = []
+    for folder, _dirs, names in os.walk(root):
+        if "__pycache__" in folder:
+            continue
+        for name in names:
+            if not name.endswith((".py", ".js", ".html")):
+                continue
+            path = os.path.join(folder, name)
+            with open(path, encoding="utf-8") as f:
+                if dead.search(f.read()):
+                    guilty.append(os.path.relpath(path, root))
+    assert guilty == [], guilty
+
+
+def _server_module():
+    from oneground.lab import server as srv
+    return srv

@@ -131,9 +131,11 @@ ENDPOINTS = {
     # the template is that declaration written out as a file.
     "/api/compose/fields": "compose_fields",
     "/api/compose/template": "compose_template",
-    # The jobs half, all reads. The server never enqueues and never
-    # cancels: it has no write path and makes no request of its own, so the
-    # page is told where the supervisor is and speaks to it directly.
+    # The jobs half's reads. Enqueue and cancel are POSTs and live in
+    # `WRITE_ENDPOINTS`, because this server forwards them to the supervisor
+    # -- option B. This comment described option A, where the page spoke to
+    # the supervisor itself, and it outlived option A by four commits: the
+    # CSP says `connect-src 'self'`, so the page cannot.
     "/api/jobs": "job_list",
     "/api/jobs/targets": "job_targets",
     "/api/jobs/log": "job_log",
@@ -154,6 +156,56 @@ WRITE_ENDPOINTS = {
     "/api/jobs/run": "job_run",
     "/api/jobs/cancel": "job_cancel",
 }
+
+
+#: What each write route lets a request do, in one phrase, or None where it
+#: lets a request do nothing it could not already do.
+#:
+#: **Every sentence this server says about its own powers is composed from
+#: this table**, so none of them can be written beside the code and left
+#: behind by it. `capabilities()` reads it, `check_host` warns from it, and
+#: `/api/check` answers from it.
+#:
+#: The rule that keeps it honest is not this comment: `WRITE_ENDPOINTS` and
+#: `CAPABILITY` must have the same keys, and a test asserts it. A route added
+#: without a phrase fails the suite, which makes describing a new capability
+#: part of adding one rather than a thing to remember afterwards.
+CAPABILITY = {
+    "/api/compose/write": "write requirements files into the runs directory",
+    "/api/jobs/run": ("start stages -- characterize, simulate, report and "
+                      "the rest -- through the supervisor on loopback"),
+    "/api/jobs/cancel": "stop a stage that is running",
+    # These two transform what the caller already sent. `open` parses a
+    # document the request carries and `preview` renders state the request
+    # carries; neither reaches the filesystem, so neither is a power.
+    "/api/compose/open": None,
+    "/api/compose/preview": None,
+}
+
+
+def capabilities(runs_dir):
+    """What a session over `runs_dir` lets a request do, in order.
+
+    Derived from which write routes are mounted, which is the one gate:
+    `answer_write` refuses every POST when `runs_dir is None`, so a `lab`
+    session over a single run has none of these and a `ui` session has all
+    of them. Nothing here is a judgement about what the session *ought* to
+    be able to do -- it is a reading of what it can.
+    """
+    if runs_dir is None:
+        return ()
+    return tuple(CAPABILITY[route] for route in WRITE_ENDPOINTS
+                 if CAPABILITY[route] is not None)
+
+
+def can_sentence(runs_dir, nothing):
+    """The capabilities as one sentence, or `nothing` if there are none."""
+    able = capabilities(runs_dir)
+    if not able:
+        return nothing
+    if len(able) == 1:
+        return able[0]
+    return ", ".join(able[:-1]) + " and " + able[-1]
 
 
 class Forwarded(Exception):
@@ -207,10 +259,23 @@ def is_loopback(host):
         return False
 
 
-def check_host(host, i_know=False):
+def check_host(host, i_know=False, runs_dir=None):
     """None on a loopback address. Anything else serves the run to every
     machine that can reach this one: refused without `i_know`, and with it,
-    the warning that must be printed, naming what is exposed."""
+    the warning that must be printed, naming what is exposed.
+
+    **The last clause is computed, not written.** It used to end *"It still
+    writes nothing and runs nothing"*, which was true when written and false
+    from the commit that gave `ui` a write path -- in the one sentence where
+    this claim could cost something, since it is read at the moment somebody
+    is being asked to type `--i-know`. It now names whatever
+    `capabilities(runs_dir)` reports, so a new write route changes this
+    warning without anyone editing it.
+
+    `runs_dir` is the gate rather than a mode flag because it is the gate
+    `answer_write` uses. Passing the same value the server will be given is
+    what makes the warning describe the session that is about to exist.
+    """
     if is_loopback(host):
         return None
     if not i_know:
@@ -220,11 +285,17 @@ def check_host(host, i_know=False):
             "digests -- to every machine that can reach this one, guarded "
             "only by the token in the URL. Pass --i-know to do that anyway, "
             "or leave --host at 127.0.0.1.")
-    return (f"WARNING: --host {host} --i-know: this lab is reachable from "
-            "the network. Anyone who can reach this machine and holds the "
-            "URL, token included, can read every drawing of this run -- the "
-            "ground, every query's trace, the figures -- and the workdir's "
-            "path and digests. It still writes nothing and runs nothing.")
+    able = can_sentence(runs_dir, None)
+    exposed = (f"WARNING: --host {host} --i-know: this lab is reachable from "
+               "the network. Anyone who can reach this machine and holds the "
+               "URL, token included, can read every drawing of this run -- "
+               "the ground, every query's trace, the figures -- and the "
+               "workdir's path and digests.")
+    if able is None:
+        return exposed + " It writes nothing and runs nothing."
+    return (exposed + " They can also " + able + ". This session is not "
+            "read-only: exposing it hands those powers to anyone holding "
+            "the URL.")
 
 
 # ---------------------------------------------------------- measurements
@@ -419,7 +490,7 @@ class LabServer:
                 "mean -- `python -c \"from oneground.cli import main; "
                 "main()\"` from it, or reinstall it -- rather than reading "
                 "a page whose subject you cannot name.")
-        self.warning = check_host(host, i_know)
+        self.warning = check_host(host, i_know, runs_dir=runs_dir)
         broken = {**guard.check_views(), **guard.check_transport(),
                   **guard.check_contract()}
         # Task 046: a served module that writes is refused at startup, like
@@ -1108,30 +1179,28 @@ class LabServer:
         """
         common = {
             "mode": "runs" if self.index is not None else "run",
-            # These two were flat strings saying this server writes nothing
-            # and runs nothing. The first became false for a `ui` session the
-            # hour the form landed, and it is the FOURTH place that one claim
-            # lived: the page's eyebrow, the CLI's startup line, this field,
-            # and the module docstring below. Three were corrected one at a
-            # time, each by someone looking at that one.
+            # **Read off the server, not written beside it.**
             #
-            # So this is not the staleness defect, it is the two-homes
-            # defect -- `docs/PRACTICE.md` section 4. A claim with four
-            # copies has no owner, and correcting a sentence is not
-            # correcting a claim.
+            # These were flat strings saying this server writes nothing and
+            # runs nothing, in the FOURTH place that one claim lived. The
+            # repair was to answer per mode -- and four commits later the
+            # `runs` string was false again, because jobs did not arrive
+            # along the mode axis. They arrived along capability, and `ui`
+            # gained one. A comment directly above this field named in
+            # advance the field that would need changing when they landed.
+            # It did not help. See `docs/PRACTICE.md` section 4.
             #
-            # They now answer per mode, which is the repair that makes the
-            # next change impossible to miss: a `lab` session still writes
-            # nothing and the sentence says so, and a `ui` session says what
-            # it writes. When jobs land, `runs` is the field that has to
-            # change, and it is the field a reader asks.
+            # So the sentence is now composed from `CAPABILITY`, which is
+            # keyed by the routes `answer_write` actually mounts. It cannot
+            # describe a power this session does not have or omit one it
+            # does, because it is not a description -- it is a reading.
             "writes": ("requirements files, through one guarded path"
-                       if self.index is not None
+                       if self.runs_dir is not None
                        else "nothing: this session has no write path"),
-            "runs": ("nothing: no job, no session is created from this "
-                     "page" if self.index is not None else
-                     "nothing: no job, no written file, no session is "
-                     "created from this page"),
+            "runs": can_sentence(
+                self.runs_dir,
+                "nothing: no job, no written file, no session is created "
+                "from this page"),
             "token": ("required on every request; see docs/UI.md for what "
                       "it protects against and what it does not"),
             # Which build answered this request. The page shows it and a

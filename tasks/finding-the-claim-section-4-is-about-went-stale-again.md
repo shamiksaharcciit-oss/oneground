@@ -76,19 +76,50 @@ this HEAD and two are correctly historical:
 |---|---|---|
 | `server.py:1131` | `runs: nothing: no job, no session is created from this page` | **false** |
 | `server.py:227` — the `--host --i-know` warning | "It still writes nothing and runs nothing." | **false**, and it is a security sentence: a `ui` session exposed with `--i-know` can now be written to and enqueued to by anyone holding the URL |
+| `server.py:135` — the comment over the jobs routes | "all reads. The server never enqueues … the page … speaks to it directly" | **false**, and it describes **option A**, which was abandoned for the CSP reason four commits earlier |
 | `docs/UI.md:4` | "Nothing runs from this page — no job, no written file, no session." | **false** on two of three |
-| `docs/UI.md:257` | "Nothing runs from this page." | correct — it is under *What slice 1 did not do* |
-| `docs/INTERFACE.md:355` | "No job runs from the UI yet." | **false** |
+| `docs/UI.md:257` | "Nothing runs from this page." | correct — under *What slice 1 did not do* |
+| `docs/INTERFACE.md:355` | "No job runs from the UI yet." | correct — under *Sequencing*, describing slice 1, with slice 2 the next item |
 | `server.py:1320` | the eyebrow's comment, predicting this | correct, and unheeded |
 
-Six homes now, not four. **The claim gained two homes in the slice that was
-supposed to have taught this project about its homes**, which is `7.4.2` — a
-defect recurs in whatever is newest, written by whoever just fixed it — with
-the longest interval yet, and in the surface where the rule itself is
-written down.
+**A correction to my own first count.** I reported `docs/INTERFACE.md:355` as
+false and it is not: it sits in a numbered sequencing list whose next item is
+*Configure and run*, so *"no job runs from the UI yet"* is a description of
+slice 1 and reads correctly beside slice 2. I had grepped the sentence and
+ruled on the line — which is warning 1 exactly, *a check must run the rule,
+not search for it*, performed by hand while writing up an instance of it.
 
-## The one I would fix first regardless of the ruling
+Seven homes, then, not six, and three false rather than four. The seventh —
+`server.py:135` — is the worst of them and the grep found it only because it
+was nearby: it is not a stale claim about what the server does but **a
+description of a design that was never built.** Option A had the page talk to
+the supervisor directly; the CSP made that impossible and option B forwards
+through the server. The comment kept explaining option A directly above the
+routes that implement option B.
 
-`server.py:227`. The others mislead a reader. That one tells someone that
-exposing a `ui` session to the network is read-only when it is not, at the
-moment they are being asked to type `--i-know`.
+**The claim gained two homes in the slice that was supposed to have taught
+this project about its homes**, which is `7.4.2` — a defect recurs in
+whatever is newest, written by whoever just fixed it — with the longest
+interval yet, and in the surface where the rule itself is written down.
+
+## What was done
+
+All three false statements are repaired, and the two in `server.py` are no
+longer statements. `CAPABILITY` maps each write route to one phrase;
+`capabilities(runs_dir)` reads the routes `answer_write` actually mounts; the
+network warning and `/api/check`'s `runs` field are both composed from it.
+A test asserts `set(WRITE_ENDPOINTS) == set(CAPABILITY)`, so a route added
+without a phrase fails the suite, and a mutant adds a route and asserts both
+sentences change with nothing else edited.
+
+The exposure warning now reads, for a `ui` session:
+
+> … and the workdir's path and digests. **They can also write requirements
+> files into the runs directory, start stages — characterize, simulate,
+> report and the rest — through the supervisor on loopback and stop a stage
+> that is running. This session is not read-only: exposing it hands those
+> powers to anyone holding the URL.**
+
+and for a `lab` session over one run, *"It writes nothing and runs nothing"*
+— which it now says because no write route is mounted rather than because the
+sentence says so.

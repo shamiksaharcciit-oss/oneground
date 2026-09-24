@@ -930,6 +930,73 @@ found the first four, and argued for the declaration before it existed, is
 
 ---
 
+### The repair that failed: a claim split along the axis that made it stale
+
+**This section's own repair did not hold, and the way it failed is worth
+more than the repair was.**
+
+The claim above — *read-only · nothing runs from this page* — was corrected
+by **splitting it per mode**: `/api/check` answers one thing for a `lab`
+session and another for a `ui` session, so a sentence true of one and false
+of the other can no longer be written as a single string. That was right for
+the defect in front of it. The form had landed in `ui` only, and mode was
+exactly the axis along which the claim had come apart.
+
+**Four commits later the same field was false again.** The jobs half landed,
+a page enqueued through the supervisor, and `/api/check` went on saying
+*"nothing: no job, no session is created from this page"* while the page
+beside it created jobs. Both branches of the conditional were about mode.
+Jobs did not arrive along mode — **they arrived along capability**, and `ui`
+gained one.
+
+> **A claim split along the axis that made it stale is not protected against
+> the next axis.**
+>
+> And it is worse than leaving it flat. A flat false sentence is one nobody
+> has thought about. A split false sentence carries evidence that someone
+> did, so the next reader spends their scepticism somewhere else.
+
+**What rules out the obvious lesson.** Directly above the false string, in
+the same function, was this comment — written in this slice, as part of that
+repair:
+
+> *"When jobs land, `runs` is the field that has to change, and it is the
+> field a reader asks."*
+
+Correct, specific, naming the right field, four lines away, and written by
+the person who then landed jobs. It did not work. So this instance **rules
+out *write the note closer to the code*** the same way the `git add -A`
+instance ruled out *place the warning better*: the note was already as close
+and as exact as a note can be. There is no version of the prose that would
+have survived, because the failure is not one of attention.
+
+> The general form, and it is the only repair this page has found that works
+> on an axis nobody anticipated:
+>
+> **A claim derived from what the code does cannot go stale along an axis
+> nobody anticipated. A claim written beside the code can. Read the sentence
+> off the server.**
+
+**What that looked like here.** `CAPABILITY` maps each write route to one
+phrase; `capabilities(runs_dir)` reads the routes `answer_write` actually
+mounts; the `/api/check` field and the `--host --i-know` warning are both
+composed from it. Neither can describe a power the session lacks or omit one
+it has, because neither is a description — both are readings. The guarantee
+is not the arrangement but the test beside it: `set(WRITE_ENDPOINTS) ==
+set(CAPABILITY)`, so a route added without a phrase fails the suite.
+
+That is the difference worth keeping. **The per-mode split made the next
+change visible only if it was a change of mode. The derivation makes the
+next change visible whatever axis it arrives along, because the sentence is
+computed from the thing that changed.**
+
+> The tell, when you are about to write a claim about what a program does:
+> **ask whether the program already knows the answer.** If it does, read it.
+> A sentence and a route table that agree today are two things that have to
+> be kept agreeing; a sentence computed from the route table is one thing.
+
+---
+
 ## 5. What a guard is telling you when it refuses you
 
 Every guard in this project eventually refuses something reasonable. The
@@ -1362,6 +1429,24 @@ the work rather than of a person.
 > the diff you are about to commit for the same shape.** Not the codebase —
 > the diff. The defect you just removed and the code you just wrote are in
 > the same commit more often than not.
+
+**The longest interval, and the worst surface.** The claim in §4 —
+*nothing runs from this page* — had four homes when that section was written.
+By the end of the same slice it had **seven**, and two of the three new ones
+were added *by the repair work itself*: a comment over the jobs routes
+describing a design that had already been abandoned, and a second copy of the
+exposure claim in the network warning. Three of the seven were false.
+
+It is 7.4.2 at its largest interval so far, and in the surface where the rule
+is written down. The check that found it was not a check: it was asking the
+running server what it was, thirty seconds before handing over its URL.
+
+> Which sharpens the cheap version above. Grepping the diff catches a shape
+> you can spell. This one could not be spelled — the seven homes say the same
+> thing in seven wordings, which is §4's own first rule. **What found it was
+> asking the product a question and reading the answer**, and that is the
+> version of the check to reach for when the defect is a claim rather than a
+> construct.
 
 ### 7.5 To prove a classifier reads an input, vary only that input
 

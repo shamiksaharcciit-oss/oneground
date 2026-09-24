@@ -1,9 +1,17 @@
 # The interface — `oneground ui [<runs-dir>]`
 
-*The read half: many runs, each report whole with its evidence, and the lab
-reached from a run. Nothing runs from this page — no job, no written file, no
-session. `docs/INTERFACE.md` is the position this implements; this document is
-what was built and the rules it is held to.*
+*Many runs, each report whole with its evidence, and the lab reached from a
+run. Slice 2 adds the write half: a form that writes requirements files
+through one guarded path, and stages started through a supervisor on
+loopback. **No pod session is created from this page** — the money boundary
+is unchanged and a pod is still created by a typed `y` at a terminal.
+`docs/INTERFACE.md` is the position this implements; this document is what
+was built and the rules it is held to.*
+
+*What this session can do is also answerable without reading this: the
+check panel's `runs` and `writes` fields are composed from the write routes
+the server mounts, so they cannot disagree with it. This sentence can; that
+one cannot.*
 
 `oneground lab <workdir>` is unchanged and still opens one run's ground and
 trace. `oneground ui` is the same server, the same token and the same guard,

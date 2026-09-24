@@ -221,9 +221,13 @@ def _cmd_ui(args, rest):
     from .lab.runs import LabRunError
 
     try:
-        labserver.check_host(args.host, args.i_know)
+        # One expression, used twice, rather than two that agree today:
+        # the warning must describe the session that is about to exist, and
+        # `runs_dir` is what decides whether it can write and enqueue.
+        ui_runs_dir = None if args.demo else args.runs_dir
+        labserver.check_host(args.host, args.i_know, runs_dir=ui_runs_dir)
         lab = labserver.LabServer(
-            runs_dir=None if args.demo else args.runs_dir,
+            runs_dir=ui_runs_dir,
             demo=args.demo, host=args.host, port=args.port,
             i_know=args.i_know)
     except (LabRunError, labserver.LabRefused) as e:
@@ -281,7 +285,7 @@ def _cmd_lab(args, rest):
     mode = {"move": labcontract.MOVE, "release": labcontract.RELEASE,
             None: None}[args.mode]
     try:
-        labserver.check_host(args.host, args.i_know)
+        labserver.check_host(args.host, args.i_know, runs_dir=None)
         run = LoadedRun(args.workdir, family=args.family, config=args.config,
                         also=args.also)
         lab = labserver.LabServer(run, host=args.host, port=args.port,
