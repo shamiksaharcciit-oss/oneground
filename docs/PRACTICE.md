@@ -395,6 +395,29 @@ every test asserting a status code passes.
 > carries anything, and the call site that should have reinstated it is the
 > line you just wrote without thinking.
 
+**11a. An error a refresh can delete is an error nobody will report.** A page
+that reloads itself must not clear what an action just said.
+
+The jobs page refreshed every four seconds and `refresh()` began with
+`clearFail()`; every action ended with `await refresh()`. So a message an
+action raised lived about **forty milliseconds**. Clicking a stage looked
+like it did nothing — and what it was doing was failing, loudly, every time,
+and saying so in a box that was wiped before a human eye could land on it.
+
+**Its cost was a full round of looking.** The developer clicked twice, on two
+different runs, reported *nothing is enqueued*, and the page had been
+reporting the reason all along. The defect beneath it took three rounds of
+diagnosis that its own error message would have shortened to one.
+
+> The rule: **an automatic redraw clears only what it drew.** Anything a
+> person caused — an error, a selection, a half-typed field, an open panel —
+> survives until that person does something about it. The test is whether the
+> thing on screen was put there by the clock or by a hand.
+
+It pairs with warning 9's mirror: that one is a check too fast to see a
+defect, this is a page too fast to show one. Both are about a clock nobody
+accounted for, and both were found by a person rather than by a check.
+
 **11. An intermittent failure is evidence, and a fix that does not make it
 stop is a different fix.** Warning 10 above was found only because one test
 kept failing about 40% of the time, and it was explained away twice.

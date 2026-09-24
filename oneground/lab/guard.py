@@ -414,6 +414,30 @@ UNQUALIFIED_WRITERS = frozenset({
 #: Modes that make `open()` a write.
 WRITING_MODES = ("w", "a", "x", "+")
 
+#: Calls that reach off this process.
+OUTBOUND_CALLS = frozenset({
+    "urlopen", "urlretrieve", "HTTPConnection", "HTTPSConnection",
+    "create_connection", "socket", "getaddrinfo", "connect",
+})
+
+#: The one place a served module may make one, and the one destination it
+#: may reach. Task 046 narrowed "this server makes no request of its own" --
+#: ruled, not taken -- because the page cannot ask the supervisor directly:
+#: the server's own CSP says `connect-src 'self'`.
+#:
+#: Keeping the old sentence would have meant a dynamic CSP carrying a port
+#: discovered at runtime, which is a larger loosening of a stronger
+#: property: a CSP is a browser-enforced ceiling on what the page can do at
+#: all, and this is one function a scan can read.
+#:
+#: So the promise is narrower and still checked, and this is where the
+#: destination is named rather than described.
+OUTBOUND_ALLOWED = {
+    ("server.py", "forward_to_supervisor"):
+        "the supervisor for this session's own runs directory, at the "
+        "address in supervisor.json, refused unless loopback",
+}
+
 #: Not part of the running server, so none of the three sets of rules apply:
 #: the package docstring, the browser client the tests drive, and the tests.
 NOT_SERVED = ("__init__.py", "cdp.py")
@@ -542,6 +566,55 @@ def check_write_path():
         path = os.path.join(LAB_DIR, name)
         with open(path, encoding="utf-8") as f:
             v = write_violations(f.read(), path)
+        if v:
+            found[name] = v
+    return found
+
+
+def outbound_violations(source, filename="<module>", module=None):
+    """[(line, rule, detail)] for calls that reach off this process.
+
+    Function-scoped, because the permission is about *where in the module*
+    the call may be, not merely that the module contains one. A second call
+    in a second function is the thing this exists to catch, and a
+    module-level allowance would not.
+    """
+    tree = ast.parse(source, filename)
+    out = []
+    # Which function each node is inside, by walking down rather than up:
+    # ast gives no parent pointers, and a nested helper inside the permitted
+    # function is still inside it.
+    def walk(node, fn):
+        for child in ast.iter_child_nodes(node):
+            here = child.name if isinstance(
+                child, (ast.FunctionDef, ast.AsyncFunctionDef)) else fn
+            if isinstance(child, ast.Call):
+                f = child.func
+                name = f.attr if isinstance(f, ast.Attribute) else (
+                    f.id if isinstance(f, ast.Name) else None)
+                if name in OUTBOUND_CALLS:
+                    if (module, here) not in OUTBOUND_ALLOWED:
+                        out.append((child.lineno, "outbound",
+                                    "%s() in %s()" % (name, here or
+                                                      "<module>")))
+            walk(child, here)
+    walk(tree, None)
+    return sorted(out)
+
+
+def check_outbound():
+    """{module: [(line, rule, detail)]} for served modules reaching off this
+    process anywhere but the one permitted function.
+
+    Empty is the only acceptable answer. `OUTBOUND_ALLOWED` names the single
+    destination beside the single call site, so a reader can check both in
+    one place.
+    """
+    found = {}
+    for name in TRANSPORT_MODULES + CONTRACT_MODULES + WRITE_MODULES:
+        path = os.path.join(LAB_DIR, name)
+        with open(path, encoding="utf-8") as f:
+            v = outbound_violations(f.read(), path, module=name)
         if v:
             found[name] = v
     return found

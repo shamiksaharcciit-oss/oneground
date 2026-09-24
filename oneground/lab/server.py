@@ -36,18 +36,35 @@ WHAT IT NEVER DOES
 - answer a request without this session's token, or for a Host it did not bind
 - send a CORS header, list a directory, or log a request line (it carries the
   token)
-- **make a request of its own.** Still true, and the one on this list most
-  under pressure: the write half needs a job enqueued and the supervisor owns
-  the job list. Forwarding would be the easy way and would turn this server
-  into something that makes requests, which is a property worth more than the
-  convenience. See `tasks/046-interface-write.report.md`; the ruling is not
-  this module's to make.
+- **make a request anywhere but to the supervisor for its own runs
+  directory.** This said "make a request of its own" until task 046, and the
+  narrowing is deliberate and was ruled rather than taken.
+
+  The write half needs a job enqueued, the supervisor owns the job list, and
+  the page cannot ask it directly: this server's own Content-Security-Policy
+  says `connect-src 'self'`, so the browser refuses. Keeping the old sentence
+  would have meant a **dynamic CSP** carrying a port discovered at runtime
+  from a file on disk — a larger loosening of a stronger property, because a
+  CSP is a browser-enforced ceiling on what the page can do at all, while
+  this sentence is a property of one module's source that a parsed scan
+  checks.
+
+  And the failure modes are not symmetric: a wrong CSP silently permits,
+  where a wrong forward target is one string in one module that a test can
+  pin. So it is pinned. The destination is read from `supervisor.json` in
+  the runs directory this session serves **and from nowhere else**, refused
+  unless it is loopback, and `guard.check_outbound()` permits the call in
+  exactly one function of one module.
+
+  The server forwards a request; it does not authorise one. The supervisor
+  checks its own token exactly as before.
 
 What the token does and does not protect against is in docs/LAB.md.
 """
 
 import hashlib
 import hmac
+import http.client
 import http.server
 import ipaddress
 import json
@@ -132,7 +149,26 @@ WRITE_ENDPOINTS = {
     "/api/compose/open": "compose_open",
     "/api/compose/preview": "compose_preview",
     "/api/compose/write": "compose_write",
+    # Forwarded to the supervisor, which owns the job list. The page cannot
+    # ask it directly: this server's own CSP says `connect-src 'self'`.
+    "/api/jobs/run": "job_run",
+    "/api/jobs/cancel": "job_cancel",
 }
+
+
+class Forwarded(Exception):
+    """The supervisor answered something other than 200.
+
+    Carries its status and its body so `answer_write` can hand both back
+    unchanged. A refusal from the supervisor is the supervisor's sentence,
+    and re-expressing it here would be a second implementation of a message
+    that is already right.
+    """
+
+    def __init__(self, status, body):
+        super().__init__(str(body.get("error") or status))
+        self.status = status
+        self.body = body
 
 #: A requirements file is prose-sized. This is two orders of magnitude more
 #: than the largest example in the tree and it is here so that an unbounded
@@ -390,6 +426,17 @@ class LabServer:
         # a view that measures. The write path is one module by declaration
         # (`guard.WRITE_MODULES`) and this is where that stops being a
         # convention -- a session does not start if anything else can write.
+        # The narrowed promise, held at startup like the others: exactly one
+        # served function may reach off this process, and it is named.
+        reaching = guard.check_outbound()
+        if reaching:
+            raise LabRefused(
+                "these served modules reach off this process from somewhere "
+                "other than the one permitted place (" +
+                ", ".join("%s.%s" % k for k in guard.OUTBOUND_ALLOWED) +
+                "): " + "; ".join(f"{m}:{line} {detail}"
+                                  for m, found in sorted(reaching.items())
+                                  for line, _rule, detail in found))
         writes = guard.check_write_path()
         if writes:
             raise LabRefused(
@@ -549,6 +596,11 @@ class LabServer:
             return self.send(req, 400, {"error": "expected a JSON object"})
         try:
             out = getattr(self, endpoint)(body)
+        except Forwarded as e:
+            # The supervisor's answer, unchanged: it refuses in its own
+            # words and a second opinion here would be a second
+            # implementation of a message that is already right.
+            return self.send(req, e.status, e.body)
         except compose.WriteRefused as e:
             return self.send(req, 400, self._refused(e))
         except (ValueError, KeyError) as e:
@@ -795,6 +847,94 @@ class LabServer:
                     "live": job.state in ("queued", "running"),
                     "absent": None}
         raise ValueError(f"no job {wanted!r} in this directory")
+
+    #: The only destination this server may ever contact, and the only
+    #: place it may learn one: `supervisor.json`, written by the supervisor
+    #: into the runs directory this session serves.
+    FORWARD_SOURCE = supmod.ADDRESS_NAME
+
+    #: Hosts a forward may go to. Loopback only, by literal comparison
+    #: against a closed set -- a `startswith("127.")` would accept
+    #: `127.0.0.1.evil.test`, which is the classic way this is got wrong,
+    #: and a DNS name would put resolution between the check and the call.
+    LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+    def _forward_target(self, path):
+        """Where a forward goes, refused at construction if it is not one.
+
+        Every reason to refuse is checked here, before anything is sent, so
+        a bad address cannot become a request. The alternative -- validating
+        at the call -- means the validation and the send are two places, and
+        the second one is the one someone adds a shortcut to.
+        """
+        found = supmod.address(self.runs_dir) if self.runs_dir else None
+        if not found:
+            raise ValueError(
+                "no supervisor has announced itself in this directory, so "
+                "there is nothing to forward to and nothing can be started "
+                "from here")
+        url = urllib.parse.urlsplit(found.get("url") or "")
+        if url.scheme != "http" or not url.hostname:
+            raise ValueError(
+                f"the supervisor address is not a usable http url: "
+                f"{found.get('url')!r}")
+        if url.hostname not in self.LOOPBACK:
+            # The whole point of the narrowing. A supervisor.json naming
+            # somewhere else is either a mistake or an attempt, and this
+            # server does not reach off this machine for either.
+            raise ValueError(
+                f"refused: the supervisor address names {url.hostname!r}, "
+                f"which is not loopback. This server forwards to "
+                + ", ".join(self.LOOPBACK) + " and nowhere else.")
+        if url.path not in ("", "/"):
+            raise ValueError(
+                f"the supervisor address carries a path, {url.path!r}; the "
+                "destination is an origin and this server appends the route")
+        return (url.hostname, url.port or 80, path, found["token"])
+
+    def forward_to_supervisor(self, path, body):
+        """Send one request to the supervisor and hand back what it said.
+
+        **Forwarded, not re-expressed.** The supervisor's status and its
+        body come back unchanged: it refuses in its own words, and a second
+        opinion here would be the second implementation this project keeps
+        declining to write.
+
+        The supervisor's token is attached because this server can read it —
+        it is in the directory this session serves — and that is not this
+        server authorising anything. The caller was already checked against
+        the lab's token; the supervisor checks its own, exactly as before.
+        """
+        host, port, route, token = self._forward_target(path)
+        payload = json.dumps(body).encode("utf-8")
+        conn = http.client.HTTPConnection(host, port, timeout=30)
+        try:
+            conn.request("POST", route, body=payload, headers={
+                "Content-Type": "application/json",
+                supmod.SUPERVISOR_TOKEN_HEADER: token})
+            answer = conn.getresponse()
+            status, raw = answer.status, answer.read()
+        finally:
+            conn.close()
+        try:
+            return status, json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return 502, {"error": "the supervisor answered %s and the body "
+                                  "was not readable JSON" % status}
+
+    def job_run(self, body):
+        """Enqueue, by asking the supervisor."""
+        status, out = self.forward_to_supervisor("/enqueue", body)
+        if status != 200:
+            raise Forwarded(status, out)
+        return out
+
+    def job_cancel(self, body):
+        """Cancel, by asking the supervisor."""
+        status, out = self.forward_to_supervisor("/cancel", body)
+        if status != 200:
+            raise Forwarded(status, out)
+        return out
 
     def supervisor_address(self, params):
         """Where the supervisor is, so the page can speak to it directly.

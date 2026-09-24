@@ -729,3 +729,176 @@ def test_the_log_path_comes_from_the_record_not_the_request(tmp_path):
             assert "no job" in str(caught.value), attempt
     finally:
         lab.stop()
+
+# ================================================== the forward to the supervisor
+# Task 046, option B. The page cannot reach the supervisor itself -- this
+# server's CSP says `connect-src 'self'` -- so the server forwards, to one
+# loopback address read from its own runs directory and nowhere else.
+
+
+def _with_address(tmp, url, token="t"):
+    import json as _j
+    from oneground import supervisor as supmod
+    with open(os.path.join(str(tmp), supmod.ADDRESS_NAME), "w",
+              encoding="utf-8") as f:
+        _j.dump({"url": url, "token": token, "pid": 1, "build": "x"}, f)
+
+
+def test_the_target_is_read_from_supervisor_json_and_nowhere_else(tmp_path):
+    """One source. Not an environment variable, not a flag, not a default:
+    the file the supervisor writes into the directory this session serves."""
+    from oneground import supervisor as supmod
+    lab = _ui(str(tmp_path))
+    try:
+        with pytest.raises(ValueError) as caught:
+            lab._forward_target("/enqueue")
+        assert "no supervisor has announced itself" in str(caught.value)
+
+        _with_address(tmp_path, "http://127.0.0.1:9999", token="abc")
+        host, port, route, token = lab._forward_target("/enqueue")
+        assert (host, port, route, token) == ("127.0.0.1", 9999,
+                                              "/enqueue", "abc")
+        assert lab.FORWARD_SOURCE == supmod.ADDRESS_NAME
+    finally:
+        lab.stop()
+
+
+# Each case names the refusal it expects, rather than accepting any. "It
+# refused" is the assertion that passes when the wrong thing refuses -- the
+# empty url below is refused a step earlier, by `address()` declining a file
+# with no usable url, and a looser assertion would have hidden that.
+@pytest.mark.parametrize("url,expect", [
+    ("http://example.com:80", "is not loopback"),
+    ("http://10.0.0.5:8080", "is not loopback"),
+    # A suffix of loopback is not loopback: `startswith("127.")` would accept
+    # this, which is the classic way this check is got wrong.
+    ("http://127.0.0.1.evil.test:80", "is not loopback"),
+    ("http://[2001:db8::1]:80", "is not loopback"),
+    ("https://127.0.0.1:443", "not a usable http url"),
+    ("ftp://127.0.0.1", "not a usable http url"),
+    ("http://127.0.0.1:8080/enqueue", "carries a path"),
+    ("", "no supervisor has announced itself"),
+])
+def test_a_target_that_is_not_loopback_is_refused_at_construction(
+        tmp_path, url, expect):
+    """**The mutant.** Refused before anything is sent, so a bad address
+    cannot become a request -- validating at the call would put the check and
+    the send in two places, and the second is where a shortcut goes.
+    """
+    lab = _ui(str(tmp_path))
+    try:
+        _with_address(tmp_path, url)
+        with pytest.raises(ValueError) as caught:
+            lab._forward_target("/enqueue")
+        assert expect in str(caught.value), (url, str(caught.value))
+    finally:
+        lab.stop()
+
+
+def test_loopback_is_a_closed_set_not_a_prefix():
+    from oneground.lab import server as srv
+    assert set(srv.LabServer.LOOPBACK) == {"127.0.0.1", "::1", "localhost"}
+
+
+def test_exactly_one_served_function_may_reach_off_this_process():
+    """The narrowed promise, checked -- not dropped. And the declaration
+    names the destination beside the call site, so both are read together."""
+    from oneground.lab import guard
+    assert guard.check_outbound() == {}
+    assert set(guard.OUTBOUND_ALLOWED) == {
+        ("server.py", "forward_to_supervisor")}
+    why = guard.OUTBOUND_ALLOWED[("server.py", "forward_to_supervisor")]
+    assert "supervisor.json" in why and "loopback" in why
+
+
+@pytest.mark.parametrize("source,caught", [
+    ("import http.client\ndef innocent():\n"
+     "    return http.client.HTTPConnection('example.com', 80)\n", True),
+    ("import urllib.request\ndef helper():\n"
+     "    return urllib.request.urlopen('http://x')\n", True),
+    ("import http.client\ndef forward_to_supervisor(p, b):\n"
+     "    return http.client.HTTPConnection('127.0.0.1', 1)\n", False),
+])
+def test_the_outbound_scan_is_function_scoped(source, caught):
+    """Function-scoped, because the permission is about where in the module
+    the call may be. A second call in a second function is what this exists
+    to catch, and a module-level allowance would not see it."""
+    from oneground.lab import guard
+    found = guard.outbound_violations(source, "<m>", module="server.py")
+    assert bool(found) is caught, found
+
+
+def test_the_permission_is_for_one_module_too():
+    """The same function name in another served module is not permitted."""
+    from oneground.lab import guard
+    source = ("import http.client\ndef forward_to_supervisor(p, b):\n"
+              "    return http.client.HTTPConnection('127.0.0.1', 1)\n")
+    assert guard.outbound_violations(source, "<m>", module="runs.py")
+
+
+def test_a_served_module_reaching_out_stops_the_session_starting(tmp_path):
+    """Held at startup like the contract and the write path, and watched
+    firing rather than observed not firing."""
+    from oneground.lab import guard, server as srv
+    real = guard.check_outbound
+    guard.check_outbound = lambda: {"runs.py": [(7, "outbound",
+                                                 "urlopen() in fetch()")]}
+    try:
+        with pytest.raises(srv.LabRefused) as caught:
+            srv.LabServer(runs_dir=str(tmp_path), port=0)
+        said = str(caught.value)
+        assert "reach off this process" in said
+        assert "server.py.forward_to_supervisor" in said
+    finally:
+        guard.check_outbound = real
+
+
+def test_the_supervisor_still_checks_its_own_token(tmp_path):
+    """The server forwards a request; it does not authorise one. A forward
+    carrying the wrong token is refused by the supervisor, and its refusal
+    comes back unchanged rather than being re-expressed here.
+    """
+    from oneground import supervisor as supmod
+    sup = supmod.Supervisor(str(tmp_path))
+    channel = supmod.Channel(sup).start()
+    try:
+        # the address file says the right place and the WRONG token
+        _with_address(tmp_path, channel.url, token="not-the-token")
+        lab = _ui(str(tmp_path))
+        try:
+            status, out = lab.forward_to_supervisor(
+                "/enqueue", {"stage": "simulate",
+                             "invocation": ["simulate", "x"]})
+            assert status == 403, out
+            assert "token is required" in out["error"]
+            assert sup.read() == [], "a refused forward enqueued a job"
+        finally:
+            lab.stop()
+    finally:
+        channel.stop()
+
+
+def test_a_forward_that_works_returns_the_supervisors_own_answer(tmp_path):
+    from oneground import supervisor as supmod
+    sup = supmod.Supervisor(str(tmp_path))
+    channel = supmod.Channel(sup).start()
+    try:
+        _with_address(tmp_path, channel.url, token=channel.token)
+        lab = _ui(str(tmp_path))
+        try:
+            status, out = lab.forward_to_supervisor(
+                "/enqueue", {"stage": "simulate",
+                             "invocation": ["simulate", "runs/x"]})
+            assert status == 200, out
+            assert out["job"]["state"] == "queued"
+            assert [j.id for j in sup.read()] == [out["job"]["id"]]
+
+            # and a refusal comes back as the supervisor's own words
+            status, out = lab.forward_to_supervisor(
+                "/enqueue", {"stage": "pod up", "invocation": ["pod", "up"]})
+            assert status == 400
+            assert "cannot be automated by accident" in out["refusal"]
+        finally:
+            lab.stop()
+    finally:
+        channel.stop()

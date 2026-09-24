@@ -55,16 +55,27 @@
     return body;
   }
 
-  // The supervisor, directly. Not through the lab server, which makes no
-  // request of its own.
+  // THROUGH THE SERVER, not straight at the supervisor.
+  //
+  // This page cannot reach the supervisor itself: the lab's own
+  // Content-Security-Policy says `connect-src 'self'`, so the browser
+  // refuses a fetch to any other origin, and it refuses it silently enough
+  // that it took a person clicking to notice.
+  //
+  // The supervisor's CORS allowance was necessary and not sufficient -- the
+  // page end forbids what the supervisor end permits, and a ruling was made
+  // twice about one end of a channel before anyone looked at the other.
+  //
+  // So the server forwards, to one loopback address read from its own runs
+  // directory, checked by `guard.check_outbound()`. The supervisor still
+  // requires its own token: the server forwards a request, it does not
+  // authorise one.
   async function ask(path, body) {
     if (!sup || !sup.running) throw new Error(sup ? sup.why : 'no supervisor');
-    const r = await fetch(sup.url + path, {
+    const r = await fetch('/api/jobs' + path + '?token='
+                          + encodeURIComponent(TOKEN), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Oneground-Supervisor-Token': sup.token,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const out = await r.json().catch(() => ({
@@ -303,7 +314,7 @@
     try {
       // The invocation is exactly what a terminal would run, which is what
       // makes the record replayable.
-      await ask('/enqueue', { stage: stage, invocation: [stage, arg] });
+      await ask('/run', { stage: stage, invocation: [stage, arg] });
     } catch (e) {
       fail(e.refusal || e.error || String(e));
     }
