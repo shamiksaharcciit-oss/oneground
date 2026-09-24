@@ -312,7 +312,10 @@ failing beside it saying something else.
 Task 045 then found the general form. A test asserting that every
 couldn't-check claim carries a remedy reads a local workdir. In CI there is
 none, so it **skips**, and the suite is green. It is red only on a machine
-that happens to hold that workdir.
+that happens to hold that workdir. *(Repaired in the same task: the rule now
+has a tracked subject in `fixtures/arxiv-150k/report/` that raises rather than
+skips, and the local-workdir arm skips only on a report whose own provenance
+block says it predates the field — a reason, rather than an absence.)*
 
 > **A check that passes everywhere it runs, and only runs where nobody looks,
 > reported nothing for as long as it existed.**
@@ -686,6 +689,43 @@ further copies saying the same thing in different words went on being wrong.
 
 A search that fails through carelessness is advice. A search that fails
 through precision is evidence.
+
+### 4.1 A collapse states what makes the group a group, once
+
+> **Saying a shared fact zero times is the same defect as saying it fifteen
+> times, from the other side.**
+
+The instance, from task 045. Fifteen claims in the arXiv report were one
+sentence differing only in the configuration and the constraint — one fact
+occupying more of the page than every verdict in the report combined. The
+repair groups the rows that cite the same thing and states them as one
+claim: fifteen sentences become three, 3,959 characters become 1,739.
+
+Then the obvious question, which is the useful half: **the twelve rows in the
+largest group are one group because they share a reason, and the collapsed
+sentence printed that reason nowhere.** Before the collapse it was stated
+zero times across fifteen repetitions, so nothing had regressed — and that is
+exactly why it would never have been noticed.
+
+It matters because **the grouping is itself a claim**: *these twelve belong
+together because they share this*. A collapsed sentence that hides its basis
+is harder to check than the repetition it replaced, not easier. Fifteen
+sentences can each be checked against their own row. One sentence over twelve
+rows can only be checked by someone who can see why the twelve are twelve —
+and a reader who cannot see why twelve rows belong together cannot see that a
+thirteenth does not.
+
+So the rule, and it applies to any summary that stands in for several things:
+
+> **When you replace N statements with one, the one says what the N have in
+> common. Once.** The saving is in the repetition, never in the basis — the
+> basis is the thing the collapse is asserting.
+
+Both directions need a check, because each alone is satisfiable for free: a
+rule that only demands a basis is satisfied by stating anything, and a rule
+that only checks the basis against the members is satisfied by stating
+nothing. `claims.py` step 9 holds both, and printing the reason cost 570 of
+the 2,220 characters the collapse saved.
 
 ### Tools that are correct and answer an adjacent question
 
@@ -1083,10 +1123,12 @@ three sizes:
 | a **dataclass** (`Param`) from `oneground.models` | allowlist the import | `oneground/param.py`, a leaf |
 | a **function** (`producing_version`) from `oneground.receipts` | allowlist the import | `oneground/provenance.py`, a leaf |
 | a **module** (the job record) from the served package | allow a second writer | outside it: the server reads jobs, the supervisor writes them |
+| a **new shared module** (`cites.py`) placed in `oneground.receipts` | allowlist the import | `oneground/cites.py`, a package root that imports nothing |
 
-A dataclass, a function, a whole module. Each time the guard was describing
-the architecture rather than obstructing it, and each time the exemption
-would have been the cheapest possible way to not hear it.
+A dataclass, a function, a whole module, and a module that had not existed
+until that morning. Each time the guard was describing the architecture rather
+than obstructing it, and each time the exemption would have been the cheapest
+possible way to not hear it.
 
 > The test, when you cannot tell which case you are in: **would the exemption
 > still be right if the guard did not exist?** Intake would still name those
@@ -1101,6 +1143,49 @@ this rule does not apply here, nobody re-reads it, and the next module to want
 the same exemption has a precedent. Every entry in an allowlist is a small
 permanent hole, so each one earns its place by being *true about the world*
 rather than *true about today's diff*.
+
+**The fourth entry is the one that changes the rule**, because it is the only
+one where the wrong home passed every reasonable test.
+
+> **A module's neutrality is a property of everything its package pulls in,
+> not of the module.**
+
+Task 045 needed a path grammar that both `oneground/report/claims.py` and
+`oneground/lab/citations.py` could import. The lab's guard lists
+`oneground.report` in `MEASURING` and `citations.py` is a transport module, so
+the shared part could not live in `report/`. It went into
+`oneground/receipts/cites.py`, and every reason for that home was sound:
+`oneground.receipts` is not in `MEASURING`; `oneground.report` already depends
+on it, so no new edge was created; resolving a citation genuinely *is* reading
+a receipt; and the module itself imports nothing but `json` and `os`.
+
+The guard refused it. Importing `oneground.receipts.cites` runs
+`oneground/receipts/__init__.py`, and that file contains `import torch` inside
+`library_versions()`, where it records the torch version for a build stamp.
+The import is lazy, correct and inside a function; the guard reads the AST and
+does not care, which is right, because a lazy import is still an import the
+module can perform. So the package was neutral in every sense anyone had
+thought to check, and its `__init__` was not. The module moved to
+`oneground/cites.py` — a package root that imports nothing at all.
+
+The other three entries were caught doing something that looked wrong on
+inspection. This one survived four independent arguments in its favour, and
+the only thing in the project capable of contradicting them was a guard
+computing the transitive import closure — which no person does by eye, because
+doing it by eye means reading every `__init__.py` on the path and every
+function inside them.
+
+> **You cannot choose a module's home by reading the module. Its cost is
+> whatever its package already imports, and that is a fact about files you did
+> not open.**
+
+The practical form: when a shared helper is extracted, prefer the shallowest
+home that has no `__init__` work at all, and let the guard confirm it rather
+than reasoning about whether a package *feels* heavyweight. A package root
+that imports nothing is the only home whose cost is visible from the module.
+This is *remove the moment of choice* in a small key — the guard is consulted
+instead of the developer's judgement about what a package pulls in. Nobody had
+to remember that `receipts/__init__` touches torch, and nobody did.
 
 ### 5.1 What a guard is telling you when it does not move
 

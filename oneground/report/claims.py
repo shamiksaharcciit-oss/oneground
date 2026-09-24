@@ -354,13 +354,23 @@ def _derive_holds(rule, outcome, outcomes):
     raise ClaimViolation("unknown holds_rule %r" % rule)
 
 
-def check(claim, rows=None, tolerance=1e-9):
+def check(claim, rows=None, tolerance=1e-9, workdir=None, pending=()):
     """Every way a claim can fail to follow from its rows. Returns a list.
 
     `rows` is `{member: {constraint: {"value":, "outcome":, "source":}}}` --
     the same per-member facts the claim was built from. Passing it is what
     turns "the claim is internally consistent" into "the claim is true of the
     run", and the second is the one that matters.
+
+    `workdir` turns on step 8, which reads each cite's `source` out of the
+    run's receipts and compares it with the cited value. It is optional for
+    the same reason `rows` is -- a caller with no run on disk can still check
+    everything that does not need one -- and for the same reason it should be
+    passed wherever a run exists. **Task 045 finding 1: until it did, the
+    invariant never once verified that a citation was true.**
+
+    `pending` names the files the caller is about to write and is being
+    checked in order to write. See `cites.PENDING`.
     """
     bad = []
     q = claim.quantifier
@@ -580,21 +590,181 @@ def check(claim, rows=None, tolerance=1e-9):
                     bad.append(
                         "prose prints %s beside %s, but the claim cites %r "
                         "for it" % (printed, c.member, c.value))
+
+    # 8. THE CITATION ITSELF IS TRUE. Task 045, finding 1.
+    #
+    #    Every rule above checks that the sentence follows from what it
+    #    cites. Not one of them opened the file a cite names. So a `Cite`
+    #    could carry `source="verify.json:load.completed"` and
+    #    `value=119.1` while that field held 35731, and the invariant, two
+    #    real-report tests, a published fixture and the teaser all passed --
+    #    until a UI was asked to render the two side by side.
+    #
+    #    Four shapes are legitimately not a scalar field and are CLASSIFIED,
+    #    not failed: a rule, a requirements input, a wildcard over every
+    #    option, and a container whose cited value is one of its members. A
+    #    check that failed those would be wrong three times to catch one.
+    #    A source naming a field that is not there is a violation, and a
+    #    distinct one.
+    if workdir is not None:
+        bad.extend(_citation_problems(claim, workdir, tolerance, pending))
+
+    # 9. A COLLAPSED CLAIM STATES ONE FACT, ONCE. Task 045, finding 4.
+    #
+    #    One sentence standing in for several rows prints the facts those rows
+    #    share EXACTLY ONCE. That is the whole economy of the collapse, and it
+    #    is also the way it can lie: if the rows do not agree, the single
+    #    printed fact is true of some of them and lent to the rest -- which is
+    #    the defect this module is named for, at a new grain.
+    #
+    #    On the arXiv report fifteen `no_engine_comparison` claims read as one
+    #    sentence fifteen times. Fourteen cite two engines that produced no
+    #    value; the fifteenth cites pgvector at 316.87 with `fails`. Grouping
+    #    on the sentence shape puts all fifteen together and says "fewer than
+    #    two engines produced a value -- qdrant (couldn't-check), pgvector
+    #    (couldn't-check)" of a row where pgvector produced 316.87. This rule
+    #    refuses that grouping; step 5b, on each part, is what ties every
+    #    member to its own rows.
+    if claim.extra.get("collapsed"):
+        labels = tuple(p.text for p in claim.parts)
+        if len(labels) < 2:
+            bad.append(
+                "collapsed claim has %d part(s): a sentence standing in for "
+                "several rows names each row it stands for" % len(labels))
+        if tuple(claim.scope) != labels:
+            bad.append("collapsed claim is over %s but its parts are %s"
+                       % (list(claim.scope), list(labels)))
+        if tuple(claim.holds_for) != labels:
+            bad.append(
+                "collapsed claim holds for %s but stands in for %s -- a row "
+                "the sentence does not hold of is a row it may not state"
+                % (list(claim.holds_for), list(labels)))
+        shapes = [tuple((c.member, c.value, c.outcome) for c in p.cites)
+                  for p in claim.parts]
+        odd = [labels[i] for i, s in enumerate(shapes) if s != shapes[0]]
+        if odd:
+            bad.append(
+                "collapsed claim states one set of engine facts for %d rows, "
+                "but %s do not share it: %s against %s"
+                % (len(labels), odd,
+                   [s for s in shapes if s != shapes[0]][0], shapes[0]))
+
+        # AND IT STATES WHAT MAKES THE GROUP A GROUP. Task 045, the ruling.
+        #
+        # **A collapse states its basis, once.** Twelve rows sharing a reason
+        # and stating it nowhere is the same defect as fifteen rows stating it
+        # fifteen times, approached from the other side: the grouping IS a
+        # claim -- *these belong together because they share this* -- and a
+        # sentence that hides its own basis is harder to check than the
+        # repetition it replaced. A reader who cannot see why twelve rows
+        # belong together cannot see that a thirteenth does not.
+        #
+        # Both directions, because each alone is satisfiable by saying
+        # nothing or by saying anything.
+        reasons = {c.reason or "" for p in claim.parts for c in p.cites}
+        stated = (claim.detail or "").strip()
+        if len(reasons) == 1 and reasons != {""} and not stated:
+            bad.append(
+                "collapsed claim over %d rows states no basis: they share a "
+                "reason and the sentence does not give it, so nothing on the "
+                "page says what makes them one group" % len(labels))
+        if stated and stated not in reasons:
+            bad.append(
+                "collapsed claim states a basis its rows do not carry: %r "
+                "against %s" % (stated[:80], sorted(r[:80] for r in reasons)))
+
     return bad
 
 
-def check_all(claims, rows=None):
+def _cites_of(claim):
+    """Every cite in a claim and its parts, once each.
+
+    Step 8 reads the artifact behind a cite. A composite's parts usually carry
+    the same cites as their parent, so checking them again through the
+    recursion at step 4 would print each problem twice; a collapsed claim's
+    parts carry cites the parent does not have at all, so not checking them
+    would leave finding 1 short of the rows it exists for. Gathering them here
+    and leaving the recursion to pass `workdir=None` gets both.
+    """
+    out = []
+    stack = [claim]
+    while stack:
+        c = stack.pop(0)
+        for cite in c.cites:
+            if cite not in out:
+                out.append(cite)
+        stack.extend(c.parts)
+    return out
+
+
+def _citation_problems(claim, workdir, tolerance=1e-9, pending=()):
+    """What the receipts say about each cite's source. Task 045, finding 1."""
+    from .. import cites as C
+
+    out, cache = [], {}
+    for c in _cites_of(claim):
+        if c.derived or c.value is None or not c.source:
+            continue
+        kind, got, note = C.resolve(workdir, c.source, member=c.member,
+                                    cache=cache, pending=pending)
+        if kind in C.NOT_A_FIELD:
+            continue
+        if kind == C.UNRESOLVED:
+            out.append("cited %s names %s, which is not there: %s"
+                       % (_fmt(c.value), c.source, note))
+            continue
+        if _same(got, c.value, tolerance):
+            continue
+        # A source naming a CONTAINER whose cited value is one of its members
+        # is under-specified rather than wrong, and saying which member it is
+        # tells the author how to tighten it.
+        where = C.contains(got, c.value)
+        if where is not None:
+            out.append(
+                "cited %s names the container %s; the value is its %r. The "
+                "source should name the field it cites."
+                % (_fmt(c.value), c.source, where))
+            continue
+        out.append("cited %s for %s but %s holds %s"
+                   % (_fmt(c.value), c.member, c.source, _fmt(got)))
+    return out
+
+
+def _same(got, want, tolerance):
+    if isinstance(got, bool) or isinstance(want, bool):
+        return got == want
+    if isinstance(got, (int, float)) and isinstance(want, (int, float)):
+        return abs(float(got) - float(want)) <= tolerance
+    return got == want
+
+
+def check_all(claims, rows=None, workdir=None, pending=()):
     """[(claim, [problem])] for every claim that violates the invariant."""
     out = []
     for c in claims:
-        problems = check(c, rows)
+        problems = check(c, rows, workdir=workdir, pending=pending)
         if problems:
             out.append((c, problems))
     return out
 
 
-def raise_on_violation(claims, rows=None, where=""):
-    bad = check_all(claims, rows)
+def raise_on_violation(claims, rows=None, where="", workdir=None, pending=()):
+    """The gate. Task 045: `workdir` turns on step 8 HERE, not only in tests.
+
+    Step 8 arrived with a test suite and no caller. Every production call went
+    through this function, this function took no `workdir`, and so the check
+    that reads the file a citation names did not run when a report was
+    written. **That is finding 5's defect one layer along** -- a rule whose
+    only exercise is its own test is a test, not a guard -- and it is the
+    shape the whole of task 045 was about, so leaving it would have been the
+    task reproducing its own subject.
+
+    Passing a workdir is therefore the default at every call site that has
+    one, and the parameter is optional only for the callers that genuinely do
+    not: a claim set built without a run on disk can still be checked against
+    everything that does not need one.
+    """
+    bad = check_all(claims, rows, workdir=workdir, pending=pending)
     if not bad:
         return
     lines = []
@@ -701,11 +871,21 @@ def rows_from_options(options):
 # outcome, an engine, a verdict or a measured value into a string.
 
 def part(predicate, quantifier, text, scope=(), holds_for=(), cites=(),
-         constraint=None):
-    """One assertion inside a sentence, with the fragment that states it."""
+         constraint=None, subject=None, asserts_outcome=None,
+         holds_rule="any"):
+    """One assertion inside a sentence, with the fragment that states it.
+
+    `subject`, `asserts_outcome` and `holds_rule` exist for the same reason
+    they exist on a `Claim`: a part that names its own option and the outcome
+    it asserts is checked against that option's rows by 5b, instead of
+    inheriting its parent's subject and being believed. Task 045, finding 4 --
+    a collapsed claim's members are its parts, so the parts are where the
+    per-row derivation has to happen.
+    """
     return Claim(kind="part", predicate=predicate, quantifier=quantifier,
-                 constraint=constraint, scope=tuple(scope),
-                 holds_for=tuple(holds_for), cites=tuple(cites), text=text)
+                 constraint=constraint, subject=subject, scope=tuple(scope),
+                 holds_for=tuple(holds_for), cites=tuple(cites), text=text,
+                 asserts_outcome=asserts_outcome, holds_rule=holds_rule)
 
 
 def _members(names):
@@ -825,7 +1005,8 @@ def _r_meets(c):
 def _r_indistinguishable(c):
     vals = "; ".join("%s %.4f" % (cite.member, float(cite.value))
                      for cite in c.cites)
-    overall = "; ".join("%s %s" % (cite.member, cite.outcome)
+    # Task 045, finding 3: the reader's word, not the machine's constant.
+    overall = "; ".join("%s %s" % (cite.member, outcome_label(cite.outcome))
                         for cite in c.cites)
     head = ("These options are indistinguishable on recall: %s. Their recall "
             "differs by less than the calibration tolerance (%s), which is "
@@ -895,12 +1076,40 @@ def _r_engine_comparison(c):
     return ("%s %s %s %s" % (head, measured, verdicts, c.detail)).rstrip()
 
 
+def _nc_engines(cites):
+    # Task 045, finding 3: `outcome_label`, not the raw outcome. This printed
+    # "qdrant (couldnt_check), pgvector (couldnt_check)" -- a machine token
+    # in the middle of an English sentence, in 16 of the arXiv report's 37
+    # claim sentences. The translation already existed, three hundred lines
+    # below, and this site did not call it.
+    return ", ".join("%s (%s)" % (x.member, outcome_label(x.outcome))
+                     for x in cites)
+
+
 def _r_no_engine_comparison(c):
+    """One row, or the rows that cite the same thing. Task 045, finding 4.
+
+    Fifteen of the arXiv report's 37 claims were this sentence, differing only
+    in the configuration and the constraint: one fact occupying more of the
+    page than every verdict in the report combined. Rows citing the same
+    engine facts are one sentence with its members listed; rows citing
+    anything else stay apart, and step 9 is what enforces that.
+    """
+    if c.extra.get("collapsed"):
+        # The basis, once. These rows are one sentence because they share a
+        # reason, and a collapse that does not say what makes the group a
+        # group cannot be checked for containing the wrong row.
+        basis = ((", and for the same reason in each: %s" % c.detail.rstrip("."))
+                 if c.detail else "")
+        return ("%d rows were not compared across engines because fewer than "
+                "two engines produced a value -- %s in each%s. A comparison "
+                "here would be between a number and an absence. The rows: %s"
+                % (len(c.parts), _nc_engines(c.parts[0].cites), basis,
+                   "; ".join(p.text for p in c.parts)))
     return ("%s: %s was not compared across engines because fewer than two "
             "engines produced a value -- %s. A comparison here would be "
             "between a number and an absence"
-            % (c.subject, c.constraint,
-               ", ".join("%s (%s)" % (x.member, x.outcome) for x in c.cites)))
+            % (c.subject, c.constraint, _nc_engines(c.cites)))
 
 
 def _r_engines_meeting(c):
@@ -1278,39 +1487,36 @@ def runner_up_lines(recommended, options, meets="meets",
     return out
 
 
-def how_to_resolve(name, verdict, verify_info):
-    """What is missing. Specific, not generic."""
-    reason = verdict.reason
-    # Task 034. For a not-verifiable-here row what would settle it is not a
-    # command: it is a different engine, or an adapter that does not exist.
-    # Printing "run `oneground verify`" here would be false, and it is the
-    # one case where the remedy is a contribution rather than an action.
-    remedy = getattr(verdict, "remedy", "")
-    kind = getattr(verdict, "couldnt_check_kind", None)
-    if remedy and kind in ("not_verifiable_here", "coverage_unresolved"):
-        return f"To decide {name}: {remedy}."
-    if name == "latency_p95":
-        if "no verify run" in reason:
-            return ("To decide latency_p95: run `oneground verify` against a "
-                    "real engine in the environment the constraint targets. "
-                    "Latency is never taken from simulation.")
-        if "could not attribute" in reason:
-            env = (verify_info or {}).get("platform", "this machine")
-            return ("To decide latency_p95: re-run `oneground verify` where "
-                    "the round trip to the engine is small relative to the "
-                    "query. On " + env + " the baseline RTT was a large "
-                    "fraction of the query p95, so the number measured the "
-                    "path rather than the engine. A pod session with the "
-                    "client and engine in the same environment is the way to "
-                    "settle it (task 011).")
-        if "constraint targets" in reason:
-            return ("To decide latency_p95: measure in the environment the "
-                    "constraint names. " + reason + ".")
-        return "To decide latency_p95: %s." % reason
-    if name == "monthly_budget":
-        return ("To decide monthly_budget: a cost model with error bands is "
-                "not in this build (task 011). Nothing here estimates cost, "
-                "because a confident number from list prices would be "
-                "fiction.")
-    return "To decide %s: %s." % (name, reason)
+def how_to_resolve(name, verdict, verify_info=None):
+    """What would settle this, or a visible statement that nothing recorded
+    here would. Task 045, finding 5.
+
+    **Every kind that carries a remedy is routed, not two of three.** This
+    used to name `not_verifiable_here` and `coverage_unresolved` and route
+    only those, so `not_verified` -- the one kind whose remedy is always an
+    action -- fell past it even after someone filled the field in. Routing on
+    the presence of the remedy rather than on a list of kinds means a new kind
+    arrives routed, which is the difference between a rule and a table
+    somebody has to remember.
+
+    **The fall-through no longer dresses a reason as a remedy.** It used to
+    end `return "To decide %s: %s." % (name, reason)`, which begins with the
+    grammar of an instruction and then states the obstacle. A reader skimming,
+    or a reviewer checking that remedies exist, sees a sentence shaped like an
+    action; only someone who reads to the end finds there is nothing to do in
+    it. That is worse than a blank, because a blank is obviously missing --
+    so when no remedy is recorded, the absence is now the sentence.
+
+    `verify_info` is no longer read: the one branch that needed it composed
+    the environment-noise remedy here, from a substring of the reason, and
+    that remedy now lives on the verdict that knows it. The parameter stays
+    for the callers that pass it positionally.
+    """
+    remedy = (getattr(verdict, "remedy", "") or "").strip()
+    if remedy:
+        return "To decide %s: %s" % (name, remedy if remedy.endswith(".")
+                                     else remedy + ".")
+    return ("Nothing recorded in this run settles %s, and no remedy for it "
+            "is recorded either. The obstacle was: %s."
+            % (name, (verdict.reason or "not stated").rstrip(".")))
 

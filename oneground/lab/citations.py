@@ -41,116 +41,36 @@ deciding which to believe.
 import json
 import os
 
+from .. import cites as _cites
 from .receipt import CITATIONS, split_path
 
-#: A source that is not a `file:field` reference, and what it is instead.
-#: Each is a kind the drawer renders in its own right.
-NON_FIELD = {
-    "(rule)": ("rule",
-               "this follows from a rule, not from a row: no measurement was "
-               "read to reach it"),
-    "(not run)": ("not_run",
-                  "the stage that would have produced this was not run"),
-    "cost": ("cost_model",
-             "the cost model, which is declared prices rather than a "
-             "measurement"),
-}
-
-#: Sources naming something that is not a receipt of this run.
-REQUIREMENTS_PREFIX = "requirements:"
-
-#: Fields a list member may be identified by, as `receipt.MEMBER_KEYS`.
-MEMBER_KEYS = ("config", "engine", "label", "name", "key")
-
-
-def _segment(seg):
-    if seg.endswith("]") and "[" in seg:
-        head, _, rest = seg.partition("[")
-        return head, rest[:-1]
-    return seg, None
+# ONE PATH GRAMMAR (task 045, finding 1).
+#
+# These were defined here, and `oneground/report/claims.py` had no way to
+# reach them: the lab's guard lists `oneground.report` in MEASURING and this
+# is a transport module, so the dependency could not simply be reversed. The
+# grammar and the walker now live in `oneground.receipts.cites`, which both
+# import -- `receipts` is not in MEASURING, `report` already depends on it,
+# and resolving a citation is reading a receipt.
+#
+# They are re-exported under their old names so this module's callers and
+# tests are untouched. **A second grammar would reintroduce exactly the place
+# two things can disagree**, which is the defect finding 1 exists to close: a
+# view's declared `reads` and a claim's `source` must never need translating.
+NON_FIELD = _cites.NON_FIELD
+REQUIREMENTS_PREFIX = _cites.REQUIREMENTS_PREFIX
+MEMBER_KEYS = _cites.MEMBER_KEYS
+_segment = _cites.segment
+_member = _cites.member_of
 
 
-def _member(node, want):
-    for it in node:
-        if isinstance(it, dict) and any(it.get(k) == want
-                                        for k in MEMBER_KEYS):
-            return it
-    return None
+_walk = _cites.walk
 
 
-def _walk(node, path, member=None):
-    """(found, value, reason). Never raises: unresolvable is an answer."""
-    for seg in split_path(path):
-        head, want = _segment(seg)
-        if isinstance(node, dict):
-            if head not in node:
-                return False, None, (
-                    f"no field {head!r} here (this receipt has "
-                    f"{sorted(node)[:5]})")
-            node = node[head]
-        elif isinstance(node, list) and member is not None:
-            got = _member(node, member)
-            if got is None:
-                return False, None, f"no member {member!r} in this list"
-            if head not in got:
-                return False, None, f"no field {head!r} on member {member!r}"
-            node = got[head]
-        else:
-            return False, None, f"cannot read {head!r} from a {type(node).__name__}"
-        if want is None:
-            continue
-        if want == "*":
-            return False, None, "names every option, not one field"
-        if isinstance(node, list):
-            got = _member(node, want)
-            if got is None:
-                return False, None, f"no member {want!r} in a list of {len(node)}"
-            node = got
-        elif isinstance(node, dict):
-            if want not in node:
-                return False, None, f"no key {want!r}"
-            node = node[want]
-        else:
-            return False, None, f"cannot index a {type(node).__name__}"
-    return True, node, None
+_contains = _cites.contains
 
 
-def _contains(container, value):
-    """Where `value` sits inside `container`, or None.
-
-    Some sources name a container and cite a leaf inside it --
-    `latency_shape_single_client.p95_across_runs` holds min/median/max and the
-    claim cites the min. That is an under-specified source rather than a wrong
-    one, and saying so is more useful than calling it a mismatch.
-    """
-    if isinstance(container, dict):
-        for k, v in container.items():
-            if v == value:
-                return k
-    return None
-
-
-def _scoped(data, path, member):
-    """Enter `engines[member]` when a source starts below that level.
-
-    `verify.json:load.achieved_qps` names no engine; the citation's `member`
-    does. Descending by the member rather than guessing is what makes a
-    two-engine run's citations unambiguous.
-    """
-    if not (isinstance(data, dict) and "engines" in data and member):
-        return data
-    first = split_path(path)[0] if path else ""
-    head, _ = _segment(first)
-    if head in data:
-        return data
-    engines = data["engines"]
-    if isinstance(engines, list):
-        got = _member(engines, member)
-        if got is not None:
-            return got
-    elif isinstance(engines, dict) and member in engines:
-        return engines[member]
-    return data
+_scoped = _cites.scoped
 
 
 def resolve_one(workdir, source, cited_value=None, member=None, cache=None):

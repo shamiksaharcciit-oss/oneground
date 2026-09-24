@@ -119,13 +119,22 @@ def test_qps_meets_and_fails_synthetic():
 
 def test_qps_is_couldnt_check_without_a_load_phase_synthetic():
     """A single-client run has no throughput to report, and says which
-    command produces one."""
+    command produces one -- in the field that holds commands.
+
+    Task 045, finding 5. This asserted `"runpod" in v.reason`, and passing was
+    what kept the action in the reason: every check that asked whether a
+    remedy existed said no, every reader of the prose said yes, and the
+    disagreement was invisible from both sides. The obstacle stays in
+    `reason`; the command moves to `remedy`.
+    """
     data = verify_on("p")
     data.pop("load")
     v = vd.qps_target(sim_row(), data, {"latency": {"at_qps": 200}})
     assert v.outcome == CC
     assert "no load phase" in v.reason or "load phase" in v.reason
-    assert "runpod" in v.reason
+    assert "runpod" not in v.reason, v.reason
+    assert "runpod" in v.remedy
+    assert v.couldnt_check_kind == vd.NOT_VERIFIED
 
 
 def test_qps_at_the_wrong_concurrency_is_couldnt_check_synthetic():
@@ -957,7 +966,10 @@ def test_a_load_constraint_never_falls_back_to_the_sequential_row_synthetic():
     v = vd.latency_p95(sim_row(), data, c)
     assert v.outcome == CC, v.reason
     assert "no k=10_under_load" in v.reason, v.reason
-    assert "not a substitute" in v.reason, v.reason
+    # Task 045, finding 5: the refusal is the obstacle and belongs in the
+    # reason; what to run instead is the remedy. This asserted both of the
+    # reason, which is what held the action in the wrong field.
+    assert "not a substitute" in v.remedy, v.remedy
     assert v.value is None, "a sequential p95 leaked into a load verdict"
 
 
