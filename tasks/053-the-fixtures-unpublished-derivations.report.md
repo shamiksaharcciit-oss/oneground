@@ -42,6 +42,25 @@ reproduces) and the stricter one (nothing published is uncovered) the
 same rule, going forward. Both are stated in `docs/FIXTURES.md`, in that
 order, with the disagreement not smoothed over.
 
+**Why this resolution beats the two obvious alternatives, and is worth
+saying so rather than leaving as an implied preference.** One alternative
+was to write down the code's condition as the rule regardless — that
+would have documented an accident: a condition that happened to sit in a
+summary-formatting function, never checked against a real promotion,
+now enshrined as policy. The other was to delete the four fields from
+what `verify.py` is willing to know about, closing the disagreement by
+narrowing scope rather than widening coverage — cheaper, and it would
+have kept `routing_ceiling`/the copy percentiles permanently unverifiable
+by the one command built to verify them. Neither was taken. What was
+taken cost nothing beyond four names and four `_compare()` calls, because
+`ref_semantic_sharded()` was already computing and returning all six
+values from the one call `verify_values()` was already making — the fix
+did not add a computation, it read four numbers that were already sitting
+in memory and being thrown away. Making the narrow rule (declared
+coverage reproduces) and the strict one (nothing published is uncovered)
+the same rule was available at that price specifically because the gap
+was in *reading*, not in *measuring*.
+
 **The three fixture gaps, closed:**
 
 1. **Chunk counts persisted.** Traced in `oneground/sample/sec_filings.py`:
@@ -58,6 +77,15 @@ order, with the disagreement not smoothed over.
    `TOKENIZE_BATCH`. Real numbers, not estimated: **1,559,834 chunks from
    10,000 documents, 109,722 (7.03%) crossing a section boundary** — the
    crossing rate matches the original build log's own 7.03% exactly.
+   **That agreement is the answer to the gap, not an approximation of
+   one.** The question this item exists to close is not "roughly how many
+   chunks" — it is "what did the actual canonical build produce, published
+   where a reader can find it." A number computed independently, from the
+   published `documents.jsonl.zst` those same 10,000 filings produced, and
+   landing on the build log's own 7.03% rather than something merely
+   close to it, is a positive reproduction of the missing record — the
+   strongest form this closure could take, short of re-running the
+   original pod session itself.
 2. **Accession list shipped.** `resolve_source()` only ever hashed the
    sorted accession list, never kept it. Re-ran it against live EDGAR
    (the same lightweight index-only fetch task 030's own report confirmed
