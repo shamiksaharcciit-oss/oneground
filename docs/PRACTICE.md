@@ -690,6 +690,43 @@ further copies saying the same thing in different words went on being wrong.
 A search that fails through carelessness is advice. A search that fails
 through precision is evidence.
 
+### 4.1 A collapse states what makes the group a group, once
+
+> **Saying a shared fact zero times is the same defect as saying it fifteen
+> times, from the other side.**
+
+The instance, from task 045. Fifteen claims in the arXiv report were one
+sentence differing only in the configuration and the constraint — one fact
+occupying more of the page than every verdict in the report combined. The
+repair groups the rows that cite the same thing and states them as one
+claim: fifteen sentences become three, 3,959 characters become 1,739.
+
+Then the obvious question, which is the useful half: **the twelve rows in the
+largest group are one group because they share a reason, and the collapsed
+sentence printed that reason nowhere.** Before the collapse it was stated
+zero times across fifteen repetitions, so nothing had regressed — and that is
+exactly why it would never have been noticed.
+
+It matters because **the grouping is itself a claim**: *these twelve belong
+together because they share this*. A collapsed sentence that hides its basis
+is harder to check than the repetition it replaced, not easier. Fifteen
+sentences can each be checked against their own row. One sentence over twelve
+rows can only be checked by someone who can see why the twelve are twelve —
+and a reader who cannot see why twelve rows belong together cannot see that a
+thirteenth does not.
+
+So the rule, and it applies to any summary that stands in for several things:
+
+> **When you replace N statements with one, the one says what the N have in
+> common. Once.** The saving is in the repetition, never in the basis — the
+> basis is the thing the collapse is asserting.
+
+Both directions need a check, because each alone is satisfiable for free: a
+rule that only demands a basis is satisfied by stating anything, and a rule
+that only checks the basis against the members is satisfied by stating
+nothing. `claims.py` step 9 holds both, and printing the reason cost 570 of
+the 2,220 characters the collapse saved.
+
 ### Tools that are correct and answer an adjacent question
 
 It has now happened **seven times in one slice**, to seven different kinds

@@ -649,6 +649,30 @@ def check(claim, rows=None, tolerance=1e-9, workdir=None, pending=()):
                 % (len(labels), odd,
                    [s for s in shapes if s != shapes[0]][0], shapes[0]))
 
+        # AND IT STATES WHAT MAKES THE GROUP A GROUP. Task 045, the ruling.
+        #
+        # **A collapse states its basis, once.** Twelve rows sharing a reason
+        # and stating it nowhere is the same defect as fifteen rows stating it
+        # fifteen times, approached from the other side: the grouping IS a
+        # claim -- *these belong together because they share this* -- and a
+        # sentence that hides its own basis is harder to check than the
+        # repetition it replaced. A reader who cannot see why twelve rows
+        # belong together cannot see that a thirteenth does not.
+        #
+        # Both directions, because each alone is satisfiable by saying
+        # nothing or by saying anything.
+        reasons = {c.reason or "" for p in claim.parts for c in p.cites}
+        stated = (claim.detail or "").strip()
+        if len(reasons) == 1 and reasons != {""} and not stated:
+            bad.append(
+                "collapsed claim over %d rows states no basis: they share a "
+                "reason and the sentence does not give it, so nothing on the "
+                "page says what makes them one group" % len(labels))
+        if stated and stated not in reasons:
+            bad.append(
+                "collapsed claim states a basis its rows do not carry: %r "
+                "against %s" % (stated[:80], sorted(r[:80] for r in reasons)))
+
     return bad
 
 
@@ -1072,10 +1096,15 @@ def _r_no_engine_comparison(c):
     anything else stay apart, and step 9 is what enforces that.
     """
     if c.extra.get("collapsed"):
+        # The basis, once. These rows are one sentence because they share a
+        # reason, and a collapse that does not say what makes the group a
+        # group cannot be checked for containing the wrong row.
+        basis = ((", and for the same reason in each: %s" % c.detail.rstrip("."))
+                 if c.detail else "")
         return ("%d rows were not compared across engines because fewer than "
-                "two engines produced a value -- %s in each. A comparison "
+                "two engines produced a value -- %s in each%s. A comparison "
                 "here would be between a number and an absence. The rows: %s"
-                % (len(c.parts), _nc_engines(c.parts[0].cites),
+                % (len(c.parts), _nc_engines(c.parts[0].cites), basis,
                    "; ".join(p.text for p in c.parts)))
     return ("%s: %s was not compared across engines because fewer than two "
             "engines produced a value -- %s. A comparison here would be "

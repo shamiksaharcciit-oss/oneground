@@ -941,9 +941,37 @@ def no_comparison_claim(members):
                     for label in labels),
         parts=parts,
         source="verify.json:engines[*]",
+        # THE BASIS OF THE GROUPING, STATED ONCE. Task 045, the ruling on
+        # finding 4's open question.
+        #
+        # These rows are one sentence because they share a reason, and the
+        # first version of the collapse printed the reason nowhere -- twelve
+        # rows stating it zero times, which is the same defect as fifteen rows
+        # stating it fifteen times, from the other side. A collapsed claim
+        # that hides its own basis is harder to check than the repetition it
+        # replaced: a reader cannot see why these twelve belong together, and
+        # so cannot see that a thirteenth does not.
+        #
+        # It goes in `detail` because it is a quotation from the layer that
+        # measured it, audited there: `composed_text` strips it before the
+        # prose rules run, exactly as it does a verdict's reason.
+        detail=_shared_reason(members),
         extra={"collapsed": True})
     cl.render(c)
     return c
+
+
+def _shared_reason(members):
+    """The one reason every row in the group carries, or "".
+
+    Empty is not a failure mode to paper over: a group whose rows agree on
+    their engines and outcomes but not on why is a group with no single basis
+    to state, and saying nothing is then correct. `_no_comparison_substance`
+    keys on the reason, so in practice a group always has one -- and step 9
+    checks the two agree rather than trusting that sentence.
+    """
+    reasons = {v.reason for _, _, verdicts in members for v in verdicts}
+    return reasons.pop() if len(reasons) == 1 else ""
 
 
 def _calibration_footer(verify_info, recommended, history_path=None):

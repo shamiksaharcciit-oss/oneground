@@ -92,6 +92,24 @@ A new **step 9** holds the thing a collapse can break: a sentence standing in
 for several rows prints their shared facts once, and is admissible only if
 every part cites the same facts, member for member.
 
+**And it states what makes the group a group** — ruled after the first
+version of the collapse printed the rows' shared reason nowhere. Twelve rows
+stating a reason zero times is the same defect as fifteen stating it fifteen
+times, from the other side: the grouping is itself a claim, and a sentence
+that hides its basis is harder to check than the repetition it replaced.
+
+Step 9 holds this with **two checks, not one**, because either alone is
+satisfiable for free and the other side of the defect walks straight through
+it. A check that only demands a basis is satisfied by stating anything —
+`detail = "because it was convenient to group them"` passes it as readily as
+the true reason. A check that only compares a stated basis to the members is
+satisfied by stating nothing — the twelve rows go back to citing their reason
+zero times and there is nothing there to compare. Only both together enforce
+the ruling: `detail` must be present when the rows share a reason, and when
+present it must be one of the reasons they actually carry. The two mutation
+tests in `test_one_fact_one_sentence.py` each defeat one check and are caught
+by the other. `docs/PRACTICE.md` §4.1 records the rule.
+
 ### Finding 5 — a couldn't-check whose remedy restates the obstacle
 
 The routing first, the prose after, in that order.
@@ -159,7 +177,11 @@ back through `compare_engine_claims`.
 | | claims | characters |
 |---|---|---|
 | `no_engine_comparison`, stored | 15 | 3,959 |
-| `no_engine_comparison`, rebuilt | **3** | **1,739** |
+| `no_engine_comparison`, rebuilt | **3** | 1,739 |
+| …with each group stating its basis (ruled) | **3** | **2,309** |
+
+The basis costs 570 characters and the collapse still removes 42%. They are
+the best-spent characters in the sentence: they are what makes it checkable.
 
 The three: 2 hash_sharded rows, 12 semantic_sharded rows, and the
 single_node_hnsw row that cites something else and stays its own sentence.
@@ -435,7 +457,11 @@ the caller is about to write — would need the writer and the checker to be the
 same function, which they are not. Small, and the shape this task keeps
 finding.
 
-**3. The collapsed sentence does not print the shared reason.** Each part
+**3. ~~The collapsed sentence does not print the shared reason.~~ Ruled in
+and done** — see finding 4 above and `docs/PRACTICE.md` §4.1. Left here with
+its original text struck rather than deleted, because what it said was that
+nothing had regressed, and that was true and was also why it would never have
+been noticed. Each part
 keeps its own, so nothing is lost from the record, but the twelve
 semantic_sharded rows share one explanation that no sentence now states —
 where before it was stated zero times across fifteen. Printing it once is a
@@ -479,8 +505,9 @@ Changed:
   `OFF_ENGINE_CONSTRAINTS`; the `else` branch keeps the remedy; latency
   `meets`/`fails` cite `.max`/`.min` rather than the container
 - `oneground/report/__init__.py` — `no_comparison_claim`,
-  `_no_comparison_substance`, `_NoComparison`; the gate passes `workdir` and
-  `pending`; `qps_max`'s cite names the field; one prose fix
+  `_no_comparison_substance`, `_NoComparison`, `_shared_reason`; the gate
+  passes `workdir` and `pending`; `qps_max`'s cite names the field; one prose
+  fix
 - `oneground/proposals/propose.py` — the card's gate passes `plan.workdir` and
   `pending=("card.json",)`
 - `oneground/lab/citations.py` — re-exports the shared grammar
@@ -489,7 +516,8 @@ Changed:
 - `oneground/verify/test_matched.py` — two tests that asserted an action was
   in `reason` now assert it is in `remedy`
 - `oneground/report/test_verdict.py`, `oneground/report/test_no_lent_outcomes.py`
-- `docs/PRACTICE.md` — §5's fourth entry (ruled); §2 warning 6 notes the repair
+- `docs/PRACTICE.md` — §4.1, *a collapse states what makes the group a group,
+  once* (ruled); §5's fourth entry (ruled); §2 warning 6 notes the repair
 
 Scratch (gitignored, listed so the measurements can be re-run):
 `tasks/scratch/045_token_fresh.py`, `045_finding2_resolves.py`,
@@ -509,24 +537,19 @@ Commits on `task-045`:
 | `0eeb4cd` | finding 5 |
 | `bc7f0bf` | finding 3's assertion over a real report |
 | `b2d33e8` | finding 6 — the check becomes a guard at both gates |
+| `1a4b74b` | this report |
+| *(next)* | the collapse states its basis (ruled) |
 
 ## Blocked on developer
 
 **Publishing is yours.** `git push -u origin task-045` was refused by this
 session's permission layer ("out-of-place publication"), not by git or by the
-remote, and I did not route around it. **One commit landed after you said you
-were pushing** — `b2d33e8`, finding 6 — so `task-045` is five commits ahead of
-`origin/main` (`da41810`), not four, and the report itself is a sixth once it
-is committed.
+remote, and I did not route around it. Commits landed after you said you were
+pushing — `b2d33e8` (finding 6), `1a4b74b` (this report) and the basis ruling
+— so re-push before merging, or merge from local.
 
-One ruling wanted, in *Observed, not done* item 3: **whether the collapsed
-sentence should print the shared reason.** Twelve rows share one explanation
-that no sentence now states, where before it was stated zero times across
-fifteen — so nothing regressed, and printing it once is the improvement the
-freed space was for. It is a prose change beyond the brief's list, which is
-why it is not in.
-
-One thing worth knowing rather than deciding: **the gate is now live on
+No rulings outstanding. One thing worth knowing rather than deciding: **the
+gate is now live on
 `oneground report` and `oneground propose`.** A report whose citation names a
 field holding another value, or names a field that is not there, will refuse
 to be written. That is the intent, and it is a behaviour change — the first

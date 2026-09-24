@@ -158,9 +158,18 @@ def test_the_fifteen_become_three_and_state_the_same_fifteen_rows():
     assert is_ == was, "rows dropped: %s; rows invented: %s" % (
         sorted(was - is_), sorted(is_ - was))
 
-    # The point of the collapse, measured rather than asserted.
-    assert sum(len(c.text) for c in now) < sum(
-        len(d["text"]) for d in stored) / 2
+    # The point of the collapse, measured rather than asserted: 3,959
+    # characters become 2,309 today, a 42% reduction over three sentences
+    # instead of fifteen.
+    #
+    # It was 1,739 before the group was made to state its basis, and the 570
+    # characters that bought back are the best-spent ones here: they say why
+    # these rows are one row, which is the only thing that makes the collapse
+    # checkable. The bound is a third rather than a half so that a longer
+    # reason -- a better one -- does not fail a test about repetition.
+    before = sum(len(d["text"]) for d in stored)
+    after = sum(len(c.text) for c in now)
+    assert after < before * 2 / 3, (before, after)
 
 
 def test_the_row_that_cites_something_else_stays_its_own_sentence():
@@ -187,6 +196,65 @@ def test_the_row_that_cites_something_else_stays_its_own_sentence():
     families = [{p.subject.split("[")[0] for p in c.parts}
                 for c in now if c.extra.get("collapsed")]
     assert all(len(f) == 1 for f in families), families
+
+
+# --------------------------------------------------------------------------
+# a collapse states what makes the group a group, once
+# --------------------------------------------------------------------------
+
+def test_the_collapsed_sentence_states_its_basis_exactly_once():
+    """The ruling on finding 4's open question.
+
+    Twelve rows sharing a reason and stating it **zero** times is the same
+    defect as fifteen rows stating it fifteen times, approached from the other
+    side. The grouping is itself a claim -- *these belong together because
+    they share this* -- and a sentence that hides its own basis is harder to
+    check than the repetition it replaced: a reader who cannot see why twelve
+    rows belong together cannot see that a thirteenth does not.
+    """
+    _, built = _built()
+    collapsed = [c for c in built
+                 if c.kind == "no_engine_comparison"
+                 and c.extra.get("collapsed")]
+    assert collapsed
+
+    for c in collapsed:
+        assert c.detail, "the group states no basis: %s" % c.text[:80]
+        core = c.detail.rstrip(".")
+        assert c.text.count(core) == 1, (
+            "the basis is stated %d times, and once is the point"
+            % c.text.count(core))
+        # It is the reason every row actually carries, not a summary of them.
+        assert {x.reason for p in c.parts for x in p.cites} == {c.detail}
+        # And it names the family that makes this group this group.
+        assert c.parts[0].subject.split("[")[0] in c.detail
+
+    # The two groups' bases differ, which is why they are two groups.
+    assert len({c.detail for c in collapsed}) == len(collapsed)
+
+
+def test_the_mutant_a_collapse_that_hides_its_basis_is_refused():
+    """The rule, in the direction the first version of the collapse failed."""
+    options, built = _built()
+    c = [x for x in built if x.extra.get("collapsed")][0]
+    rows = cl.rows_from_options(options)
+    assert not cl.check(c, rows)
+
+    c.detail = ""
+    cl.render(c)
+    bad = cl.check(c, rows)
+    assert any("states no basis" in m for m in bad), bad
+
+
+def test_the_mutant_a_collapse_that_states_a_basis_its_rows_lack_is_refused():
+    """And in the other direction, because saying anything would satisfy the
+    first rule as cheaply as saying nothing."""
+    options, built = _built()
+    c = [x for x in built if x.extra.get("collapsed")][0]
+    c.detail = "because it was convenient to group them"
+    cl.render(c)
+    bad = cl.check(c, cl.rows_from_options(options))
+    assert any("basis its rows do not carry" in m for m in bad), bad
 
 
 def test_every_member_keeps_its_own_citation():
