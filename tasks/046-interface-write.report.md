@@ -40,3 +40,31 @@ right one all along and the argument would have been a rationalisation.
 The general form, for whichever guard comes next: **an identity is in the
 right place when the first thing built on top of it does not touch it.** Not
 when it is well argued — when something new arrives and it stays still.
+
+## A stale tab is §6's subject arriving as a process-management question
+
+At the end of the slice the session serving the lab had been started three
+commits earlier. Stopping it needed a permission this agent does not have, and
+the obvious way round was to start a second session on a free port and hand
+over the new URL.
+
+That would have been wrong, and the reason is `docs/PRACTICE.md` §6 rather
+than tidiness. **A stale tab one refresh away from a named build is a build
+with no name in the only place it matters** — in front of the person looking
+at it. The server would have reported its build correctly; there would simply
+have been two of them, identical in every visible respect, differing in three
+commits of behaviour, and the one thing distinguishing them would have been a
+port number in a URL bar.
+
+§6's instance was a URL served by a checkout nobody had named. This is the
+same defect reached from the other end: not a build that cannot say what it
+is, but two builds that both can, where saying so does not help because the
+question a person asks is *which tab*. The rule survives the restatement —
+**do not hand over a URL that is one refresh away from a different build** —
+and it generalises: the identity of a build is a property of the session
+serving it, so ending the old session is part of publishing the new one and
+not housekeeping that follows it.
+
+Worth recording because it did not arrive as a design question. It arrived as
+a process that would not die, which is the form this class of problem takes
+in practice and the form in which it is easiest to solve the wrong way.

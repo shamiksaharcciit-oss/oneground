@@ -182,11 +182,20 @@ and a `deployment` block with one endpoint are both documented as tolerant.
 Sorting the deliberate from the unexamined is the work, and it is a reading
 of intent rather than of code.
 
-**What I would want to know first**, and it is one measurement: of the 58,
-how many are read by anything? A field nothing validates and nothing reads is
-a different problem from one that is read and trusted. The second kind is
-where a wrong value becomes a wrong number in a report, which is the thing
-this project exists to refuse.
+**The measurement the ruling depends on, and it is not yet taken: of the
+58, how many are read by anything?**
+
+A field nothing validates and nothing reads is dead weight in an example
+file — the repair is to delete it, and it is a documentation defect. A field
+nothing validates and something *reads and trusts* is where a typo becomes a
+wrong number in a report, which is the thing this project exists to refuse.
+Those are different findings with different repairs, and the 58 is some
+mixture of them that nobody has separated.
+
+So this item is **one measurement away from being rulable and is not rulable
+before it**, which is why it is stated here as a number and a question rather
+than as a proposal. The number is honest; a recommendation built on it would
+not be.
 
 Full account: `tasks/finding-the-table-and-the-example-describe-different-things.md`.
 
@@ -232,9 +241,27 @@ The three smaller questions that follow, for the same ruling:
 3. Does `intake` owe a refusal for every way a requirements file can be
    unusable, or only for every way its *contents* can be? Number 4 is that
    question about the container and number 7 is it about the contents, which
-   is why they read as one question asked twice. The answer that would settle
-   both is a written statement of what the checked set is — today there are
-   25 checks and no sentence saying why 25.
+   is why they read as one question asked twice. What settles both is one
+   thing: **a written statement of the checked set.** Today there are 25
+   checks and no sentence saying why 25 — and *that*, rather than either
+   instance, is the finding.
+
+   It is also a shape this project has already paid for four times.
+   `docs/PRACTICE.md` §4 collects them: a `var()` check that covered every
+   declared token and was silent about the elements that named none; an
+   exit-code test that covered six of ten stages and read as though it
+   covered ten; a browser check that covered a panel's existence and read as
+   though it covered its behaviour; and a stage tool that made a coverage
+   claim nobody had stated, so a reader took the coverage from the name.
+
+   The fifth is this one, and it is one level out. The first four are checks
+   whose coverage is unstated. This is a **validator** whose coverage is
+   unstated — the same defect in the thing every run begins with rather than
+   in something that inspects it. Its repair is the same as theirs and was
+   written down before it was needed: *an unstated coverage claim becomes a
+   stated one, and then a checked one.* For `intake` that is a declaration of
+   which of the 74 fields are checked, which turns "why 25" from a question
+   nobody can answer into a list anyone can read and disagree with.
 
 
 ---

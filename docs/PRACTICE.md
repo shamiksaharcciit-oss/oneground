@@ -1035,6 +1035,57 @@ the same exemption has a precedent. Every entry in an allowlist is a small
 permanent hole, so each one earns its place by being *true about the world*
 rather than *true about today's diff*.
 
+### 5.1 What a guard is telling you when it does not move
+
+> **An identity is in the right place when the first thing built on top of it
+> does not touch it.**
+
+The rest of this section is about a guard refusing. This is the other half,
+and it is the more useful one, because **it is the only test of a design
+decision that can be run after the fact.** A design argument is made before
+there is anything to check it against; this turns it into a prediction, and
+then waits.
+
+**The instance.** Task 046's write guard holds
+
+    parse(write(D)) == D
+
+over the **parsed document**, not over the bytes. A byte identity is the
+obvious thing to reach for — stricter, easier to explain, catches more — and
+choosing the weaker-looking one was an argument: a file's meaning is what it
+parses to, so anything a parser discards is presentation, and a byte guard
+would be checking the writer's layout rather than the document's content.
+
+Step 2 then put an explanation above **every field in every file the tool
+writes**, a preamble at the top, and wrapping that varies with indentation
+depth. Under a byte identity every one of those changes what the guard
+compares. Nothing in the guard moved: not the identity, not
+`check_write_path`, not `write_violations`, and not one line of the
+round-trip tests, which passed unmodified against a writer whose output had
+grown by a comment per field.
+
+> Why this is worth more than the argument that preceded it: **the reason and
+> the evidence are not the same claim.** The reason predicted that comments
+> would not disturb the guard. Step 2 is what turned the prediction into a
+> result. Had the guard needed one exemption to accommodate comments, the byte
+> identity would have been right all along and the argument would have been a
+> rationalisation — and there is no way to tell those apart at the moment the
+> decision is made, which is why the decision has to be left somewhere it can
+> be scored later.
+
+**How to run it.** When you settle an identity, a boundary or a contract,
+write down what you are predicting *will not* need to change. Then when the
+first real thing is built on it, count the lines of the guard that moved.
+Zero is the result. One is a finding, and it is about the identity rather
+than about the thing that moved it.
+
+The failure mode it catches is specific and common: an identity drawn to fit
+what exists, which then has to be renegotiated by everything that arrives
+after. That renegotiation is normally invisible — each amendment looks local
+and reasonable at the time — so the count has to be taken deliberately, at
+the first arrival, before there are enough amendments for them to look like
+maintenance.
+
 ---
 
 ## 6. A server that cannot say which build it serves
