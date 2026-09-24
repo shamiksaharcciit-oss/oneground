@@ -7,7 +7,6 @@ user. These tests are the fix, and the fence around the classification the
 supervisor reads.
 """
 
-import json
 import os
 import subprocess
 import sys
@@ -47,6 +46,19 @@ def test_the_refusal_is_one_line():
     lines = [ln for ln in out.splitlines() if "refused." in ln]
     assert len(lines) == 1, out
     assert lines[0].endswith("requirements file not found: nope.yaml")
+
+
+def test_a_directory_is_a_refusal_not_a_permission_error():
+    """The measured case from `tasks/finding-a-path-check-that-accepts-a-
+    directory.md`: `oneground characterize .` used to reach `open()` and
+    raise IsADirectoryError/PermissionError -- neither a declared refusal,
+    so it escaped as a traceback, and the Windows message is actively
+    misleading about what is wrong."""
+    code, out = _run("characterize", ".")
+    assert code == refusals.REFUSED_EXIT == 2, out
+    assert "Traceback (most recent call last)" not in out
+    assert "PermissionError" not in out and "IsADirectoryError" not in out
+    assert ". is a directory, not a requirements file" in out
 
 
 def test_a_genuine_failure_keeps_its_traceback():
@@ -174,83 +186,36 @@ def test_matching_is_exact_on_the_type():
 def test_the_mapping_declares_a_reason_for_every_code():
     for code, (state, why) in jobs.EXIT_MEANING.items():
         assert why and len(why) > 20, code
-        assert state in (None, "done", "refused"), code
+        assert state in ("done", "refused", "failed"), code
 
 
-def test_exit_zero_is_done_and_exit_two_is_refused(tmp_path):
-    assert jobs.classify("simulate", 0, str(tmp_path))[0] == "done"
-    assert jobs.classify("simulate", 2, str(tmp_path))[0] == "refused"
+def test_exit_zero_is_done_and_exit_two_is_refused():
+    assert jobs.classify("simulate", 0)[0] == "done"
+    assert jobs.classify("simulate", 2)[0] == "refused"
 
 
-# The row where one code means two things. Tested hardest, because the
-# workdir is the only thing that separates them and a wrong answer here
-# renders a crash as a finished run or a finished run as a crash.
-@pytest.mark.parametrize("stage,receipt", [
-    ("characterize", "characterization.json"),
-    ("simulate", "simulate.json"),
-    ("verify", "verify.json"),
-    ("report", "report.json"),
-    ("propose", "proposals"),
-])
-def test_exit_one_with_the_receipt_is_done(tmp_path, stage, receipt):
-    """The run happened and dropped something; the drops are in the receipt.
-    Calling this `failed` would throw away a run that produced results."""
-    d = str(tmp_path)
-    target = os.path.join(d, receipt)
-    if "." in receipt:
-        with open(target, "w", encoding="utf-8") as f:
-            json.dump({}, f)
-    else:
-        os.makedirs(target)
-    state, why = jobs.classify(stage, 1, d)
-    assert state == "done", why
-    assert receipt in why
-
-
-@pytest.mark.parametrize("stage", ["characterize", "simulate", "verify",
-                                   "report", "propose"])
-def test_exit_one_without_the_receipt_is_failed(tmp_path, stage):
-    """Nothing was produced, so the run did not happen. Calling this `done`
-    would put a crash in the list as complete."""
-    state, why = jobs.classify(stage, 1, str(tmp_path))
+# Task 046 contract changes 5 and 6 repaired the two stages that made this
+# row mean two things. With EXIT_CONTRACT empty, every stage's exit 1 means
+# the same thing, and classify no longer needs a workdir to decide it.
+@pytest.mark.parametrize("stage", jobs.STAGES)
+def test_exit_one_is_failed_for_every_stage(stage):
+    state, why = jobs.classify(stage, 1)
     assert state == "failed", why
-    assert "no " in why
+    assert "did not finish" in why
 
 
-def test_exit_one_is_the_only_code_the_workdir_decides():
-    """If a second code ever needs the workdir, this test says so before the
-    classifier quietly grows a second branch."""
-    undecided = [c for c, (s, _) in jobs.EXIT_MEANING.items() if s is None]
-    assert undecided == [1]
-
-
-def test_the_workdir_actually_decides_it(tmp_path):
-    """The mutant for the row: the same stage and the same exit code, and
-    only the receipt differs. Without this, `classify` could ignore the
-    workdir entirely and every test above would still pass."""
-    d = str(tmp_path)
-    before, _ = jobs.classify("simulate", 1, d)
-    with open(os.path.join(d, "simulate.json"), "w", encoding="utf-8") as f:
-        f.write("{}")
-    after, _ = jobs.classify("simulate", 1, d)
-    assert (before, after) == ("failed", "done")
-
-
-def test_a_stage_with_no_receipt_of_its_own_says_so_rather_than_guessing(
-        tmp_path):
-    state, why = jobs.classify("pod status", 1, str(tmp_path))
-    assert state == "failed"
-    assert "writes no receipt of its own" in why
-
-
-def test_an_unexpected_code_is_failed_and_says_it_was_unexpected(tmp_path):
-    state, why = jobs.classify("simulate", 137, str(tmp_path))
+def test_an_unexpected_code_is_failed_and_says_it_was_unexpected():
+    state, why = jobs.classify("simulate", 137)
     assert state == "failed"
     assert "137" in why and "deliberately" in why
 
 
-def test_every_stage_has_a_receipt_entry():
-    """A stage added without one would fall to the no-receipt branch and be
-    called failed on every drop, which is a wrong answer rather than a
-    missing one."""
-    assert set(jobs.STAGE_RECEIPT) == set(jobs.STAGES)
+def test_the_exit_contract_now_has_no_exceptions():
+    """Both declared exceptions -- `("simulate", 1)` and `("pod plan", 1)`
+    -- were the repair `tasks/046-contract-changes.report.md` items 5 and 6
+    deferred. `_cmd_simulate` now returns 0 with the drop named in
+    simulate_info.json, and `cmd_plan` returns `refusals.REFUSED_EXIT` for
+    both of its refusals. An empty EXIT_CONTRACT means the rule -- a stage's
+    exit code says whether it ran, never what it found -- holds without
+    exception."""
+    assert jobs.EXIT_CONTRACT == {}

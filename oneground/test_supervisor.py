@@ -116,20 +116,22 @@ def test_start_records_running_and_a_start_time(sup):
 
 # ------------------------------- what a record means is in the record
 def test_the_reason_for_the_classification_is_stored(sup):
-    """A reader of one record does not have the workdir and cannot re-run
-    the decision, so `failed` alone would hand over the conclusion and keep
-    the evidence."""
+    """A reader of one record does not have `jobs.EXIT_MEANING` in front of
+    them and cannot re-run the decision, so `failed` alone would hand over
+    the conclusion and keep the evidence."""
     j = sup.enqueue("simulate", ["simulate", "runs/x"])
     sup.start(j, python=sys.executable)[1].close()
     sup.finish(j, 1)
     stored = sup.read()[0]
     assert stored.state == "failed"
-    assert "no simulate.json" in stored.why
+    assert "did not finish" in stored.why
 
 
-def test_exit_one_with_the_receipt_is_recorded_as_done_with_the_reason(sup):
-    """The row where one code means two things, through the supervisor this
-    time rather than through `classify` alone."""
+def test_exit_one_is_failed_whatever_the_workdir_holds(sup):
+    """Task 046 contract changes 5 and 6: `simulate` and `pod plan` were the
+    two stages that made exit 1 mean two things, and both are repaired.
+    A receipt on disk no longer changes the answer -- through the
+    supervisor, not just through `classify` alone."""
     with open(os.path.join(sup.runs_dir, "simulate.json"), "w",
               encoding="utf-8") as f:
         f.write("{}")
@@ -137,8 +139,7 @@ def test_exit_one_with_the_receipt_is_recorded_as_done_with_the_reason(sup):
     sup.start(j, python=sys.executable)[1].close()
     sup.finish(j, 1)
     stored = sup.read()[0]
-    assert stored.state == "done"
-    assert "simulate.json written" in stored.why
+    assert stored.state == "failed"
 
 
 def test_every_terminal_record_carries_its_reason(sup):

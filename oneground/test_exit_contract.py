@@ -132,20 +132,16 @@ def test_every_declared_exception_carries_a_reason_and_is_real():
             "case it was written for and should go")
 
 
-def test_the_declared_exceptions_are_the_ones_that_cost_the_classifier():
-    """Pinned so the connection is not lost: `simulate` returning 1 for
-    dropped configurations is the sole reason `EXIT_MEANING[1]` means two
-    things and `classify` has to consult the workdir at all.
-
-    If this entry goes, that row collapses to *did not finish* and the
-    workdir check becomes unnecessary. Stated here because the cost of a
-    declared exception is easiest to see from the thing paying it.
+def test_the_declared_exceptions_are_gone_and_the_row_collapsed():
+    """The repair the two entries deferred: `_cmd_simulate` returns 0 with
+    the drop named in simulate_info.json, and `pod plan`'s cmd_plan returns
+    `refusals.REFUSED_EXIT` for both of its refusals. `EXIT_CONTRACT` is
+    empty and `EXIT_MEANING[1]` collapsed to *did not finish*, which is what
+    paying for the two declared exceptions bought back.
     """
-    assert set(jobs.EXIT_CONTRACT) == {("simulate", 1), ("pod plan", 1)}
+    assert jobs.EXIT_CONTRACT == {}
     state, _why = jobs.EXIT_MEANING[1]
-    assert state is None, (
-        "exit 1 is undecided precisely because simulate uses it for a "
-        "finding; if that changed, this row should have too")
+    assert state == jobs.FAILED
 
 
 def test_verify_returns_zero_when_an_engine_contradicts_the_simulation():

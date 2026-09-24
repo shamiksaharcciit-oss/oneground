@@ -26,6 +26,7 @@ import time
 sys.path.insert(0, os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")))
 
+from oneground import refusals                           # noqa: E402
 from oneground.pod import api, confirm, plan as planmod  # noqa: E402
 from oneground.pod import session as sessionmod          # noqa: E402
 from oneground.pod import state as statemod              # noqa: E402
@@ -1290,13 +1291,15 @@ def test_cap_arithmetic_refuses_an_over_budget_plan():
         raise AssertionError("an over-cap plan passed check_cap")
 
 
-def test_plan_exit_code_is_1_when_over_cap():
+def test_plan_exit_code_is_2_when_over_cap():
+    """Task 046 contract change 6: a refusal, so `refusals.REFUSED_EXIT`
+    rather than the code that means did-not-finish."""
     with tempfile.TemporaryDirectory() as tmp:
         spec = _spec_file(tmp, SPEC_YAML.replace("max_usd: 3.00",
                                                  "max_usd: 1.00"))
         t = _transport()
         code, out, _ = _run_cli(["plan", spec], t, tmp)
-        assert code == 1 and "REFUSED" in out
+        assert code == refusals.REFUSED_EXIT == 2 and "REFUSED" in out
 
 
 def test_deploy_spec_carries_the_session_label_twice():

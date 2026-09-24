@@ -234,6 +234,17 @@ def _validate_declared(req, path):
 
 def load(path):
     """Read, validate, return. Raises RequirementsError with a named field."""
+    # Task 046, tasks/finding-a-path-check-that-accepts-a-directory.md:
+    # `exists` is true of a directory, so `oneground characterize .` used to
+    # reach `open()` and raise IsADirectoryError (POSIX) or PermissionError
+    # (Windows) -- neither a declared refusal, so it escaped as a traceback,
+    # and the Windows message is actively misleading: the path is readable,
+    # it is simply not a file.
+    if os.path.isdir(path):
+        raise RequirementsError(
+            f"{path} is a directory, not a requirements file. Name the file "
+            "itself -- `requirements.yaml` inside it, if that is what you "
+            "meant.")
     if not os.path.exists(path):
         raise RequirementsError(f"requirements file not found: {path}")
     with open(path, encoding="utf-8") as f:

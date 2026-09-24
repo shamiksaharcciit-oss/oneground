@@ -143,19 +143,20 @@ def _cmd_simulate(args, rest):
         raise SystemExit(f"oneground simulate: unexpected arguments: "
                          f"{' '.join(rest)}")
     simulate.run(args.requirements, emit_state=args.emit_state)
-    # Task 034. A configuration that could not be built is reported and the
-    # sweep goes on, so the rows already measured are not lost -- but a run
-    # that did not measure what it planned to exits non-zero, because
-    # couldn't-check is never rounded up to success.
+    # Task 034, and task 046 contract change 5. A configuration that could
+    # not be built is reported and the sweep goes on, so the rows already
+    # measured are not lost. Couldn't-check is never rounded up to success --
+    # but that is a claim the receipt already makes, in simulate_info.json;
+    # the exit code saying it too was a finding travelling in a process, and
+    # jobs.py's own rule is that a stage's exit code says whether it ran,
+    # never what it found. It ran.
     dropped = getattr(simulate.run, "last_dropped", None) or []
     if dropped:
         planned = getattr(simulate.run, "last_planned", len(dropped))
-        print(f"\n  exit 1: {len(dropped)} of {planned} planned "
-              f"configuration(s) were not measured. The rest were, and are in "
-              f"simulate.json;")
+        print(f"\n  {len(dropped)} of {planned} planned configuration(s) "
+              f"were not measured. The rest were, and are in simulate.json;")
         print("  each one that was not is named with its reason in "
               "simulate_info.json:dropped.")
-        return 1
     return 0
 
 

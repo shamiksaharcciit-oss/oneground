@@ -173,16 +173,16 @@ class Supervisor:
         return proc, handle
 
     def finish(self, job, exit_code, handle=None):
-        """Record how a job ended, from its exit code and the workdir.
+        """Record how a job ended, from its exit code.
 
         Everything the classification rests on goes into the record: the
         code, the state, **and the reason** -- because a reader of this one
-        record does not have the workdir in front of them and cannot re-run
-        the decision.
+        record does not have the exit code's table in front of them and
+        cannot re-run the decision.
         """
         if handle is not None and not handle.closed:
             handle.close()
-        state, why = jobs.classify(job.stage, exit_code, job.workdir)
+        state, why = jobs.classify(job.stage, exit_code)
         job.ended = _now()
         job.exit_code = exit_code
         refusal = None
