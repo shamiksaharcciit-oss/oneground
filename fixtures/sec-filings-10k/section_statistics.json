@@ -1,4 +1,10 @@
 {
+  "chunking": {
+    "chunks_crossing_a_boundary": 109722,
+    "chunks_per_document": 155.98,
+    "chunks_total": 1559834,
+    "crossing_rate": 0.0703
+  },
   "document_chars": {
     "max": 1773064,
     "min": 24056,
