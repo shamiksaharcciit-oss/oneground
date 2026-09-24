@@ -347,14 +347,48 @@ table.ingredients th { white-space: nowrap; font-size: .75rem;
 #compose-upload { position: absolute; width: 1px; height: 1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-.compose-split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+/* The preview gets the wider half: it holds the writer's 74-column lines
+   and the form beside it holds controls, which reflow. See `.compose-file`
+   for why the width is load-bearing rather than a preference. */
+.compose-split { display: grid; gap: 24px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
 .compose-left { min-width: 0; }
 .compose-right { min-width: 0; }
 .compose-file {
   background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
-  padding: 12px; overflow-x: auto; white-space: pre; font-size: 13px;
-  line-height: 1.5; max-height: 70vh;
+  padding: 12px; font-size: 13px; line-height: 1.5; max-height: 70vh;
+  /* WRAPPING, NOT SCROLLING. This pane is mostly prose -- the writer puts
+     an explanation above every field -- and prose dragged sideways is prose
+     nobody reads. The file's own comments are hard-wrapped at 74 columns by
+     `compose.render`, so a wrap here happens only when the pane is narrower
+     than the file, which is the case worth handling rather than the case
+     worth preserving.
+
+     `overflow-wrap: anywhere` is for the one thing that cannot be wrapped
+     by the writer: a long value with no spaces, such as a path. Without it
+     the pane grows a horizontal scrollbar for one line and the other
+     hundred are dragged with it. */
+  white-space: pre-wrap; overflow-wrap: anywhere;
 }
+/* There is no hanging indent here, and the reason is worth recording: I
+   wrote `text-indent: -2ch` to mark continuation lines and it does not do
+   that. `text-indent` applies to the first line box of a BLOCK, and the
+   newlines in a `pre` are line breaks inside one block, not new blocks, so
+   it would have indented the file's first line and nothing else.
+   `each-line` is the keyword that would work and it is not supported
+   widely enough to rely on.
+
+   So the wrap is accepted rather than marked, and the pane is widened to
+   make it rarer -- see `.compose-split`, where the columns are one
+   declaration and not a second overriding the first.
+
+   MEASURED, because the first version of this comment claimed the column
+   fits the writer's 74 columns and it does not: at a 1200px window the pane
+   is 552px and the file's longest line is 75 characters, so lines wrap
+   there too. Fitting them would mean 12px type, which is a worse trade than
+   a wrapped comment. The claim this makes is the one that was asked for and
+   the one that is true at both widths: `scrollWidth === clientWidth`, so
+   nothing has to be dragged into view. */
 
 .field-group { margin-bottom: 22px; }
 .field-group h3 {
@@ -389,6 +423,11 @@ table.ingredients th { white-space: nowrap; font-size: .75rem;
 
 .compose-save { display: flex; align-items: center; gap: 10px;
   margin: 18px 0; flex-wrap: wrap; }
+/* The directory reads as part of the path, not as a second control: same
+   face as the box beside it, dimmed, and not selectable as a field. */
+.save-dir { font-family: var(--mono, ui-monospace, monospace);
+  font-size: 13px; color: var(--ink-soft); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
 .compose-save input { flex: 1 1 260px; padding: 6px 8px;
   border: 1px solid var(--rule); border-radius: 4px;
   background: var(--field); color: var(--ink); font: inherit; }

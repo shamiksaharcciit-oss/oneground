@@ -494,10 +494,21 @@
     where.value = 'requirements.yaml';
     const whereLabel = el('label', null, 'Write it to');
     whereLabel.setAttribute('for', 'compose-path');
+    // WHERE IT LANDS, BEFORE IT LANDS. `Write it to requirements.yaml`
+    // named a file and not a place, so the only way to learn the directory
+    // was to save and watch the jobs page react -- which is finding out
+    // afterwards. The server already knows; the page was not asking.
+    //
+    // It is the same shortened form the header shows, from the same field,
+    // so the two cannot disagree and neither prints an absolute path.
+    const dir = el('span', 'save-dir');
+    dir.id = 'compose-dir';
+    dir.textContent = '';
     const go = el('button', 'primary', 'Save');
     go.type = 'button';
     go.addEventListener('click', () => { save(); });
     saveRow.appendChild(whereLabel);
+    saveRow.appendChild(dir);
     saveRow.appendChild(where);
     saveRow.appendChild(go);
     main.appendChild(saveRow);
@@ -511,6 +522,21 @@
 
     redrawFormKeepingFocus();
     await refresh();
+
+    // After the form is up, because a directory the reader cannot act on is
+    // not worth blocking the page for. A session that cannot answer leaves
+    // the prefix empty rather than guessing or printing a placeholder that
+    // reads like a path.
+    try {
+      const check = await getApi('/api/check');
+      if (check.runs_dir) {
+        dir.textContent = check.runs_dir
+          + (check.runs_dir.endsWith('/') ? '' : '/');
+        dir.title = 'the runs directory this session was opened on';
+      }
+    } catch (e) {
+      dir.textContent = '';
+    }
   }
 
   window.onegroundCompose = showCompose;
