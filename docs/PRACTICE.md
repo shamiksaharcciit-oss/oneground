@@ -1452,9 +1452,12 @@ the other side: a rule that exists, is written down, and is implemented in
 the wrong place, so that everyone downstream reimplements it or does without.
 
 **The instance.** `intake.RequirementsError` is the project's own refusal
-type. Its module header states the two rules that shape all twenty-five of
-its messages -- *name the field*, and *refuse rather than guess* -- and every
-message obeys them. `cli.main` caught none of them, so the commonest refusal
+type. Its module header states the two rules that shape every one of its
+messages -- *name the field*, and *refuse rather than guess* -- named rather
+than counted, because a document that counts them goes stale the moment one
+is added (`oneground/intake/fields.py:count_refusals()`, task 049, found
+this exact sentence's own count one behind after task 047). `cli.main`
+caught none of them, so the commonest refusal
 in the product reached every command-line user as an unhandled Python
 traceback with the carefully written sentence on the last line.
 

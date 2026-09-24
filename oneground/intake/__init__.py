@@ -24,6 +24,8 @@ import os
 
 import yaml
 
+from oneground import analogy
+
 SCHEMA_VERSION = 1
 
 # What Tier 2 cannot do without. Everything else in `corpus.declared` sharpens
@@ -32,10 +34,30 @@ SCHEMA_VERSION = 1
 # user's corpus.
 DECLARED_REQUIRED = ("size_now", "dimension")
 
-# Values `corpus_type` is matched on. Not a closed set for the user -- an
-# unrecognised type is carried through and simply matches no fixture, which is
-# an honest "no analogy" rather than a wrong one.
+# Task 049 widened this from a one-field comment to the general distinction
+# it was already drawing without naming: intake validates a field's VALUE
+# only when the field's own domain is closed BY DEFINITION -- a set where
+# everything outside it is necessarily a mistake, not merely a value the
+# field has not been asked about yet.
+#
+# `corpus_type` and `text_length` are the pair that makes the line visible.
+# Both feed the exact same mechanism (`analogy.py`'s fixture-match scoring,
+# one `declared.get(...)` against `analogy.get(...)` comparison each) and are
+# treated oppositely: `corpus_type` is NOT a closed set for the user -- an
+# unrecognised type is carried through and simply matches no fixture, which
+# is an honest "no analogy" rather than a wrong one, because new kinds of
+# corpus are always a legitimate answer the fixture set has not met yet.
+# `text_length` IS closed: the example file's own words are "short (<300
+# chars) | medium | long" -- three defined buckets, and nothing a fourth
+# word could name that one of them does not already cover. Consumption is
+# identical; the domains are not, and that is the whole of why one is
+# validated and the other is carried through.
 DECLARED_TEXT_LENGTHS = ("short", "medium", "long")
+
+# Closed by the same reasoning: three named provenances, and no fourth word
+# means something the other three do not already say. `corpus.sample.
+# queries.source` -- task 049.
+QUERY_SOURCES = ("logs", "written", "synthetic")
 
 
 class RequirementsError(ValueError):
@@ -221,6 +243,26 @@ def _validate_declared(req, path):
             f"{path}: corpus.declared.languages must be a list; got "
             f"{languages!r}")
 
+    # Task 049: closed by definition, the same way text_length is -- 'auto'
+    # and 'none' are the two sentinels analogy.choose() itself matches on
+    # (want in (None, "none", False), and str(want) != "auto"), and anything
+    # else has to name a fixture that is actually built, or it is a typo
+    # analogy.choose() would otherwise absorb silently into "no analogy,"
+    # the same honest-looking wrong answer a bad text_length would produce
+    # if this file did not refuse it either. The known set is read from the
+    # fixtures directory rather than hardcoded, because a fixture added
+    # later must not require an edit here to be nameable.
+    nearest = d.get("nearest_fixture")
+    if nearest not in (None, "auto", "none", False):
+        known = sorted(fid for fid, _a, _p, _s in
+                       analogy.load_fixture_analogies())
+        if str(nearest) not in known:
+            raise RequirementsError(
+                f"{path}: corpus.declared.nearest_fixture is {nearest!r}, "
+                "which names no built fixture with an analogy to match "
+                f"against. Known: {', '.join(known) or '(none built)'} -- "
+                "or 'auto' to match, 'none' to disable.")
+
     # `corpus.sample` absent but a Tier-1 field set anyway is a file caught
     # halfway between the two tiers, and silently ignoring it would run the
     # wrong tier without saying so.
@@ -331,6 +373,17 @@ def load(path):
             f"{path}: corpus.sample.queries.path is missing. The ambiguity "
             "rate and the ground truth are measured against real queries; "
             "there is no useful substitute for them.")
+
+    # Task 049: closed by definition, the same reasoning as text_length --
+    # three named provenances and nothing a fourth word could mean that one
+    # of them does not already say. Unlike text_length this was previously
+    # unvalidated and unread anywhere; the closed set was always there, in
+    # the example file's own comment, with nothing consulting it.
+    source = req.queries.get("source")
+    if source is not None and str(source) not in QUERY_SOURCES:
+        raise RequirementsError(
+            f"{path}: corpus.sample.queries.source is {source!r}; it must "
+            f"be one of {', '.join(QUERY_SOURCES)}.")
 
     if req.run.get("seed") is None:
         raise RequirementsError(

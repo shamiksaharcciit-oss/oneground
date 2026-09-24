@@ -3,7 +3,12 @@
 **It lives in `intake` rather than in the lab because a field's explanation
 and its refusal must not end up in different packages.** They are two strings
 about one field; the whole reason this table exists is that they cannot be
-allowed to diverge; and the refusals are here, twenty-five of them. So the
+allowed to diverge; and the refusals are here -- `count_refusals()` below
+says how many, by parsing `__init__.py` rather than by a digit written down
+to go stale the next time one is added. This sentence used to say
+"twenty-five." Task 047 added a twenty-sixth (`load()` refusing a
+directory) and touched none of the four places, including this one, that
+said so -- the instance task 049 exists to stop repeating. So the
 declaration sits beside the thing it has to agree with, and the lab imports
 it.
 
@@ -54,13 +59,75 @@ added to `Param`.
 
 What this table cannot carry, named rather than missing
 -------------------------------------------------------
-Eleven of intake's twenty-five refusals are outside it, and `OUTSIDE_THE
-_TABLE` below names every one with the reason. They are not a backlog: the
-write guard refuses each of them at write time, because a document that
-violates one does not survive `load()`. What an absent declaration costs is
-*when* the user finds out -- at save rather than while typing -- which is a
-timing defect and not a correctness one.
+`len(OUTSIDE_THE_TABLE)` of intake's `count_refusals()` refusals are outside
+it, and `OUTSIDE_THE_TABLE` below names every one with the reason. They are
+not a backlog: the write guard refuses each of them at write time, because a
+document that violates one does not survive `load()`. What an absent
+declaration costs is *when* the user finds out -- at save rather than while
+typing -- which is a timing defect and not a correctness one.
+
+What intake validates, and why
+-------------------------------
+Everything above says how a field intake validates is declared. It does not
+say which fields those are, and until task 049 nothing did -- `FIELDS` was a
+list a reader could inspect but not a rule they could apply to a field not
+already on it, and the list had no stated boundary, only its own membership.
+
+**A field is validated iff, applied in order:**
+
+1.  **Scope.** It belongs to what `characterize` -- the stage intake feeds --
+    needs to run and to route correctly: `run.*`, `corpus.sample.*`,
+    `corpus.declared.*`, `extraction.*`, the file and its schema version. A
+    field under `constraints`, `simulate`, `verify` or `report` is never in
+    scope -- those are later stages' own configuration, validated (if at
+    all) by the stage that consumes it. `OUT_OF_SCOPE_BLOCKS` names the four
+    blocks; this line alone places 44 of the 74 fields
+    `requirements.example.yaml` currently documents.
+2.  **Presence.** Within scope, required when absence would force something
+    load-bearing to be guessed rather than refused -- this module's own rule
+    2. `run.seed`, one of `vectors.path`/`text.path`, `queries.path`,
+    `size_now` and `dimension` are required this way (`REQUIRED`, and the
+    `xor`/`one-of` entries in `OUTSIDE_THE_TABLE`); nothing else in scope is,
+    because nothing else is load-bearing on a measurement happening at all.
+3.  **Value.** Within scope, a field's value (beyond presence) is validated
+    against a type, range or closed set only when the field's own domain is
+    closed **by definition** -- everything outside it is necessarily a
+    mistake, not a legitimate answer the field's concept has not been asked
+    about yet. `text_length` (short/medium/long, with defined character
+    boundaries -- there is no fourth length) is closed this way;
+    `corpus_type` is not, on its own comment above `DECLARED_TEXT_LENGTHS`,
+    even though both feed the identical mechanism in `analogy.py`'s scoring.
+    `OPEN_DOMAIN` names the fields this leaves deliberately unchecked for
+    that reason. A second, separate reason a value is left unchecked: its
+    correctness can only be judged by opening a file the requirements file
+    merely *names* -- not from the YAML text alone. `DEFERRED` names those;
+    each is checked later, by the stage that actually opens the file.
+4.  **Descriptive annotation.** Carved out regardless of 1-3: a field that
+    documents why a block is what it is, for a human reader, and that no
+    code path consults -- not because nothing has read it yet, but because
+    there is nothing for it to decide. `ANNOTATIONS` names each with its own
+    reason, because an exception with no stated reason is a field the rule
+    quietly gave up on. One entry, `run.mode`, is declared there on
+    *behaviour* rather than on a comment in the file the way its two
+    neighbours are -- the worked example of what this component asks for
+    when a field fits by conduct rather than by its own documentation.
+
+**Its own exceptions.** A field every one of 1-4 places, with a stated
+reason, is decided -- `checked_reason()` returns it. A field none of them
+places is not a fifth rule invented to cover it: it is evidence this rule is
+incomplete, exactly as much as a field the rule predicts wrong. Task 049's
+proposal found two of the latter (`nearest_fixture`, `corpus.sample.
+queries.source` -- closed domains the rule said should be checked and were
+not) and fixed them rather than explained them away, which is the argument
+for a rule over a list: a rule can be wrong in a way a test can catch before
+anyone reads the report. `test_checked_set.py` is that test, over all 74 of
+the example file's current leaves in both directions -- checked matches
+checked, and everything else resolves to one of 1/3/4's named reasons or the
+test fails.
 """
+
+import ast
+import os
 
 from oneground.param import NO_DEFAULT, Param
 
@@ -70,7 +137,9 @@ from oneground.param import NO_DEFAULT, Param
 #: should be asking anyway. The re-export is the layering made explicit: the
 #: interface talks to the declaration, and the declaration talks to `Param`.
 __all__ = ["NO_DEFAULT", "Param", "PRESENT", "ABSENT", "SENTINELS",
-           "FIELDS", "BY_NAME", "OUTSIDE_THE_TABLE"]
+           "FIELDS", "BY_NAME", "OUTSIDE_THE_TABLE",
+           "OUT_OF_SCOPE_BLOCKS", "ANNOTATIONS", "DEFERRED", "OPEN_DOMAIN",
+           "checked_reason"]
 
 #: Sentinels for the owner position of `belongs_to`. See the module docstring:
 #: each answers a question with no value in it, which is what keeps them from
@@ -154,6 +223,12 @@ FIELDS = (
        "number you can compute and should not report.",
        default=50, minimum=1,
        belongs_to=("corpus.sample.queries.path", PRESENT)),
+    # Task 049: closed by definition, the same reasoning as text_length --
+    # three named provenances, nothing a fourth word could mean that one of
+    # them does not already say. Previously documented and read by nothing.
+    _p("corpus.sample.queries.source", str,
+       "logs | written | synthetic -- where these queries came from.",
+       choices=("logs", "written", "synthetic")),
 
     _p("corpus.declared.size_now", int,
        "Your real corpus size today. The capacity arithmetic is arithmetic "
@@ -175,6 +250,18 @@ FIELDS = (
        "Whether the corpus has a meaningful time order."),
     _p("corpus.declared.languages", list,
        "The languages present, as a list. Sharpens the fixture analogy."),
+    # Task 049: closed by definition too, but not by a static set -- 'auto'
+    # and 'none' are the two fixed sentinels analogy.choose() matches on,
+    # and anything else must name a fixture the account actually has built.
+    # No `choices=`: the third option is not a fixed list, it is whatever
+    # `analogy.load_fixture_analogies()` finds, and a static tuple here
+    # would go stale the first time a fixture is added -- the defect this
+    # task exists to stop reproducing.
+    _p("corpus.declared.nearest_fixture", str,
+       "auto | none | a built fixture's id. 'auto' matches; 'none' "
+       "disables the analogy; a named fixture is used directly rather than "
+       "chosen by matching. The set of valid ids is read from the "
+       "fixtures directory, not fixed here."),
 
     _p("extraction.tool", str,
        "What produced the extracted text. oneground takes extracted text and "
@@ -261,3 +348,129 @@ OUTSIDE_THE_TABLE = (
      "a negated value set over an open string domain; expressing it needs a "
      "predicate, and a predicate cannot be rendered into a comment"),
 )
+
+
+# ============================================================================
+# THE CHECKED SET -- task 049
+#
+# Everything above says how a field intake validates is declared. This says
+# which fields those are, as a rule rather than as this table's membership --
+# see the module docstring's new section, "What intake validates, and why."
+# ============================================================================
+
+#: Rule 1. A field under one of these top-level blocks is never intake's
+#: subject: `constraints`, `simulate`, `verify` and `report` are later
+#: stages' own configuration, validated (if at all) by the stage that
+#: consumes it, not by intake. This single line accounts for 44 of the 74
+#: leaves `requirements.example.yaml` currently documents.
+OUT_OF_SCOPE_BLOCKS = ("constraints", "simulate", "verify", "report")
+
+#: Rule 4. In scope by rule 1, carved out anyway: a field that documents
+#: *why* a block is what it is, for a human reader, and that no code path
+#: consults -- not because nothing has read it yet, but because there is
+#: nothing for it to decide. Each entry names why, because an exception
+#: with no stated reason is a field the rule quietly gave up on rather than
+#: placed.
+ANNOTATIONS = {
+    "corpus.sample.kind": "restates corpus.sample's own presence: a file "
+        "has this block or it does not, structurally",
+    "corpus.declared.kind": "restates corpus.declared's own presence, the "
+        "same way",
+    "corpus.sample.sampling.method": "the example file's own comment: "
+        "\"how the sample was drawn from the full corpus -- recorded, not "
+        "enforced\"",
+    "corpus.sample.sampling.stratify_by": "same block, same comment",
+    "corpus.sample.sampling.full_corpus_size": "same block, same comment",
+    # The worked example: a field that fits by behaviour rather than by a
+    # comment in the file, declared here with the reason rather than left a
+    # disagreement between the rule and the tree. `Requirements` never reads
+    # it; `self.tier` is computed from which blocks are present
+    # (`1 if self.sample else (2 if self.declared else None)`), never from
+    # this field. It looks like a decision the user makes; the code decides
+    # it structurally instead, and this field is what that decision would
+    # have read if anything did.
+    "run.mode": "nothing reads it; tier is computed from which blocks are "
+        "present, never from this field -- it fits rule 4 by behaviour, "
+        "unlike its two neighbours above which the file says so about "
+        "directly",
+}
+
+#: Rule 3, the file-opening clause. In scope, and not validated because
+#: correctness can only be judged by opening a file the requirements file
+#: merely names -- not judgeable from the YAML text alone. Each is checked
+#: later, by the stage that actually opens that file, which is `intake`'s
+#: own module docstring rule 2 ("refuse rather than guess") applied one
+#: level down: a check that cannot yet tell truth from guess is not ready
+#: to refuse.
+DEFERRED = {
+    "corpus.sample.metadata.path": "optional; if `characterize` cannot "
+        "open it, that failure names the path, not a schema violation",
+    "corpus.sample.metadata.timestamp_field": "characterize.py checks the "
+        "column exists once the metadata file is actually open",
+    "corpus.sample.metadata.filter_fields": "same shape as "
+        "timestamp_field: column names, checkable only once the file is "
+        "open",
+    "corpus.sample.metadata.category_field": "same shape again -- and "
+        "task 048 found the property that would carry it "
+        "(`Requirements.category_field`) is never called by anything "
+        "either, a second, separate absence this rule does not speak to",
+}
+
+#: Rule 3, the closed-domain clause, negative case. In scope, presence
+#: optional, and not validated because the field's domain is open BY
+#: CONCEPT rather than closed by definition -- see `DECLARED_TEXT_LENGTHS`'s
+#: own comment for the reasoning, which this generalises rather than
+#: repeats. An unmatched value degrades to an honest "no match", not a
+#: wrong answer, so there is nothing for a refusal to catch.
+OPEN_DOMAIN = {
+    "corpus.declared.corpus_type": "an unrecognised type simply matches no "
+        "fixture in analogy.py's scoring -- an honest 'no analogy', not a "
+        "wrong one",
+    "corpus.declared.embedding_model": "the same mechanism, the same "
+        "reasoning, previously unstated: an unmatched model scores low "
+        "rather than refusing",
+}
+
+
+def count_refusals():
+    """How many refusals `intake.load()` (and everything it calls) raises,
+    today -- parsed, not grepped, and never written down as a digit.
+
+    Task 049: `fields.py`'s own docstring said "twenty-five" through task
+    046 and stayed twenty-five through task 047, which added a twenty-sixth
+    (`load()` refusing a directory) without anyone noticing the sentence had
+    gone stale, because nothing connected the sentence to the source. This
+    is that connection: every `raise RequirementsError(...)` in
+    `intake/__init__.py`, walked by `ast` rather than assumed.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "__init__.py")
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), path)
+    return sum(
+        1 for node in ast.walk(tree)
+        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)
+        and isinstance(node.exc.func, ast.Name)
+        and node.exc.func.id == "RequirementsError")
+
+
+def checked_reason(field):
+    """`(checked, reason)` for a dotted field path -- the rule, applied.
+
+    `checked` is `field in BY_NAME`. `reason` explains either side: which
+    `Param` declares it, or which of rules 1/3/4 places it outside the
+    checked set and why. Returns `(None, None)` for a field none of the
+    above accounts for -- the rule not yet having an answer, which is
+    evidence the rule is incomplete rather than something to be guessed at
+    here. `test_checked_set.py` treats that pair as a failure, not a case.
+    """
+    if field in BY_NAME:
+        return True, f"declared in FIELDS: {BY_NAME[field].note[:60]}..."
+    top = field.split(".")[0]
+    if top in OUT_OF_SCOPE_BLOCKS:
+        return False, f"rule 1: {top} is a later stage's configuration"
+    for table, rule in ((ANNOTATIONS, "rule 4"), (DEFERRED, "rule 3"),
+                        (OPEN_DOMAIN, "rule 3")):
+        if field in table:
+            return False, f"{rule}: {table[field]}"
+    return None, None

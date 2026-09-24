@@ -355,11 +355,14 @@ number is here rather than an impression, and
 the measurement and what it would cost to close.
 
 **And the form validates nothing**, which is the part most likely to be
-"improved" later. Eleven of `intake`'s twenty-five refusals are relational or
-not about a field at all, and a form re-expressing them would be the second
-implementation this whole design exists to prevent. The page **names all
-eleven** with the reason each is out, because silence would otherwise read as
-*this is valid*. The write guard refuses all eleven at save, in the CLI's
+"improved" later. Eleven of `intake`'s refusals are relational or not about
+a field at all (`oneground/intake/fields.py:OUTSIDE_THE_TABLE`, out of
+however many `count_refusals()` says there are today rather than a count
+frozen at whichever task last checked), and a form re-expressing them would
+be the second implementation this whole design exists to prevent. The page
+**names all eleven** with the reason each is out, because silence would
+otherwise read as *this is valid*. The write guard refuses all eleven at
+save, in the CLI's
 words.
 
 ### The jobs
@@ -456,8 +459,8 @@ _path` is the read half's precedent, inverted.
 Slice 2's form explains each field beside it and refuses what the CLI
 refuses. The shape that satisfies both from one place is a declaration per
 field, from which the explanation and the refusal are rendered. Three things
-about that, measured against the 25 refusals `oneground/intake/load()`
-actually raises.
+about that, measured against whatever `oneground/intake/fields.py:
+count_refusals()` says `oneground/intake/load()` actually raises today.
 
 **It reuses `Param`, it does not invent a format.** `oneground/models/base.py`
 already declares a field as `type`, `minimum`, `maximum`, `choices`,
