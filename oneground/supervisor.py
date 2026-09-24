@@ -81,6 +81,11 @@ class Supervisor:
         self.runs_dir = os.path.abspath(runs_dir)
         self.path = os.path.join(self.runs_dir, jobs.JOBS_NAME)
         self.logs = os.path.join(self.runs_dir, LOGS_DIR)
+        #: Processes this supervisor started, by job id. Not state about the
+        #: work -- the work's state is the record and the workdir -- but a
+        #: handle on children of THIS process, which no file can hold.
+        self._live = {}
+        self._handles = {}
 
     # -- the list ----------------------------------------------------------
     def read(self):
@@ -199,6 +204,73 @@ class Supervisor:
                 return f.read().strip()
         except OSError:
             return None
+
+    # -- advancing ---------------------------------------------------------
+    def tick(self):
+        """Advance the list by one step: reap what finished, start what is
+        next. Returns what it did, so a caller can log it and a test can
+        assert on it rather than inferring from the file.
+
+        **One job at a time.** A `simulate` uses the machine, and two of them
+        fight for it -- the second would measure a loaded machine and record
+        timings nobody can compare. This is a decision rather than a
+        limitation, and it is the reason `started` and `ended` in a record
+        mean what they look like.
+
+        Idempotent and cheap, so it can be called on a timer without the
+        caller tracking anything.
+        """
+        did = []
+        records = self.read()
+
+        for job in records:
+            if job.state != jobs.RUNNING:
+                continue
+            proc = self._live.get(job.id)
+            if proc is None:
+                # Running in the record and not a child of this process: a
+                # previous supervisor started it and did not survive. Left
+                # alone rather than guessed at -- the record says running,
+                # and this process cannot tell whether it still is. Saying
+                # so is `couldnt_check` in the one place the three outcomes
+                # have no field for it, so it is named here instead.
+                did.append(("orphaned", job.id))
+                continue
+            code = proc.poll()
+            if code is None:
+                continue
+            self.finish(job, code, self._handles.pop(job.id, None))
+            self._live.pop(job.id, None)
+            did.append(("finished", job.id))
+
+        records = self.read()
+        if any(j.state == jobs.RUNNING for j in records):
+            return did
+        queued = [j for j in records if j.state == jobs.QUEUED]
+        if queued:
+            job = sorted(queued, key=lambda j: j.id)[0]
+            proc, handle = self.start(job)
+            self._live[job.id] = proc
+            self._handles[job.id] = handle
+            did.append(("started", job.id))
+        return did
+
+    def run_forever(self, interval=1.0, stop=None):
+        """Tick until told to stop. The whole scheduler.
+
+        There is no queue object and no worker pool: the job list on disk is
+        the queue, so a supervisor that dies and is restarted picks up
+        exactly where the file says, and nothing is held anywhere else.
+        """
+        while stop is None or not stop.is_set():
+            try:
+                self.tick()
+            except jobs.JobError:                        # pragma: no cover
+                # A malformed list is not a reason to stop advancing the
+                # ones that are fine -- but it is not this loop's to repair
+                # either, so it is left for a reader to see.
+                pass
+            time.sleep(interval)
 
     # -- stopping ----------------------------------------------------------
     def cancel(self, job, proc=None, grace=CANCEL_GRACE_SECONDS):

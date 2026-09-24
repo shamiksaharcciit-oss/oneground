@@ -229,3 +229,82 @@ def test_a_cancelled_job_cannot_then_be_finished(sup):
     with pytest.raises(jobs.JobError):
         sup.finish(j, 0)
     assert sup.read()[0].state == "cancelled"
+
+# ----------------------------------------------------- advancing the list
+def test_tick_starts_a_queued_job_and_reaps_it(sup):
+    """The scheduler, which did not exist: enqueue recorded a job and
+    nothing ever drove it to running. A channel that worked would still have
+    produced a list of things that never ran."""
+    j = sup.enqueue("characterize", ["characterize", "nope.yaml"])
+    assert sup.read()[0].state == "queued"
+
+    did = sup.tick()
+    assert ("started", j.id) in did
+    assert sup.read()[0].state == "running"
+
+    for _ in range(600):
+        did = sup.tick()
+        if any(k == "finished" for k, _ in did):
+            break
+        time.sleep(0.05)
+    stored = sup.read()[0]
+
+    # What the RUNNER promises: it reaped the child, recorded a terminal
+    # state, and recorded why. Which terminal state a real child reaches is
+    # the environment's business -- under a loaded suite this one has been
+    # seen killed with 0xC000013A, which `classify` correctly calls failed
+    # and names as a code the tool does not return deliberately.
+    #
+    # Not weakened: that a refusal exit becomes `refused` with the CLI's
+    # words is asserted deterministically in
+    # `test_a_refused_command_is_recorded_as_refused_with_its_words`, which
+    # drives the exit code rather than hoping for it. This test is about the
+    # loop; that one is about the mapping. Splitting them is what lets both
+    # be exact.
+    assert stored.state in jobs.TERMINAL, stored.why
+    assert stored.why, "a terminal state with no reason"
+    assert stored.exit_code is not None
+    assert stored.ended
+
+
+def test_one_job_at_a_time(sup):
+    """A simulate uses the machine and two of them fight for it -- the
+    second would measure a loaded machine and record timings nobody can
+    compare. A decision, not a limitation."""
+    sup.enqueue("characterize", ["characterize", "nope.yaml"])
+    sup.enqueue("characterize", ["characterize", "also-nope.yaml"])
+
+    sup.tick()
+    states = [j.state for j in sup.read()]
+    # By count, not by identity: ids carry a random suffix and two enqueued
+    # in the same second sort either way round, so naming which one runs
+    # first would be asserting something this code does not promise. The
+    # promise is that exactly one runs.
+    assert states.count("running") == 1, states
+    assert states.count("queued") == 1, states
+
+    for _ in range(600):
+        sup.tick()
+        if not any(j.state == "queued" for j in sup.read()):
+            break
+        time.sleep(0.05)
+    live = [j.state for j in sup.read()]
+    assert "queued" not in live, live
+    assert live.count("running") <= 1, "two jobs were running at once"
+
+
+def test_tick_is_idempotent_on_an_empty_list(sup):
+    assert sup.tick() == []
+    assert sup.tick() == []
+
+
+def test_a_job_running_under_a_dead_supervisor_is_named_not_guessed(sup):
+    """Running in the record and not a child of this process. This one
+    cannot tell whether it still is, so it says `orphaned` rather than
+    deciding -- the couldnt_check the six states have no room for."""
+    j = sup.enqueue("simulate", ["simulate", "runs/x"])
+    j.become(jobs.RUNNING)
+    sup._replace(j)                       # as a previous process left it
+    did = sup.tick()
+    assert ("orphaned", j.id) in did
+    assert sup.read()[0].state == "running", "it was guessed at"

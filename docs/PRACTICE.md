@@ -666,10 +666,10 @@ through precision is evidence.
 
 ### Tools that are correct and answer an adjacent question
 
-It has now happened **six times in one slice**, to six different kinds of
-tool, and the repetition is the result rather than the anecdote. Three are in
-the table below; the other two are warning 1's write-path scan and warning
-7's patch on a re-export, which are the same shape reached from elsewhere.
+It has now happened **seven times in one slice**, to seven different kinds
+of tool, and the repetition is the result rather than the anecdote. Five are in the table below; the other two are warning 1's write-path scan
+and warning 7's patch on a re-export, which are the same shape reached from
+elsewhere.
 
 *The count is stated because it was got wrong once already: this was recorded
 as the fifth instance and is the sixth, and a page that collects instances
@@ -681,8 +681,27 @@ should be able to count them.*
 | a grep for a stale claim | every copy containing that phrase | three further copies saying the same thing in different words |
 | a test searching a module for `atexit` | the string's presence | that the only occurrence was the docstring **saying there is none** |
 | a test enforcing the exit-code rule | every literal non-zero return in `oneground/cli.py` | four of the ten stages, whose handlers are in `oneground/pod/cli.py` — it covered six and read as though it covered ten |
+| a browser check on a chooser panel | that it opens, and survives the page's refresh timer | whether clicking a choice **does anything** — it verified *staying open* and reported it as verified |
 
-**The last one is worth singling out**, because the tool was new, mine, and
+**The seventh is the one to end on**, because it was caught by a person
+clicking rather than by any check, and because its unstated proposition is
+the shortest yet. A browser check clicked a stage, watched the chooser open,
+sampled it at four points over thirteen seconds, and reported *verified
+surviving past 13s* — which was **true**. The proposition it did not state
+was that **surviving means working**. Clicking a choice did nothing at all;
+the enqueue was failing every time.
+
+A coverage claim can be about breadth — six of ten stages — or about depth,
+and this was depth: the check covered the panel's *existence* and read as
+though it covered its *behaviour*. Both are the same error, and the depth
+one is harder to see because there is no list to count against.
+
+> The tell: **name the proposition your check does not test, out loud, in the
+> check.** "This asserts the chooser opens and survives a refresh. It does not
+> assert that choosing does anything." Writing that sentence is usually enough
+> to make you write the second check.
+
+**And one more is worth singling out**, because the tool was new, mine, and
 written days after this very entry went on the page — by the person who had
 just written it. It made **a coverage claim nobody stated**: nothing in it
 said *all stages*, and nothing said *six of ten* either, so a reader took the

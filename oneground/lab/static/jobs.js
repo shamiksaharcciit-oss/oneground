@@ -299,7 +299,7 @@
   }
 
   async function start(stage, arg) {
-    clearFail();
+    clearFail();          // the previous attempt's, deliberately
     try {
       // The invocation is exactly what a terminal would run, which is what
       // makes the record replayable.
@@ -311,6 +311,7 @@
   }
 
   function fail(message) {
+    sticky = true;
     const box = document.getElementById('jobs-error');
     if (!box) return;
     box.hidden = false;
@@ -319,6 +320,7 @@
   }
 
   function clearFail() {
+    sticky = false;
     const box = document.getElementById('jobs-error');
     if (box) { box.hidden = true; box.textContent = ''; }
   }
@@ -450,9 +452,19 @@
     return box;
   }
 
+  // `true` while an action's message must survive. `refresh` began with
+  // clearFail() and every action ended with `await refresh()`, so a message
+  // an action raised lived about forty milliseconds and the page looked as
+  // though it had done nothing at all.
+  //
+  // That is what hid the defect beneath it: the enqueue was failing loudly
+  // and the page was erasing the complaint before it could be read. An
+  // error a refresh can delete is an error nobody will report.
+  let sticky = false;
+
   async function refresh() {
     const mine = ++seq;
-    clearFail();
+    if (!sticky) clearFail();
     let out;
     try {
       out = await get('/api/jobs');
