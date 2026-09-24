@@ -1100,15 +1100,19 @@ def test_a_new_write_route_changes_the_sentence_with_nothing_else_edited():
     from oneground.lab import server as srv
     before_check = srv.can_sentence("runs", "nothing")
     before_warn = srv.check_host("0.0.0.0", i_know=True, runs_dir="runs")
-    assert "delete a run" not in before_check
-    assert "delete a run" not in before_warn
+    assert "delete" not in before_check
+    assert "delete" not in before_warn
 
     srv.WRITE_ENDPOINTS["/api/runs/delete"] = "run_delete"
-    srv.CAPABILITY["/api/runs/delete"] = "delete a run"
+    srv.CAPABILITY["/api/runs/delete"] = srv.Can(
+        "runs", "delete", "a run and everything under it")
     try:
-        assert "delete a run" in srv.can_sentence("runs", "nothing")
-        assert "delete a run" in srv.check_host("0.0.0.0", i_know=True,
-                                                runs_dir="runs")
+        assert "delete a run and everything under it" in srv.can_sentence(
+            "runs", "nothing")
+        assert "delete a run and everything under it" in srv.check_host(
+            "0.0.0.0", i_know=True, runs_dir="runs")
+        assert "delete a run and everything under it" in srv.field(
+            "runs", "runs")
     finally:
         del srv.WRITE_ENDPOINTS["/api/runs/delete"]
         del srv.CAPABILITY["/api/runs/delete"]
@@ -1134,7 +1138,18 @@ def test_the_network_warning_names_what_exposing_a_ui_session_hands_over():
     assert "not read-only" in warning
     for power in srv.CAPABILITY.values():
         if power is not None:
-            assert power in warning, power
+            assert power.verb + " " + power.object in warning, power
+
+
+def test_every_kind_has_a_verb_and_a_sentence_for_having_none():
+    """The second structural check. A capability with a new kind fails here
+    until both tables know it, for the same reason a route with no phrase
+    fails: the shape of the answer is part of adding the capability."""
+    from oneground.lab import server as srv
+    kinds = {c.kind for c in srv.CAPABILITY.values() if c is not None}
+    assert kinds <= set(srv.NOTHING), kinds - set(srv.NOTHING)
+    assert kinds <= set(srv.KIND_VERB), kinds - set(srv.KIND_VERB)
+    assert set(srv.NOTHING) == set(srv.KIND_VERB)
 
 
 def test_a_lab_session_over_one_run_still_says_it_writes_and_runs_nothing():
@@ -1159,8 +1174,16 @@ def test_the_check_panel_agrees_with_the_routes_that_are_mounted(tmp_path):
         said = lab.check({})
         assert "/api/jobs/run" in _server_module().WRITE_ENDPOINTS
         assert "nothing" not in said["runs"], said["runs"]
-        assert "start stages" in said["runs"]
+        assert "stages" in said["runs"]
+        assert "supervisor" in said["runs"]
         assert "requirements files" in said["writes"]
+        # **The overlap.** The first version of this composed `runs` from
+        # every capability, so the field answering *what does this run*
+        # announced that the session writes files. Two fields saying
+        # overlapping things is the two-homes defect at a smaller size, and
+        # it arrived inside the repair for the two-homes defect.
+        assert "requirements files" not in said["runs"], said["runs"]
+        assert "stages" not in said["writes"], said["writes"]
     finally:
         lab.stop()
 

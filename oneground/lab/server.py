@@ -62,6 +62,7 @@ WHAT IT NEVER DOES
 What the token does and does not protect against is in docs/LAB.md.
 """
 
+import collections
 import hashlib
 import hmac
 import http.client
@@ -170,11 +171,27 @@ WRITE_ENDPOINTS = {
 #: `CAPABILITY` must have the same keys, and a test asserts it. A route added
 #: without a phrase fails the suite, which makes describing a new capability
 #: part of adding one rather than a thing to remember afterwards.
+#: `kind` is which of `/api/check`'s two fields this belongs under, and it
+#: is why one table can answer both without either of them overreaching: the
+#: first version composed `runs` from every capability and had it announcing
+#: that the session writes files, which is the two-homes defect at a smaller
+#: size -- two fields saying overlapping things.
+#:
+#: `verb` and `object` are separate because the two readers need different
+#: halves. The check panel's key is already a verb (`writes:`, `runs:`) and
+#: takes the object alone; the network warning is prose and needs both.
+Can = collections.namedtuple("Can", "kind verb object")
+
 CAPABILITY = {
-    "/api/compose/write": "write requirements files into the runs directory",
-    "/api/jobs/run": ("start stages -- characterize, simulate, report and "
-                      "the rest -- through the supervisor on loopback"),
-    "/api/jobs/cancel": "stop a stage that is running",
+    "/api/compose/write": Can(
+        "writes", "write",
+        "requirements files into the runs directory, through one guarded "
+        "path"),
+    "/api/jobs/run": Can(
+        "runs", "start",
+        "stages -- characterize, simulate, report and the rest -- through "
+        "the supervisor on loopback"),
+    "/api/jobs/cancel": Can("runs", "stop", "a stage that is running"),
     # These two transform what the caller already sent. `open` parses a
     # document the request carries and `preview` renders state the request
     # carries; neither reaches the filesystem, so neither is a power.
@@ -182,30 +199,74 @@ CAPABILITY = {
     "/api/compose/preview": None,
 }
 
+#: The two fields `/api/check` answers with, and what each says when the
+#: session has no capability of that kind. Here rather than at the call site
+#: so that adding a kind is one edit.
+NOTHING = {
+    "writes": "nothing: this session has no write path",
+    "runs": "nothing: no job and no session is created from this page",
+}
 
-def capabilities(runs_dir):
-    """What a session over `runs_dir` lets a request do, in order.
+#: The verb the field's own key already supplies. A capability whose verb is
+#: this one contributes its object alone -- `runs: stages ...` -- and one
+#: whose verb differs keeps it, because `runs: ... and a stage that is
+#: running` is what dropping it produces, and that is a sentence about
+#: nothing.
+KIND_VERB = {"writes": "write", "runs": "start"}
+
+
+def capabilities(runs_dir, kind=None):
+    """What a session over `runs_dir` lets a request do, in route order.
 
     Derived from which write routes are mounted, which is the one gate:
     `answer_write` refuses every POST when `runs_dir is None`, so a `lab`
     session over a single run has none of these and a `ui` session has all
     of them. Nothing here is a judgement about what the session *ought* to
     be able to do -- it is a reading of what it can.
+
+    `kind` narrows to one of `/api/check`'s fields; None is every kind, which
+    is what the network warning wants.
     """
     if runs_dir is None:
         return ()
     return tuple(CAPABILITY[route] for route in WRITE_ENDPOINTS
-                 if CAPABILITY[route] is not None)
+                 if CAPABILITY[route] is not None
+                 and (kind is None or CAPABILITY[route].kind == kind))
+
+
+def _joined(parts):
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def field(runs_dir, kind):
+    """One of `/api/check`'s capability fields.
+
+    The key is a verb -- `runs:` -- so a capability sharing that verb gives
+    its object alone. One that does not carries its own, appended, because a
+    field cannot have two leading verbs and the second capability is not
+    worth dropping to keep the sentence tidy.
+    """
+    able = capabilities(runs_dir, kind)
+    if not able:
+        return NOTHING[kind]
+    lead = [c.object for c in able if c.verb == KIND_VERB[kind]]
+    rest = [c.verb + " " + c.object for c in able
+            if c.verb != KIND_VERB[kind]]
+    if not lead:
+        return _joined(rest)
+    if not rest:
+        return _joined(lead)
+    return _joined(lead) + "; it can also " + _joined(rest)
 
 
 def can_sentence(runs_dir, nothing):
-    """The capabilities as one sentence, or `nothing` if there are none."""
+    """Every capability as one prose clause, verbs included."""
     able = capabilities(runs_dir)
     if not able:
         return nothing
-    if len(able) == 1:
-        return able[0]
-    return ", ".join(able[:-1]) + " and " + able[-1]
+    return _joined([c.verb + " " + c.object for c in able])
 
 
 class Forwarded(Exception):
@@ -1194,13 +1255,8 @@ class LabServer:
             # keyed by the routes `answer_write` actually mounts. It cannot
             # describe a power this session does not have or omit one it
             # does, because it is not a description -- it is a reading.
-            "writes": ("requirements files, through one guarded path"
-                       if self.runs_dir is not None
-                       else "nothing: this session has no write path"),
-            "runs": can_sentence(
-                self.runs_dir,
-                "nothing: no job, no written file, no session is created "
-                "from this page"),
+            "writes": field(self.runs_dir, "writes"),
+            "runs": field(self.runs_dir, "runs"),
             "token": ("required on every request; see docs/UI.md for what "
                       "it protects against and what it does not"),
             # Which build answered this request. The page shows it and a
