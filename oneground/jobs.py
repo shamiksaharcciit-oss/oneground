@@ -289,56 +289,17 @@ def read(runs_dir):
 #: Non-zero returns a stage handler is permitted, and why. Anything not here
 #: is a stage reporting a finding through its exit code, which the rule above
 #: forbids. A reason per entry, so an addition costs a sentence (section 7.1).
-EXIT_CONTRACT = {
-    # `_cmd_simulate`, when configurations were planned and not measured.
-    #
-    # **This is the one entry that is a finding rather than a fate**, and it
-    # is listed rather than quietly permitted because the rule above says it
-    # should not exist. The run happened; `simulate.json` holds the rows that
-    # were measured and `simulate_info.json:dropped` names each one that was
-    # not, with its reason. Under the rule that is exit 0 with the finding in
-    # the artifact, exactly where the artifact already carries it.
-    #
-    # Its own comment gives the argument for the non-zero: "couldn't-check is
-    # never rounded up to success". That is right about the outcome and it is
-    # being asserted in the wrong channel -- the artifact already refuses to
-    # round it up, and the exit code is being asked to repeat a claim the
-    # receipt makes better.
-    #
-    # Left as it is, declared, and raised as the fifth contract change in
-    # `tasks/046-contract-changes.report.md` -- which has since been
-    # RULED and TAKEN: a finding travelling in an exit code, against the
-    # rule that an exit code says whether a command ran and never what it
-    # found. The repair belongs to the proposals stream and is not a UI
-    # slice's to make unasked.
-    # Its cost is visible here: it is the sole reason `EXIT_MEANING[1]` has
-    # two meanings and `classify` has to consult the workdir at all.
-    ("simulate", 1): "configurations were planned and not measured; the rows "
-                     "that were are in simulate.json and each drop is named "
-                     "in simulate_info.json:dropped",
-
-    # `pod/cli.py:cmd_plan`, when the resolved price exceeds the cost cap.
-    #
-    # **This one is a refusal with the wrong number**, which is a different
-    # defect from `simulate`'s and a clearer one. It prints "REFUSED: the
-    # cost cap is exceeded. `up` would not proceed." and returns 1 -- so the
-    # tool declines, says so in the word the project uses for it, and exits
-    # with the code that means *did not finish*.
-    #
-    # The consequence is immediate now that plan is a job: `classify` reads
-    # 1 with no receipt and records `failed`, so the page shows a crash for
-    # the one refusal that exists to stop somebody spending money. The
-    # refusal is the most useful thing that command produces.
-    #
-    # Declared rather than fixed: `pod` is the module this slice has now
-    # wanted to reach into six times, and it is the sixth entry in
-    # `tasks/046-contract-changes.report.md` -- RULED and TAKEN, for the
-    # same reason as the fifth. The repair is one character, `return 2`,
-    # and it belongs to the proposals stream rather than here.
-    ("pod plan", 1): "the resolved price exceeds the cost cap, so `up` "
-                     "would not proceed; a refusal returning the code for "
-                     "did-not-finish, recorded as contract change six",
-}
+#:
+#: Empty, and that is the point rather than an oversight. It held two
+#: entries -- `("simulate", 1)` and `("pod plan", 1)` -- each a stage
+#: reporting through its exit code what its own artifact already said better:
+#: `simulate` a finding (`simulate_info.json:dropped`) and `pod plan` a
+#: refusal (`REFUSED: the cost cap is exceeded`), both declared rather than
+#: forbidden because the rule said they should not exist. Both were the
+#: repair the declaration deferred: `_cmd_simulate` now returns 0 with the
+#: drop named in the artifact, and `cmd_plan` returns `refusals.REFUSED_EXIT`
+#: for both of its refusals. The rule now holds without exception.
+EXIT_CONTRACT = {}
 
 
 # ------------------------------------------ reading an exit code honestly
@@ -348,8 +309,11 @@ EXIT_CONTRACT = {
 # here rather than written into the supervisor, so every row is checkable by
 # reading one table.
 #
-# The `1` row is the only one where a single code means two things, and it is
-# the row to test hardest.
+# The `1` row used to be the one where a single code meant two things --
+# `simulate` used it for a finding as well as the interpreter using it for a
+# crash, and only the workdir could tell them apart. `EXIT_CONTRACT` is now
+# empty, which means every stage's non-zero exit is 2, a refusal, or it did
+# not finish. One meaning, checked no differently than any other code.
 EXIT_MEANING = {
     0: ("done",
         "the command completed"),
@@ -358,60 +322,27 @@ EXIT_MEANING = {
         "this code for a refusal and for nothing else; `cli.main` now routes "
         "the declared refusal types here too, which is what made `refused` "
         "reachable at all"),
-    1: (None,
-        "TWO THINGS, and the workdir separates them. `simulate` exits 1 when "
-        "it ran and dropped some configurations -- the measured rows are in "
-        "`simulate.json` and each drop is named with its reason in "
-        "`simulate_info.json:dropped` -- and the interpreter exits 1 when "
-        "something raised. The first is closer to done than to failed; the "
-        "second produced nothing"),
-}
-
-#: The receipt whose presence says the stage actually ran. This is what
-#: resolves the `1` row, and it is the whole of *the truth is the workdir*
-#: made concrete: the exit code is a claim about the process, the receipt is
-#: evidence about the work.
-STAGE_RECEIPT = {
-    "characterize": "characterization.json",
-    "simulate": "simulate.json",
-    "verify": "verify.json",
-    "report": "report.json",
-    "chunk": "chunk_info.json",
-    "propose": "proposals",
-    "pod plan": "pod_plan.json",
-    "pod status": None,
-    "pod watch": None,
-    "pod fetch": None,
+    1: (FAILED,
+        "it did not finish: the interpreter exited 1 without either "
+        "declining (2) or completing (0), and nothing in EXIT_CONTRACT "
+        "permits a stage to mean anything else by it"),
 }
 
 
-def classify(stage, exit_code, workdir):
+def classify(stage, exit_code):
     """`(state, why)` for a finished job. Never guesses.
 
-    `why` is returned beside the state because a reader of a `failed` job
-    deserves to know whether it was the code or the missing receipt that
-    decided -- `docs/PRACTICE.md` §7.2, an exemption or an inference that is
-    not reported has only moved the silence.
+    Decided by the exit code alone. Task 046: this used to also take
+    `workdir`, because `simulate` reported a finding through exit 1 and only
+    the receipt on disk could tell that apart from a crash. Now that
+    `EXIT_CONTRACT` is empty, no stage does, and a parameter that decided
+    nothing is a parameter that should go rather than stay for a case that
+    no longer exists.
     """
     if stage not in STAGES:
         raise JobError(f"{stage!r} is not a stage")
     state, why = EXIT_MEANING.get(exit_code, (None, None))
     if state is not None:
         return state, why
-    if why is None:
-        return FAILED, (f"exit {exit_code}, which is not a code this tool "
-                        f"returns deliberately")
-
-    receipt = STAGE_RECEIPT.get(stage)
-    if receipt is None:
-        # A stage that writes no receipt of its own cannot be separated this
-        # way, and saying so beats guessing. `failed` is the safe reading:
-        # calling a crash `done` would put a run in the list as complete.
-        return FAILED, ("exit 1, and this stage writes no receipt of its "
-                        "own, so nothing here can tell a drop from a crash")
-    where = os.path.join(workdir or "", receipt)
-    if os.path.exists(where):
-        return DONE, ("exit 1 with %s written: the run happened and dropped "
-                      "something, which the receipt records" % receipt)
-    return FAILED, ("exit 1 with no %s: nothing was produced, so the run "
-                    "did not happen" % receipt)
+    return FAILED, (f"exit {exit_code}, which is not a code this tool "
+                    f"returns deliberately")

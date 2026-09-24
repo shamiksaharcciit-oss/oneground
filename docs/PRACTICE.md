@@ -1542,11 +1542,12 @@ everything but N**, with different verdicts.
 
 Not a test per input. A *pair* per input, with everything else held.
 
-**The instance.** `jobs.classify(stage, exit_code, workdir)` decides whether
-exit 1 means *the run happened and dropped some configurations* or *the run
-crashed*, and the workdir is the only thing that separates them:
-`simulate.json` exists in the first case and not in the second. That is the
-whole of *the truth is the workdir* made operational.
+**The instance, as it stood through task 046.** `jobs.classify(stage,
+exit_code, workdir)` used to decide whether exit 1 meant *the run happened
+and dropped some configurations* or *the run crashed*, and the workdir was
+the only thing that separated them: `simulate.json` existed in the first
+case and not in the second. That was the whole of *the truth is the
+workdir* made operational.
 
 Ten tests covered it — five stages with the receipt written, five without —
 and **every one of them would have passed against a classifier that never
@@ -1565,6 +1566,19 @@ assert (before, after) == ("failed", "done")
 > things at once measures the pair, and a classifier can satisfy it by
 > reading either. The mutant is what turns *the truth is the workdir* from a
 > slogan into a fact about this function.
+
+**Task 047 removed the case the mutant was written for, and the mutant went
+with it — this is §1 applied to a code example rather than to prose.**
+`simulate` and `pod plan` were the two stages that made exit 1 mean two
+things; both were repaired to stop reporting a finding or a refusal through
+an exit code, `jobs.EXIT_CONTRACT` closed to `{}`, and `classify` dropped
+the `workdir` parameter that distinguished them — kept, it would have been
+machinery a contract no longer needs, which is how the next reader infers
+the contract still exists. `classify` now takes `(stage, exit_code)`. The
+eleventh test is gone with the row it existed to prove. The rule above is
+unchanged and still the way to prove a classifier reads an input; this
+paragraph is a record that it once applied here, not a claim that it still
+does.
 
 This is warning 3 with the subject narrowed. *A passing check must be able to
 fail* asks whether the check can go red at all; this asks whether it can go

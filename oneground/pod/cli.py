@@ -14,10 +14,17 @@ builds a plain `RunPodClient`, whose guard makes a create call raise rather
 than spend -- see `oneground/pod/__init__.py` for why the boundary is drawn
 here and why there is no `--yes`.
 
-Exit codes
+Exit codes, for `up`, `down` and `ls` -- not jobs, so this module's own:
     0  did what was asked
     1  refused, failed, or the developer answered anything but 'y'
     2  a billable call was attempted without confirmation (a bug; loud)
+
+`plan`, `status`, `watch` and `fetch` are job stages (`jobs.STAGES`) and
+follow `jobs.py`'s exit contract instead -- 0 ran, 2 refused (with the
+`refusals.REFUSED_EXIT` this module now shares with the rest of the CLI),
+1 did not finish. Task 046 contract change 6: `plan` used to return 1 for
+the cost-cap and mirror-mismatch refusals, so the supervisor classified
+the one refusal that exists to stop somebody spending money as a crash.
 """
 
 import argparse
@@ -29,6 +36,7 @@ import sys
 import time
 
 from . import api, confirm, plan as planmod, session as sessionmod, sshx, state
+from .. import refusals
 
 
 def _repo_root():
@@ -83,9 +91,15 @@ def _mirror_refusal(session, root, log=print):
 
 
 def cmd_plan(args):
+    # Task 046 contract change 6: both returns below are the tool declining
+    # -- `_mirror_refusal` and the cost cap each print "REFUSED:" -- and
+    # `refusals.REFUSED_EXIT` is the code jobs.py's exit contract reserves
+    # for exactly that. `classify` used to read either as exit 1 with no
+    # receipt and call it `failed`, showing a crash for the one refusal that
+    # exists to stop somebody spending money.
     s = sessionmod.load(args.spec)
     if _mirror_refusal(s, _repo_root()):
-        return 1
+        return refusals.REFUSED_EXIT
     p = planmod.resolve(_client(args), s)
     print()
     print(p.render())
@@ -97,7 +111,7 @@ def cmd_plan(args):
         print()
     if not p.within_cap:
         print("  REFUSED: the cost cap is exceeded. `up` would not proceed.")
-        return 1
+        return refusals.REFUSED_EXIT
     print("  Nothing was created. This is a dry run; `up` is the only "
           "subcommand that can create a pod.")
     return 0

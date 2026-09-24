@@ -166,15 +166,19 @@ def _simulate_exit_code(requirements):
     return _capture(cli._cmd_simulate.__wrapped__, args, [])
 
 
-def test_the_run_exits_non_zero_when_a_configuration_was_not_measured():
-    """couldn't-check is never rounded up, including to an exit code."""
+def test_a_dropped_configuration_is_named_on_stdout_and_exits_zero():
+    """couldn't-check is never rounded up to success -- but that claim lives
+    in simulate_info.json:dropped, which the run wrote. Task 046 contract
+    change 5: the exit code says only whether the command ran, and it ran.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         code, text = _simulate_exit_code(
             _prepared(tmp, _unbuildable_block()))
-        assert code == 1, text
+        assert code == 0, text
         assert "1 of" in text and "were not measured" in text, text
 
-    # and a sweep with nothing dropped exits 0, so the code means something
+    # and a sweep with nothing dropped prints nothing extra, so the message
+    # means something.
     with tempfile.TemporaryDirectory() as tmp:
         code_ok, text_ok = _simulate_exit_code(_prepared(tmp))
         assert code_ok == 0, text_ok
