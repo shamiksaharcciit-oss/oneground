@@ -10,13 +10,24 @@ they are the same shape from two directions, and the pairing is the argument.*
 
 *Neither note writes a warning number in. Both were drafted against a §2 that
 ended at warning 7, and warning 8 landed on main while they were being
-written — a number in a document you do not own is §1's stale state with extra
-steps. The placement and the numbering are yours.*
+written. The general form, which is §1's and may already be covered there:*
+
+> **A number written into a document another stream owns is the stale-state
+> defect with extra steps. Ordering lives with whoever owns the ordering.**
+
+*The numbering was removed rather than corrected, because correcting it would
+have been the same mistake with a fresher number. Placement and numbering are
+yours.*
 - **`practice-a-number-on-a-page-has-a-receipt.md`** — a number that could not
   be checked. The lab team's rule, which refused one of our proposals: a
   figure on a page has a receipt in the data the page ships.
 
-## Why together
+## Why together — and please do not take only the two rules
+
+**This is the request, not a preamble.** Each note carries a usable rule, and
+each rule survives being lifted out on its own. **The thing that does not
+survive is what makes them one entry**, and it is the part worth more than
+either rule:
 
 One is about a **check** with nothing behind it and one is about a **number**
 with nothing behind it. In both the artifact looked sound — the survey named
@@ -25,9 +36,22 @@ correct — and in both there was nothing a later reader could hold it against.
 
 That is the same failure twice: **something that reads as evidence and is not
 answerable to anything.** A survey whose zero cannot be interrogated, and a
-figure whose value cannot be traced. Either one alone reads as a local
-mistake; the two together name the property that was missing, which is not
-rigour or purity but *answerability after the author has gone*.
+figure whose value cannot be traced.
+
+> **Either one alone reads as a local mistake. The two together name the
+> property that was missing, and it is not rigour or purity — it is
+> answerability after the author has gone.**
+
+That sentence is the entry. Both authors were competent, both artifacts were
+correct on the day, and neither left anything a later reader could hold them
+against. A rule about survey predicates and a rule about page data are two
+techniques; the pair is a statement about what makes work checkable once the
+person who did it is no longer in the room, which is the only reason either
+technique matters.
+
+So if the page has room for one thing from this, take the framing and let the
+two rules be its examples. Splitting them into two warnings in different
+sections is the outcome worth avoiding.
 
 They also converge with a rule this project already enforces from the other
 side. `docs/STATE.md`'s rendering contract says a view may **tally, never
