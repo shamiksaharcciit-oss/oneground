@@ -255,6 +255,25 @@ def test_the_transport_guard_catches_computation_synthetic():
         "def f(p):\n    return open(p).read()\n") == []
 
 
+def _import_package_for(name, path):
+    """The `package` a relative import inside `name`'s module resolves
+    against -- for `guard.transport_violations`, which needs the real
+    `__package__` to make sense of `from .. import x`.
+
+    Task 050. `name.rpartition(".")[0]` is `__package__` for an ordinary
+    module (`oneground.pod.cli` -> `oneground.pod`) and **wrong for an
+    `__init__.py`**, whose own dotted name already *is* its package
+    (`oneground.intake` -> `oneground.intake`, not `oneground`). Nothing in
+    the server's transitive import graph had used a relative import from
+    inside an `__init__.py` before task 049, so this line had never been
+    exercised on the file shape it gets wrong -- see the report for what
+    that says about the guard's own coverage.
+    """
+    if os.path.basename(path) == "__init__.py":
+        return name
+    return name.rpartition(".")[0] or name
+
+
 def test_everything_the_server_imports_passes_the_guard():
     """Not synthetic: a clean process imports the server, and every oneground
     module it pulled in is read with the transport rules (numpy allowed below
@@ -284,7 +303,7 @@ def test_everything_the_server_imports_passes_the_guard():
         allowed, _ = guard.TRANSPORT_ALLOWLIST.get(rel, (set(), ""))
         with open(path, encoding="utf-8") as f:
             found = [v for v in guard.transport_violations(
-                f.read(), path, package=name.rpartition(".")[0] or name,
+                f.read(), path, package=_import_package_for(name, path),
                 allow_numpy=True) if v[1] not in allowed]
         checked.append(rel)
         if found:
@@ -292,6 +311,45 @@ def test_everything_the_server_imports_passes_the_guard():
     assert "oneground/lab/server.py" in checked
     assert "oneground/lab/views/ground.py" in checked
     assert problems == [], problems
+
+
+def test_the_package_used_for_relative_imports_is_right_for_init_py():
+    """Task 050's mutant. `_import_package_for` is right where the old
+    inline computation (`name.rpartition(".")[0] or name`) was wrong, and
+    this proves it against the guard the old line fed, not against a
+    restatement of the fix.
+
+    `oneground.intake`'s own real case (task 049): `from .. import analogy`
+    inside `intake/__init__.py` correctly names `oneground.analogy`, a
+    module the guard permits. Resolved against `_import_package_for`'s
+    answer it is clean; resolved against the old line's answer it is
+    flagged -- a real import the old code would have refused, which is
+    why task 049 routed around it with an absolute import rather than
+    trusting the guard to pass a correct one.
+    """
+    src = "from .. import analogy\n"
+
+    fixed_package = _import_package_for("oneground.intake",
+                                        "oneground/intake/__init__.py")
+    assert fixed_package == "oneground.intake"
+    assert guard.transport_violations(
+        src, "oneground/intake/__init__.py", package=fixed_package,
+        allow_numpy=True) == []
+
+    old_package = "oneground.intake".rpartition(".")[0] or "oneground.intake"
+    broken = guard.transport_violations(
+        src, "oneground/intake/__init__.py", package=old_package,
+        allow_numpy=True)
+    assert broken != [], (
+        "the old computation should still wrongly flag this real, "
+        "benign import -- if it no longer does, this mutant's premise "
+        "is stale and needs re-deriving, not deleting")
+
+    # An ordinary (non-__init__) module is unaffected: both forms agree,
+    # because `name.rpartition(".")[0]` was only ever wrong for a package
+    # whose own name equals its `__package__`.
+    assert _import_package_for("oneground.pod.cli",
+                               "oneground/pod/cli.py") == "oneground.pod"
 
 
 # ------------------------------------------------------------------- token
