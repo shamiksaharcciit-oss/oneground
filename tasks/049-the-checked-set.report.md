@@ -32,6 +32,19 @@ Both are also now declared in `fields.py:FIELDS`, `nearest_fixture` **without**
 a `choices=` tuple — the same reasoning: a static choice list would be
 exactly as stale as a hardcoded validation.
 
+**Worth naming rather than leaving implicit: the fix declining to
+reproduce the defect it repairs.** This is the third time in this task's
+own lineage the same second-order error was in reach and avoided rather
+than committed — task 047's ruling against hand-editing `fields.py` from
+"twenty-five" to "twenty-six," this task's own `count_refusals()` in place
+of a fourth stale citation, and now a validation for `nearest_fixture`
+that would itself have been a hardcoded list going stale on the next
+fixture built. The care is invisible exactly when it works: a static
+`("auto", "arxiv-150k", "stackexchange-150k", "none")` tuple would have
+passed every test written against today's fixtures and been silently wrong
+the day a fifth one was added — the same shape of failure as the count
+that sat wrong for two tasks before anyone measured it.
+
 ### 2. `corpus_type` vs. `text_length`: the reason is good; rule 3 is widened
 
 Quoted in full, from `oneground/intake/__init__.py`'s own comment: *"Values
@@ -55,6 +68,20 @@ docstring, component 3), and extends it to `embedding_model` — same
 mechanism, same reasoning, previously unstated anywhere — which sits beside
 `corpus_type` in `fields.py:OPEN_DOMAIN` rather than as a third
 disagreement.
+
+**This is the rule earning its keep twice, not once.** Open-by-concept
+versus closed-by-definition was a fact the code already knew, but knew
+about exactly one field, in a comment attached to that field alone.
+Stating it as a general clause of rule 3 is what let it reach
+`embedding_model` — a field nobody was looking at, that nobody proposed as
+a case, that fell under the same reasoning purely because the reasoning
+was now general rather than local. A summary of the current table could
+not have done this: it would have listed `corpus_type` as an exception and
+stopped, because a list has no shape to extend past the case that
+prompted it. A rule that widens because one case tested it, and then on
+its own finds a third case nobody went looking for, is what distinguishes
+a rule from a summary of today's table — which is the whole argument this
+task was written to make, landing on the field it least expected to.
 
 ### 3. Component 4 has three members, declared as one worked example
 
@@ -151,7 +178,13 @@ actually forbidden. Fixed by switching to an absolute import,
 sidesteps the bug rather than exploiting it. **Not fixed: the test
 harness's package-resolution heuristic itself**, which is wrong for any
 `__init__.py` using a relative import — none had, until this task, so
-nothing had exercised it. Named under Observed, not done.
+nothing had exercised it. **Worth its own sentence: a guard check that
+resolves a relative import's package wrongly for `__init__.py` files has
+never been exercised on one — a coverage claim inside the guard that
+exists to check coverage claims, of exactly the shape this task's own
+subject is.** Named under Observed, not done, and left there deliberately
+— it is its own small, scopeable task, not something to fold into this
+one on the way past it.
 
 ## Observed, not done
 
