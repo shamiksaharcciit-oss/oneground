@@ -37,13 +37,32 @@ import time
 import numpy as np
 import zstandard as zstd
 
-from oneground.chunk.strategies import chunk_document
-from oneground.embed import embed
-from oneground.embed.registry import resolve
-from oneground.measures.crispness import (boundary_crispness, centroid_dists,
-                                          kmeans, reading as crispness_reading)
-from oneground.measures.lid import two_nn_lid
-from oneground.measures.skew import skew_top10_share
+# Task 065-071's third failure class: `python corpora/036-ordering-
+# experiment.py`, run as a file the way `run_036_models.sh` actually runs
+# it, puts THIS FILE'S OWN DIRECTORY on `sys.path[0]` -- not the caller's
+# cwd, which is what every local check of this script exercised instead
+# (an explicit `sys.path.insert(0, '.')` in an ad hoc snippet, or
+# `importlib.util.spec_from_file_location`, neither of which touches
+# `sys.path[0]` the way a real `python <path>` invocation does).
+# `oneground` is never pip-installed (`pip install -r requirements.txt`
+# only), so nothing else makes it importable. Anchored to `__file__`, not
+# cwd, matching `corpora/build_fixture.py`, `corpora/export_ground_view.py`
+# and `corpora/run_chunking.py` -- the majority convention already in this
+# directory -- rather than `corpora/036-truncation-per-model.py`'s
+# `os.path.abspath(".")`, which depends on the caller's cwd and was the
+# minority, weaker form. See `tasks/finding-a-check-that-takes-a-different-
+# route-than-production.md`.
+sys.path.insert(0, os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")))
+
+from oneground.chunk.strategies import chunk_document          # noqa: E402
+from oneground.embed import embed                               # noqa: E402
+from oneground.embed.registry import resolve                    # noqa: E402
+from oneground.measures.crispness import (                      # noqa: E402
+    boundary_crispness, centroid_dists, kmeans,
+    reading as crispness_reading)
+from oneground.measures.lid import two_nn_lid                   # noqa: E402
+from oneground.measures.skew import skew_top10_share             # noqa: E402
 
 HOME = os.environ.get("ONEGROUND_ASSETS") or os.path.expanduser(
     "~/oneground-assets")
