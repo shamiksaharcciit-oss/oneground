@@ -1,0 +1,89 @@
+# Places what sessions/036-volume-inspect.yaml (task 067/068) found
+# missing, and nothing else: arxiv-150k's `sample.jsonl.zst` -- already on
+# the volume, inside `arxiv-150k-large.tgz`, unextracted -- and
+# stackexchange-150k's whole corpus, absent from the volume under every
+# layout that inspection checked, present locally at
+# `../oneground-assets/stackexchange-150k-large.tgz` and verified there
+# against `fixtures/stackexchange-150k/MANIFEST.sha256` before this spec
+# was written.
+#
+#     oneground pod plan sessions/036-place-corpora.yaml   # resolves and prices
+#     oneground pod up   sessions/036-place-corpora.yaml   # the only billable one
+#
+# A separate decision from `036-models.yaml`, on the developer's own
+# instruction: this session writes to the volume, `036-models.yaml` never
+# does, and folding placement into a retry would make a single `y` cover
+# both a bytes-provenance question and a measurement, which is two
+# decisions wearing one confirmation prompt.
+#
+# THE ONE THING THIS SESSION CANNOT BE PRICED FROM MEASUREMENT
+#
+# `input_size_cap_mb: 500` because the default (50) exists exactly to
+# refuse a session that wants to send "460 MB of vectors" without saying so
+# (`oneground/pod/session.py`'s own docstring for the field, almost
+# verbatim). Every session priced so far this project uploaded inputs
+# measured in kilobytes; this one uploads 460 MB over `scp`, from whatever
+# this machine's own upload bandwidth is -- not measured, because no prior
+# session has needed to. `caps` below is built with that uncertainty
+# stated, not hidden inside a number that looks as precise as the others.
+#
+# EVERY EXTRACTION IS VERIFIED BEFORE THIS SESSION REPORTS SUCCESS
+#
+# `corpora/run_036_place_corpora.sh` checks every file it writes against
+# the sha256 this repo's own tracked `fixtures/<corpus>/MANIFEST.sha256`
+# already declares, and refuses -- leaving the wrong file in place for
+# inspection rather than deleting it -- if any digest disagrees. A file
+# with the right name and the wrong bytes is worse than a missing one, and
+# the next `036-models.yaml` attempt would consume it silently otherwise.
+
+gpu:
+  - RTX PRO 4500
+  - RTX PRO 6000
+  - RTX 6000 Ada
+  - RTX 4090
+
+volume: vecbench                 # datacenter derived from the name
+volume_mount_path: /workspace
+
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+disk_gb: 20
+
+env:
+  ONEGROUND_ASSETS: /workspace
+
+setup: corpora/POD_SETUP.md
+run: bash corpora/run_036_place_corpora.sh
+
+input_size_cap_mb: 500
+inputs:
+  - {local: ../oneground-assets/stackexchange-150k-large.tgz,
+     remote: /workspace/stackexchange-150k-large.tgz}
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-session.log
+done_marker: DONE
+
+outputs:
+  - {remote: /workspace/oneground-session.log,
+     local: tasks/scratch/036-place-corpora-log/}
+  - {remote: /workspace/036-place-corpora-receipt.txt,
+     local: tasks/scratch/036-place-corpora-log/}
+
+# Fixed overhead (provisioning/ssh/bundle/setup) measured at ~4 min on this
+# project's other 036 sessions. The 460 MB upload and the two tar
+# extractions are the unmeasured part -- extracting and verifying the same
+# 460 MB tarball locally, on this laptop's own disk, took ~19 s, so the
+# extraction itself is not the risk; the upload over this connection's own
+# bandwidth is. 20 minutes gives real headroom for a slow upload without
+# guessing a number for something nothing has measured yet.
+stall_minutes: 20
+
+caps:
+  # ~4 min fixed overhead + the 460 MB upload (unmeasured; this is the
+  # figure `input_size_cap_mb`'s own reasoning exists for) + well under a
+  # minute of local extraction and verification once both tarballs are in
+  # place. 30 minutes is generous for a slow upload; at $0.72/hr the worst
+  # case is $0.36.
+  max_hours: 0.5
+  max_concurrent: 1
+  max_usd: 0.75
