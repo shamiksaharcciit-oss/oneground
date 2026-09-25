@@ -7,10 +7,22 @@
 #
 # It is the session to run first after any change to oneground/pod/.
 #
-# The build's inputs are both committed, which matters: the repo reaches the
-# pod as a git bundle, and a bundle carries commits, not the working tree.
-#   fixtures/arxiv-smoke.fixture.yaml        6.8 KB
-#   tasks/scratch/001-synthetic-source.json  2.7 MB  (seeded, regenerable)
+# The repo reaches the pod as a git bundle, and a bundle carries commits,
+# not the working tree -- so a build's inputs have to be either committed or
+# declared under `inputs:` below.
+#   fixtures/arxiv-smoke.fixture.yaml        6.8 KB   committed
+#   tasks/scratch/001-synthetic-source.json  2.7 MB   `inputs:` below
+#
+# Task 065's audit found this session claiming here that both were
+# committed when only the first is: `tasks/scratch/` is entirely
+# gitignored (`.gitignore`), so `001-synthetic-source.json` -- seeded,
+# regenerable from `corpora/make_synthetic_source.py`, but not itself
+# tracked -- was never in the bundle and had no `inputs:` entry either.
+# `oneground pod up sessions/smoke.yaml` would have created a pod, billed
+# for setup, and failed at the missing SOURCE the same way task 065 found
+# for 036-models.yaml -- undiscovered until now because this session has
+# not actually been re-run since `inputs:` (task 027) established the
+# pattern this fixes it with.
 
 gpu:
   # Same preference order as the canonical build. Only RTX PRO 4500 and
@@ -47,6 +59,10 @@ run: >-
 #
 # SKIP_PROJECTION is deliberately left unset: the ground-view export needs
 # projection.npy, and the run fails at that step without it.
+
+inputs:
+  - {local: tasks/scratch/001-synthetic-source.json,
+     remote: /workspace/oneground/tasks/scratch/001-synthetic-source.json}
 
 remote_repo: /workspace/oneground
 remote_log: /workspace/oneground-session.log

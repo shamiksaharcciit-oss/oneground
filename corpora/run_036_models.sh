@@ -89,14 +89,14 @@ export ONEGROUND_036_CENTROIDS=256
 export ONEGROUND_036_DEVICE=cuda
 export ONEGROUND_036_BATCH=64
 export ONEGROUND_036_CORPORA=arxiv-150k,stackexchange-150k
-python tasks/scratch/036-ordering-experiment.py
+python corpora/036-ordering-experiment.py
 
 # ------------------------------------------------------- 4. truncation too
 # Reported BESIDE the ordering, not after it: if a corpus is being measured on
 # a fraction of each record, that is a candidate explanation for where it
 # lands, and a reader has to meet the confound at the same time as the number.
 say "counting truncation per model"
-python tasks/scratch/036-truncation-per-model.py \
+python corpora/036-truncation-per-model.py \
   > "$OUT_DIR/036-truncation-full.txt" 2>&1 || true
 
 # ------------------------------------------------------------- 5. bring home
