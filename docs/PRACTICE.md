@@ -627,6 +627,54 @@ reading the patched name by accident:
 > there, so that the next person to move an ingredient can tell in one reading
 > whether they have broken a property or a count.
 
+**12. A guard that has never once permitted anything is as suspect as one
+that has never once refused.** Every warning above this one is the same
+shape: a check reports pass, and a defect is sitting under the pass. This
+is the mirror of it, found in `oneground.bridge.import_result` (task 055)
+before it shipped, not after.
+
+`assemble_table`'s job is `docs/BRIDGE.md` §4's table rule: two rows may
+share a table when their ground truth, query subset and corpus digest all
+match. The first version consulted `oneground.comparability.
+rows_may_share_a_table` for the verdict — an existing, tested function,
+reused rather than reinvented, which is usually the right instinct. That
+function also requires a second axis to agree: oneground's own code,
+libraries and platform. A row imported from a VectorDBBench result was
+never measured by oneground and carries none of that — every key on that
+axis reads `unknown` regardless of what the three keys §4 actually names
+say. The result: `rows_may_share_a_table`'s `comparable` branch is
+**unreachable for any table a bridge row is in.** `assemble_table` built
+on it would have refused every bridge table, including two rows measured
+against the identical corpus, ground truth and query subset — the exact
+case the table rule exists to allow.
+
+**Nothing here would have shown up as a bug report.** A guard that refuses
+correctly is indistinguishable, from outside, by a guard that refuses
+unconditionally, for exactly as long as nobody tries the case it should
+permit. A round-trip test that only ever checks "no exception" on a single
+row, or "an exception" on two mismatched rows, passes against both. Every
+one of the eleven warnings above this one is a check that says yes when it
+should say no; this is the inverse, and harder to catch for a specific
+reason — a check that always permits looks, to a reviewer skimming a diff,
+exactly like a check that does nothing, which invites suspicion on sight. A
+check that always refuses looks like caution, and caution reads as the
+guard doing its job.
+
+What caught it was building the case the rule is supposed to allow and
+watching it fail, before trusting the refusal case to mean the rule was
+implemented rather than merely present. The test this task shipped,
+`test_matching_bridge_rows_assemble_despite_carrying_no_measuring_facts`,
+asserts both halves in one place: that the broader function really does
+return non-`comparable` for two identical bridge rows (so the claim is
+checked, not asserted), and that `assemble_table` still succeeds despite
+it. Either assertion alone would have let the other regress silently.
+
+> The tell, ported from §7.5's pair-per-input rule one level up: **before
+> trusting a guard's refusal, build the case it must let through and watch
+> it succeed.** A guard proven only by what it stops has not been shown to
+> stop the right thing — only that it stops *something*, which a guard
+> that stops everything also does.
+
 ---
 
 ## 3. A gated commit runs in the foreground

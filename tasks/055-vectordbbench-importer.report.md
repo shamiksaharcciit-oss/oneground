@@ -9,6 +9,22 @@ and its round-trip verification done (task 051) and no importer anywhere in
 
 ## What was done
 
+**A finding about the position paper, ahead of the importer, and it
+outranks it.** `docs/BRIDGE.md` §4 was written from VectorDBBench's
+*documentation* of what a result carries, not from its source — unlike
+every other section of that paper, which the epigraph states was read from
+`vectordb-bench==2.0.0`'s source specifically. Reading §4 against the
+source the rest of the paper already used moved three of its claims: the
+composite-score exclusion was aimed at a field no per-case file has ever
+contained; "the reason and the timeout that fired" describes information
+VectorDBBench's own runner discards before it reaches disk; and two of the
+four labels §4 promised — VectorDBBench's version, the host — are not in
+the schema at all. This is the same lesson §3.2 already recorded once, for
+the zero-padded shard-file naming an earlier draft had backwards — reading
+documentation in place of source moved a claim there too — and now has a
+second instance, in the same document, about the half of the bridge that
+had not been built yet when the first one was found.
+
 **Item 1's research, first, and it changed items 3, 4 and part of item 5.**
 `vectordb-bench==2.0.0` was downloaded from PyPI (cached locally already, the
 same copy `docs/BRIDGE.md`'s own research used) and read directly —
@@ -97,6 +113,17 @@ instead reimplements only the three keys §4's own blockquote names, reusing
 primitives rather than inventing a second comparison — the three-valued
 *meaning* is not duplicated, only which keys are asked about is narrower,
 and that narrowing is what §4 actually specifies.
+
+**This finding outranks the importer it was found in, and it is recorded
+where its kind lives rather than only here.** `docs/PRACTICE.md` §2 gained
+a twelfth entry: a guard proven only by the cases it correctly refuses has
+not been shown to permit the case it should, and `rows_may_share_a_table`
+used as this table's guard would have refused every bridge table
+unconditionally — a check that always says no, reading as caution rather
+than as the defect it is, which is the mirror of every other entry on that
+page (a check that always says yes). Caught only because the case §4's
+rule is supposed to allow was built and watched succeed, not merely the
+cases it should refuse.
 
 **Path B's line, folded in as one sentence** (per developer instruction,
 kept out of a separate commit): `docs/CHUNKING.md`'s path-A/path-B table now
