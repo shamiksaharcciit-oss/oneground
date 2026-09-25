@@ -1,5 +1,5 @@
-# Task 036 step 6 at full size: is the crispness ordering of the three corpora
-# stable across embedding models?
+# Task 036 step 6 at full size: is the crispness ordering of arxiv-150k and
+# stackexchange-150k stable across embedding models?
 #
 #     oneground pod plan sessions/036-models.yaml      # resolves and prices
 #     oneground pod up   sessions/036-models.yaml      # the only billable one
@@ -7,18 +7,44 @@
 # `up` is the developer's. It prompts at a TTY and there is no flag that
 # skips it.
 #
+# TWO CORPORA, NOT THREE (task 065)
+#
+# `sec-filings-10k` is excluded. Its chunks are cut on WHITESPACE tokens
+# (`chunk_document` with no `tokenizer=` falls back to `WhitespaceTokens`),
+# not the SUBWORD tokens `max_seq_length` is stated in, so its truncation and
+# crispness numbers reflect that mismatch as much as the corpus. Fixing it
+# means chunking per model's own tokenizer, which would make the chunk set
+# -- and so the geometry crispness measures -- differ by model, breaking
+# this experiment's own invariant that every model measures identical
+# records. That is a design decision, left to a separate task rather than
+# guessed here; this session answers the pair task 065 called clean instead:
+# stackexchange-150k truncates 0% under all three models and arxiv-150k
+# truncates lightly (1.1% under bge/e5, 35.3% under MiniLM, subsample-
+# measured), so this ordering is close to truncation-free where the
+# three-corpus one was not.
+#
+# Also fixed this task: the ordering experiment (`tasks/scratch/
+# 036-ordering-experiment.py::measure`) called `boundary_crispness` directly,
+# bypassing `crispness.reading()` -- which would have reported exactly the
+# collapsed near-zero count under e5 that made a subsample-scale read of this
+# pointless (this module's own docstring), with none of task 044's
+# distribution, resolvability check, or transfer-band verdict that a
+# near-zero count needs to be read rather than misread. It now calls
+# `reading(d, with_distribution=True)`, the same call `oneground.
+# characterize` itself makes, and stores it beside the unchanged count.
+#
 # WHY A POD, WITH THE NUMBER RATHER THAN THE IMPRESSION
 #
-# The work is 332.2 million tokens: three corpora x three models, measured
+# The work is 150.58 million tokens: two corpora x three models, measured
 # exactly with each model's own tokenizer on each corpus's real text
-# (tasks/scratch/036-price-the-full-run.py, and the per-cell breakdown is in
-# 036-price.json). Not estimated from record counts -- embedding is
-# token-bound, and the three corpora differ by 4x in record length, so a
-# record-count projection would be wrong by that much.
+# (tasks/scratch/036-price-the-full-run.py; the two-corpus total is the
+# original 332.24M less sec-filings-10k's 181.66M, and the per-cell
+# breakdown for all three corpora is still in 036-price.json). Not estimated
+# from record counts -- embedding is token-bound.
 #
-#     this laptop, measured 273 tok/s      338 hours     not a laptop job
-#     RTX PRO 4500, task 031's 80,752      1.14 hours    the figure priced here
-#     RTX PRO 4500, task 030's 99,774      0.92 hours
+#     this laptop, measured 273 tok/s      153 hours     not a laptop job
+#     RTX PRO 4500, task 031's 80,752      0.52 hours    the figure priced here
+#     RTX PRO 4500, task 030's 99,774      0.42 hours
 #
 # Both pod rates are this project's own measurements on this card: task 031
 # embedded at 196-203 chunks/s with a 412-token median, task 030 embedded
@@ -51,7 +77,7 @@ volume_mount_path: /workspace
 
 image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
 
-# The three corpora come off the volume and are not counted here. What this
+# The two corpora come off the volume and are not counted here. What this
 # run materialises is vectors: at full size the largest single cell is
 # ~150,000 x 768 float32 (~460 MB), one at a time, and only the measures are
 # kept. The receipts are JSON.
@@ -69,6 +95,26 @@ remote_repo: /workspace/oneground
 remote_log: /workspace/oneground-session.log
 done_marker: DONE
 
+# Task 065. `corpora/run_036_models.sh` runs two scripts under
+# `tasks/scratch/`, and `tasks/scratch/` is entirely gitignored -- the repo
+# reaches the pod as a git bundle, which "carries commits, not the working
+# tree" (`oneground/pod/session.py`'s own `Input` docstring, which records a
+# prior session, 20260909-195824, that spent four minutes of pod time
+# discovering exactly this for `runs/`). Without these, `up` would create a
+# pod, clone a bundle with no `tasks/scratch/036-ordering-experiment.py` in
+# it, and fail at that `python` call having spent the setup time for
+# nothing -- a second, independent way this session could have been a
+# wasted one, found by checking what `run:` actually invokes rather than
+# only what the run measures.
+inputs:
+  - {local: tasks/scratch/036-ordering-experiment.py,
+     remote: /workspace/oneground/tasks/scratch/036-ordering-experiment.py}
+  - {local: tasks/scratch/036-truncation-per-model.py,
+     remote: /workspace/oneground/tasks/scratch/036-truncation-per-model.py}
+  - {local: tasks/scratch/036-price.json,
+     remote: /workspace/oneground/tasks/scratch/036-price.json,
+     optional: true}
+
 outputs:
   # The log first, so a run stopped at the cap still comes home with every
   # cell it completed -- the experiment writes its results file after each
@@ -77,23 +123,26 @@ outputs:
      local: tasks/scratch/036-session-log/}
   - {remote: /workspace/036-models.tgz, local: ./, extract: true}
 
-# Nine embedding cells, three of them long. The quiet stretches are inside a
-# cell, and the longest at the priced rate is the filings corpus under
-# bge-base at ~72M tokens, roughly fifteen minutes.
-stall_minutes: 25
+# Six embedding cells (task 065: two corpora, not three). The quiet
+# stretches are inside a cell, and the longest at the priced rate is
+# arxiv-150k under bge-base or e5 at ~34.2M tokens, roughly seven minutes.
+stall_minutes: 15
 
 caps:
-  # Built from measured parts, conservative rate throughout:
+  # Built from measured parts, conservative rate throughout (task 065
+  # re-prices the original two-corpora-fewer estimate; see the comment
+  # block at the top of this file for why sec-filings-10k is out):
   #   ~10 min  image, deps, and three model downloads into HF_HOME
-  #   ~5 min   reading the three corpora off the volume and chunking filings
-  #   ~70 min  332.2M tokens at 80,752 tok/s
-  #   ~25 min  nine k-means (256 centroids) plus LID and crispness
-  #   ~5 min   truncation counts, tar, fetch
-  #   = ~2 h. Three hours is the headroom for a slower card that still
+  #   ~3 min   reading the two corpora off the volume
+  #   ~31 min  150.58M tokens at 80,752 tok/s
+  #   ~17 min  six k-means (256 centroids) plus LID, crispness and its
+  #            reading(), and skew
+  #   ~4 min   truncation counts, tar, fetch
+  #   = ~65 min. Two hours is the headroom for a slower card that still
   #   cleared the probe's 40% floor.
   #
-  # Three hours at $0.72/hr -- the rate the other sessions were billed at,
-  # not the $0.34 floor -- is $2.16.
-  max_hours: 3.0
+  # Two hours at $0.72/hr -- the rate the other sessions were billed at,
+  # not the $0.34 floor -- is $1.44.
+  max_hours: 2.0
   max_concurrent: 1
-  max_usd: 4.00
+  max_usd: 3.00

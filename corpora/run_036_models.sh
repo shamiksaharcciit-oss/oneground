@@ -20,11 +20,19 @@ say() { echo "[$(date -u +%H:%M:%S)] $*"; }
 # ---------------------------------------------------------------- 1. inputs
 # Before the model is loaded or a token is counted. A missing corpus should
 # cost four minutes and name the path, not surface after the first embed.
+#
+# `sec-filings-10k` is not read this session (task 065): its chunking
+# (`texts_filings` in the ordering experiment) cuts on WHITESPACE tokens,
+# not the subword tokens `max_seq_length` is stated in, so its truncation
+# and crispness numbers are entangled with that mismatch rather than being
+# a clean read on the corpus. Re-chunking it correctly would chunk
+# differently per model's own tokenizer, which breaks this experiment's own
+# invariant that every model measures identical records -- a design
+# decision left for a separate task, not guessed here.
 say "checking inputs under $ASSETS"
 for f in \
   "$ASSETS/arxiv-150k/sample.jsonl.zst" \
-  "$ASSETS/stackexchange-150k/sample.jsonl.zst" \
-  "$ASSETS/sec-filings-10k/documents.jsonl.zst"
+  "$ASSETS/stackexchange-150k/sample.jsonl.zst"
 do
   if [ ! -f "$f" ]; then
     echo "MISSING INPUT: $f" >&2
@@ -57,7 +65,10 @@ rate = len(texts) * tok / dt
 print("  probe: %d texts x %d tokens in %.1f s -> %.0f tokens/s"
       % (len(texts), tok, dt, rate))
 print("  priced at %.0f tokens/s; this card is %.2fx that" % (PRICED, rate / PRICED))
-hours = 332.2e6 / rate / 3600
+# Task 065: 150.58M, not the original 332.2M -- sec-filings-10k (181.66M of
+# the original total) is excluded this session. See the input-check comment
+# above and tasks/065-*.report.md for why.
+hours = 150.58e6 / rate / 3600
 print("  implied embedding time for the whole run: %.2f hours" % hours)
 if rate < PRICED * 0.4:
     raise SystemExit(
@@ -77,6 +88,7 @@ export ONEGROUND_036_N=0
 export ONEGROUND_036_CENTROIDS=256
 export ONEGROUND_036_DEVICE=cuda
 export ONEGROUND_036_BATCH=64
+export ONEGROUND_036_CORPORA=arxiv-150k,stackexchange-150k
 python tasks/scratch/036-ordering-experiment.py
 
 # ------------------------------------------------------- 4. truncation too
