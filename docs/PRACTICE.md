@@ -735,6 +735,58 @@ narrowing it to the type the comment actually describes is what makes the
 comment checkable** — by the interpreter, on every run, rather than by a
 reader's trust in prose beside a `pass`.
 
+**14. A check's scope can be correct by omission, for as long as nothing
+exists to expose the gap.** `oneground/proposals/test_propose.py` had a
+test, since task 028: every `.py` file in `oneground/proposals/` scanned
+for a network import or a model-shaped word, asserting the whole package
+carried neither. Its own docstring named exactly what it was for: *"An
+HTTP import or a prompt string here would mean tier 2 had started without
+anyone deciding to."*
+
+**It was right for years, and its reason was subtly wrong the whole
+time.** The test conflated two things that happened to coincide for as
+long as tier 2 did not exist: *the proposals package* and *tier 1*. Every
+file in the package was a tier-1 file, so "scan the package" and "scan
+tier 1" picked out the same files and could not be told apart. Task 059
+built tier 2 — `translate.py`, on explicit, deliberate instruction — as a
+file *in the same package*, and the test fired: correctly, on the letter
+of what it scanned, and wrongly, on the intent its own docstring stated,
+because tier 2 arriving was the thing that had been decided, not the
+thing the test existed to catch.
+
+**The same conflation, one level up, in the same session.** A stock-take
+answered "is proposals tier 2 settled" by citing `docs/PROPOSALS.md`
+§2.1's ruling on **path 2** (which model translates a proposal) — correct
+about path 2, and not an answer about **tier 2** (the CHARTER.md triage
+backlog item), a different axis the same document keeps apart in its own
+next section (`docs/PRACTICE.md`'s own §2 entry above, "An orchestrator's
+version of the same failure"). Two instances of one confusion — tier
+versus path — one in a test's scope, one in an answer given about that
+test's own subject, days apart, neither aware of the other when it
+happened.
+
+**Why rescoping beat silencing.** Deleting the test, or excluding
+`translate.py` with no comment, would have made the failure go away
+without recording what it had been asserting by accident. The test is
+still real and still runs: renamed to name what it actually protects
+(`test_tier_1_has_no_model_no_api_call_and_no_prompt`), scoped to exclude
+exactly the two files that are deliberately not tier 1, with a comment
+stating why and naming `translate.py`'s own test file as the thing that
+now guards it. Every other file in the package is still scanned,
+unchanged — the check that was right by accident is now right on
+purpose, for a narrower and correctly-named reason.
+
+> The tell: **when a check's scope is "everything in this directory" or
+> "everything in this package," ask what would have to be added for that
+> scope to stop meaning what the check's docstring says it means.** A
+> scope defined by enumeration (every file, here) and a scope defined by
+> intent (tier 1, here) are the same set for exactly as long as nothing
+> arrives that is in one and not the other — and a check passing every
+> day gives no signal that the day is coming. The conflation is invisible
+> until the axis it blurred gets something new on it, which is what
+> makes it worth stating as a category rather than filing this as one
+> fixed test.
+
 ---
 
 ## 3. A gated commit runs in the foreground
