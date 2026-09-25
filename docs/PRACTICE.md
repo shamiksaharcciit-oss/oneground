@@ -1047,6 +1047,54 @@ meaning for `default`. **A key that nearly fits is the dangerous kind**: the
 name is right, the type is right, the values line up in most rows, and the one
 row where the two meanings diverge is the row nobody checks.
 
+**A fourth instance, and the sharpest form the tell has taken.** A
+state-of-the-product inventory read `report.json`'s two environment
+blocks — `environment` (what the verdict is about) and
+`run_environment` (the machine that wrote the report) — and reported
+that no `report.json` had ever been produced from a pod-origin chain.
+False: `runs/arxiv-150k-via-characterize/report.json`'s `environment`
+names a real pod (`environment_id: 1ombs4scr257a5`, `verify_target:
+runpod`); its `run_environment` is `local:windows-amd64`, because
+`report` itself always executes locally, everywhere, including there.
+The inventory read the second field for the first.
+
+**Both fields were true. Both were written correctly, by the code this
+very section's original instance exists because someone got wrong.**
+There was no stale value to catch, no missing key, no schema violation
+— `environment` said pod, `run_environment` said local, and each was
+exactly right about what it names. The defect was entirely in which
+field answered the question being asked, which is a fact about the
+*reading*, not the *record*, and it is why no check anywhere in this
+codebase could have caught it: every check this section's family has
+produced (`FACT_CARRIERS`, `fields.REQUIRED`) declares which field a
+*writer* must use. None of them declares which field a *question*
+should be read from, because that binding is made fresh, silently, by
+whoever is reading, every time — the same gap `docs/PRACTICE.md`'s
+orchestrator entry above names for a document instead of a receipt.
+
+**What made the correction land.** Not a check catching it — asked
+directly, the same person who caused the third instance re-read the
+artifact the claim was about and found the value that contradicted it.
+What made the *correction* worth having was refusing to also amplify
+the framing that prompted the re-read: told to state a related claim
+more plainly because it looked like "the single largest gap," the
+answer was to check that claim first and correct it instead, once it
+did not hold. A report that had restated the sentence it was handed
+would have published a second, larger false claim about the same
+product, in the same document, in the same sitting — the failure this
+whole section is about, compounding rather than caught.
+
+> The tell, one level past the others in this section: **two correctly
+> named, correctly written fields can still be misread as each other,
+> and nothing about either field's correctness will show you that they
+> were.** The check that would catch this is not a check on the
+> record — it is the discipline of naming, before reading either field,
+> which question is actually being asked: *what does the verdict
+> concern*, or *what machine produced this artifact*. They are
+> different questions with the same shape, sitting three lines apart,
+> and the field that answers the one you meant to ask is not always the
+> field your eye lands on first.
+
 ### An orchestrator's version of the same failure
 
 Everything above is a tool answering an adjacent question. The same shape
