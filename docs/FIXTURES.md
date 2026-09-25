@@ -425,6 +425,28 @@ the published corpora. Measured on the full fixtures:
 | crispness 1.20 | 89.25, 96.37, 98.83 | **89.25 – 98.83** |
 | ambiguity 1.10 | 65.44, 89.28, 90.87 | **65.44 – 90.87** |
 
+**The band's own anchor does not reliably sit inside it.** Task 073
+re-embedded `bge-base-en-v1.5` -- the model these percentiles were
+published under -- in a different environment (a RunPod GPU pod, not the
+machine the publish run used), on the full `stackexchange-150k` corpus,
+and read the crispness threshold at the 99.19th percentile: outside the
+band's own upper edge, which `stackexchange-150k`'s own published value
+(98.83) set. The gap is 0.36 percentile points, not zero and not large --
+close enough that it is plausibly the reproduction gap `corpora/
+036-ordering-experiment.py`'s own docstring already names (the stored
+anchor's vectors reproduce here only to cosine 0.9969 against a fresh
+re-embedding), showing up as a real consequence rather than staying an
+abstract caveat. **This was found by cross-checking a different result
+against the band, not by testing the band itself** -- nobody set out to
+re-measure an anchor's own calibration. It does not change what the band
+is for: a reading is still weighed against corpora whose values are
+frozen at publish time, and a small drift in a fresh re-embedding of the
+same model is a different question from whether the band discriminates a
+genuinely different embedding. But it is the first direct evidence that
+the band's own edges are not perfectly reproducible even by the model
+that set them, which is worth knowing before reading a reading that sits
+close to either edge.
+
 Two things follow, both measured in task 044b.
 
 **A smoke fixture cannot calibrate a measure.** `arxiv-smoke` places the

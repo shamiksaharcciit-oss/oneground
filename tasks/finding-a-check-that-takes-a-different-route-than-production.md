@@ -1,14 +1,22 @@
 # Finding — a check that takes a different route than production is a check of a different program
 
-*Prompted by three real pod-run failures against `sessions/036-models.
+*Prompted by four real pod-run failures against `sessions/036-models.
 yaml`, in order: a corpus absent from the volume at the path the run
 expects (tasks 065/068), a bare `python` resolving to the pod's system
 interpreter because the venv was never activated for the run's own launch
-(tasks 070/071), and `python corpora/036-ordering-experiment.py`, run as
-a file the way the pod actually runs it, unable to import `oneground` at
-all (this task). All three were "prepared" first: priced with `oneground
-pod plan`, verified locally, reported as ready. All three were wrong in a
-way nothing local caught, and all three were wrong for the same reason.*
+(tasks 070/071), `python corpora/036-ordering-experiment.py`, run as a
+file the way the pod actually runs it, unable to import `oneground` at
+all (task 072), and `corpora/036-render-ordering.py` silently reading a
+stale local truncation file after the real one (task 073). Each was
+"prepared" first: priced with `oneground pod plan`, verified locally,
+reported as ready. Each was wrong in a way nothing local caught, and each
+was wrong for the same reason. Four instances found across a single
+night's sequence of real pod runs against one session; a fifth is this
+project's own earlier discovery, in the same sequence, that `tasks/
+scratch/` files never reach a pod through the git bundle a local check
+never exercises (tasks 065-066) -- the same shape, met first on the
+input side before it was met again, twice more, on the way code runs and
+once more on the way a result is read back.*
 
 ## The claim
 
@@ -18,7 +26,7 @@ check of a different one.** The two programs can share every line of
 source and still diverge, because what a script does depends on more than
 its text: on the interpreter that runs it, on the working directory it
 runs from, on whether it is invoked as a file or fed a module by another
-mechanism entirely. Each of the three failures below passed every local
+mechanism entirely. Each of the four failures below passed every local
 check because the local check took a route that quietly supplied
 something production does not.
 
@@ -41,7 +49,7 @@ something production does not.
    check ever ran a bare `python` the way the pod's own launch does,
    because every local invocation named the interpreter.
 
-3. **This task.** Every local check of `corpora/036-ordering-
+3. **Task 072.** Every local check of `corpora/036-ordering-
    experiment.py` either inserted the repo root onto `sys.path` explicitly
    in an ad hoc snippet, or loaded the file with
    `importlib.util.spec_from_file_location`, which does not touch
@@ -64,9 +72,29 @@ something production does not.
    only one of them is what `run_036_models.sh` actually does at that
    line.
 
+4. **Task 073.** `corpora/036-truncation-per-model.py` wrote its result
+   to `tasks/scratch/036-truncation-results.json` -- a path outside
+   `run_036_models.sh`'s own `$OUT_DIR`, so `tar -czf ... -C /workspace
+   036-models` never packed it and the fetch never brought it home.
+   `corpora/036-render-ordering.py` reads that same path by default with
+   no signal that the file it opens might not be the one a given session
+   wrote: it read a real file, that a real earlier local run had written,
+   at exactly the path its own default names. The read was correct. The
+   file was not this run's. A local check of the render tool -- point it
+   at a results file, see a table -- could not have told the difference,
+   because both routes (a fresh fetch, and a leftover local file from
+   unrelated earlier work) produce the identical shape of success. Fixed
+   by giving the writer an overridable output path
+   (`ONEGROUND_036_TRUNC_OUT`) that `run_036_models.sh` now points into
+   `$OUT_DIR` -- so the file the fetch carries and the file a fresh run
+   produces are the same file, not two files at the same default name --
+   and giving the reader the same override, so pointing it at a specific
+   fetch is one env var rather than a bet on whichever copy happens to be
+   on disk.
+
 ## What this is not
 
-**Not a claim that any of the three individual fixes was wrong.** Each
+**Not a claim that any of the four individual fixes was wrong.** Each
 was diagnosed correctly and each fix was verified as well as it could be
 at the time. The finding is about what "verified" was allowed to mean
 going in: a check that never takes production's own route cannot
@@ -114,6 +142,14 @@ empty directory. Both now get past every `oneground.*` import and fail
 at the same controlled, expected point a missing corpus produces --
 proving the import fix by reaching class 1's own failure mode cheaply
 and safely, exactly as this finding's route argument predicts it should.
+
+The fourth instance was fixed the same way as the first three: not by
+correcting the read, but by making the write land where the read already
+looks. `corpora/036-truncation-per-model.py` gained an overridable output
+path (`ONEGROUND_036_TRUNC_OUT`), `run_036_models.sh` now points it at
+`$OUT_DIR` so the packaged tarball carries the fresh file, and `corpora/
+036-render-ordering.py` gained the matching override so a specific
+fetch's own copy can be named rather than assumed.
 
 ## What is not decided here
 

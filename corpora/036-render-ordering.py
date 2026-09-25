@@ -21,7 +21,13 @@ import sys
 
 RESULTS = os.environ.get("ONEGROUND_036_OUT",
                          "tasks/scratch/036-ordering-results.json")
-TRUNC = "tasks/scratch/036-truncation-results.json"
+# Overridable the same way RESULTS is (task 073): the default here was
+# never the file a fetched session's own results carry -- the fix on the
+# writing side (corpora/run_036_models.sh's ONEGROUND_036_TRUNC_OUT) means
+# a fetch now places a fresh copy beside the ordering results themselves,
+# so pointing this at that path is one env var, not a silent stale read.
+TRUNC = os.environ.get("ONEGROUND_036_TRUNC_OUT",
+                       "tasks/scratch/036-truncation-results.json")
 PUBLISHED = {"sec-filings-10k": 0.107347, "arxiv-150k": 0.036273,
              "stackexchange-150k": 0.0115}
 # A truncation rate this far above the lowest makes a model a "truncating"

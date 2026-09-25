@@ -40,7 +40,15 @@ spec = importlib.util.spec_from_file_location(
 ordering = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ordering)
 
-OUT = "tasks/scratch/036-truncation-results.json"
+# Overridable the same way `036-ordering-experiment.py`'s own `OUT` is
+# (`ONEGROUND_036_OUT`). Task 073's own report: the hardcoded default sat
+# outside `run_036_models.sh`'s packaged `$OUT_DIR`, so the fresh file
+# never reached the fetch and a later local read of this path silently
+# returned a stale copy from earlier, unrelated local work -- production
+# wrote one file, the read found another, and both were real files at
+# real paths.
+OUT = os.environ.get("ONEGROUND_036_TRUNC_OUT",
+                     "tasks/scratch/036-truncation-results.json")
 
 results = {}
 texts_by_corpus = {}
