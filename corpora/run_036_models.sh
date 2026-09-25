@@ -115,7 +115,16 @@ python corpora/036-ordering-experiment.py
 # Reported BESIDE the ordering, not after it: if a corpus is being measured on
 # a fraction of each record, that is a candidate explanation for where it
 # lands, and a reader has to meet the confound at the same time as the number.
+#
+# ONEGROUND_036_TRUNC_OUT routes the JSON receipt into $OUT_DIR directly,
+# not the scratch default. Task 073 found the default path never reached
+# a fetch, and a local read of it after the fact silently returned a
+# stale copy from earlier, unrelated local work -- see tasks/finding-a-
+# check-that-takes-a-different-route-than-production.md's own evidence
+# for why the fix is "write it where the fetch already looks," not a
+# second read-time correction.
 say "counting truncation per model"
+export ONEGROUND_036_TRUNC_OUT="$OUT_DIR/036-truncation-results.json"
 python corpora/036-truncation-per-model.py \
   > "$OUT_DIR/036-truncation-full.txt" 2>&1 || true
 

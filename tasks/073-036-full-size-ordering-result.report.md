@@ -156,20 +156,22 @@ not a demonstration the number is wrong -- but also not a demonstration
 it means the same thing a same-sized in-band count would. The ordering
 holding under e5 is evidence the *direction* transfers; it is not evidence
 that e5's *crispness value* can be read the way arxiv's 96th-percentile
-bge reading can.
+bge reading can. Say plainly what this is: `transfer` (task 044) has
+existed since before this project had a real out-of-band reading to test
+it against -- every prior exercise of it was either in-band or synthetic.
+Both e5 cells landing outside the calibrated band, on a real full-scale
+embedding, is the first time this machinery has been asked the question
+it was built to answer, for real, and it answered exactly as designed:
+not a refusal, not a silent number, but a count with its own percentile
+stated and an explicit warning that it is being read somewhere the
+measure has never been calibrated.
 
-One thing worth naming rather than smoothing over: bge-base-en-v1.5's own
-reading of `stackexchange-150k` in this environment (0.0078, threshold at
-the 99.19th percentile) reads OUTSIDE the same published band its own
-publish-time reading (0.0115, 98.83rd percentile -- the band's own upper
-edge) defined. This is not a contradiction the ordering result depends on
--- the ordering compares within this run's own consistent environment,
-not against the published bge value -- but it is the anchor-reproduction
-gap `036-ordering-experiment.py`'s own docstring already names (cosine
-0.9969 against the stored anchor) showing up as a real, if narrow,
-consequence: even the reference model's own re-embedding does not
-reproduce its published value closely enough to stay inside the band that
-value itself set one edge of.
+The observation that `bge-base-en-v1.5`'s own re-embedding of
+`stackexchange-150k` reads narrowly outside the same published band its
+own value helped define is not a cross-check footnote to this run -- it
+is a finding about the instrument, and it now lives beside the band's own
+definition in `docs/FIXTURES.md`, where the next person reading that band
+will meet it, rather than here.
 
 ## Measurements
 
