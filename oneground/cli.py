@@ -18,6 +18,12 @@
     oneground fixture verify <id>                check a fixture's digests
     oneground fixture build --spec ... --source ...
     oneground pod <plan|up|status|fetch|down|watch|ls>
+    oneground library check-card <card.json>     validate, never submit
+                                                 (docs/LIBRARY.md §2)
+    oneground bridge export <requirements.yaml> --query-subset-seed ...
+                                                 write VectorDBBench's files
+    oneground bridge import <result.json>        read one back, raw numbers
+                                                 only (docs/BRIDGE.md)
 
 `fixture`, `calibrate` and `pod` are delegated rather than reimplemented. Each
 has its own parser and its own tests, and `pod` has its own money boundary:
@@ -73,6 +79,16 @@ UNGUARDED = {
         "prints per-check results. It writes no file and reads no fixture: "
         "what it checks is the protocol's contract, not any published value "
         "(task 042, docs/FAMILIES.md)"),
+    "oneground library check-card": (
+        "validates a card in memory against docs/LIBRARY.md §2's required "
+        "shape and prints accept or refuse. Writes no file, submits "
+        "nothing anywhere -- the transport is unsettled by the paper "
+        "itself (§6), and this command does not decide it (task 064)"),
+    "oneground bridge import": (
+        "reads a VectorDBBench result file a user's own run already "
+        "produced and prints its per-case raw numbers. Writes no file, "
+        "runs nothing, measures nothing itself (docs/BRIDGE.md §5, "
+        "task 064)"),
 }
 
 
@@ -87,8 +103,12 @@ def dispatchable_commands():
     names.discard("oneground fixture")
     names.discard("oneground calibrate")
     names.discard("oneground pod")
+    names.discard("oneground library")
+    names.discard("oneground bridge")
     names |= {f"oneground fixture {a}" for a in _fixture_actions()}
     names |= {f"oneground calibrate {a}" for a in _calibrate_actions()}
+    names |= {f"oneground library {a}" for a in _library_actions()}
+    names |= {f"oneground bridge {a}" for a in _bridge_actions()}
     names.add("oneground pod")            # one money boundary, one entry
     names.add("oneground propose translate")   # its own parser, dispatched
                                                 # before `propose`'s
@@ -114,6 +134,16 @@ def _fixture_actions():
 def _calibrate_actions():
     from .calibrate import build_parser as calibrate_parser
     return _choices(calibrate_parser(), "action")
+
+
+def _library_actions():
+    from .library.cli import build_parser as library_parser
+    return _choices(library_parser(), "action")
+
+
+def _bridge_actions():
+    from .bridge.cli import build_parser as bridge_parser
+    return _choices(bridge_parser(), "action")
 
 
 @envmod.guarded("oneground characterize")
@@ -491,6 +521,22 @@ def _cmd_adapters(argv):
     return coverage_main(argv)
 
 
+def _cmd_library(argv):
+    """`oneground library check-card` -- validation only, docs/LIBRARY.md
+    §7's sequencing made reachable. See `oneground/library/cli.py`."""
+    from .library.cli import main as library_main
+    return library_main(argv)
+
+
+def _cmd_bridge(argv):
+    """`oneground bridge export`/`import` -- docs/BRIDGE.md §7's own
+    stated lean ("probably... its own command") made reachable. See
+    `oneground/bridge/cli.py`, which guards `export` itself (it writes
+    real files) the same way `_cmd_fixture` guards its own actions."""
+    from .bridge.cli import main as bridge_main
+    return bridge_main(argv)
+
+
 def _cmd_models(argv):
     """`oneground models conformance` -- the family contribution gate."""
     from .models.conformance import main as conformance_main
@@ -669,6 +715,14 @@ def build_parser():
     sub.add_parser("models",
                    help="run the family conformance suite",
                    add_help=False)
+    sub.add_parser("library",
+                   help="validate a card against the public library's "
+                        "required shape; submits nothing",
+                   add_help=False)
+    sub.add_parser("bridge",
+                   help="export a workdir for VectorDBBench, or import "
+                        "its result -- docs/BRIDGE.md",
+                   add_help=False)
     return ap
 
 
@@ -728,6 +782,10 @@ def _dispatch(argv):
         return _cmd_adapters(argv[1:])
     if argv and argv[0] == "models":
         return _cmd_models(argv[1:])
+    if argv and argv[0] == "library":
+        return _cmd_library(argv[1:])
+    if argv and argv[0] == "bridge":
+        return _cmd_bridge(argv[1:])
 
     args, rest = build_parser().parse_known_args(argv)
     if args.command == "characterize":

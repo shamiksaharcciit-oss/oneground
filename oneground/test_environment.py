@@ -217,6 +217,9 @@ GUARDS_ON_USE = {
     # one ever sees it, the same reason `fixture verify`/`fixture build`
     # are here rather than decorated.
     "oneground propose translate",
+    # `bridge export` writes real files (train/test/neighbors.parquet,
+    # the card); guarded manually, the same reason `fixture build` is.
+    "oneground bridge export",
 }
 
 

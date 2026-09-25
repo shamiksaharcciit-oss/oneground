@@ -298,6 +298,78 @@ def test_engine_facts_are_labelled_declared_synthetic():
         assert info["kind"]["verify_info.json"] == "declared"
 
 
+# ------------------------------------------------------- multi-node wiring
+# docs/MULTI_NODE.md §6: "a declared list of endpoints in the requirements
+# file rather than one." These check the wiring, not the measurement --
+# `test_load_multi_node.py::test_per_node_fan_out_against_a_real_three_node_
+# cluster` is where a genuine fan-out is measured, against a real cluster.
+def test_no_node_endpoints_declared_means_no_load_per_node_key():
+    with tempfile.TemporaryDirectory() as tmp:
+        req = _prepared(tmp)
+        wd, _ = _capture(verify.run, req, log_fn=_quiet)
+        d = _block(json.load(open(os.path.join(wd, "verify.json"),
+                                  encoding="utf-8")))
+        assert "load_per_node" not in d, d
+
+
+def test_fewer_than_two_node_endpoints_is_couldnt_check_not_a_guess():
+    with tempfile.TemporaryDirectory() as tmp:
+        req = _prepared(tmp, verify_block={
+            "kind": "declared", "target": "local", "engine": "stub",
+            "endpoint": "memory://", "ks": [10],
+            "engine_params": {"m": 32, "hnsw_ef": 128},
+            "node_endpoints": ["memory://only-one"]})
+        wd, _ = _capture(verify.run, req, log_fn=_quiet)
+        d = _block(json.load(open(os.path.join(wd, "verify.json"),
+                                  encoding="utf-8")))
+        assert d["load_per_node"]["outcome"] == "couldnt_check", d
+        assert d["load_per_node"]["nodes"] == []
+
+
+def test_two_or_more_node_endpoints_reach_run_load_per_node():
+    """Proves the wiring, not the measurement: a fresh stub instance per
+    node starts with an empty namespace (`StubEngine.__init__`), so every
+    search against it fails -- the same gap `docs/MULTI_NODE.md` §4.2
+    describes for a namespace that is not actually shared cluster state,
+    which this function "does not check and cannot" (`run_load_per_node`'s
+    own docstring).
+
+    This was expected to surface as a raised error and did not: `run_load`
+    (`oneground/verify/load.py` line 270) catches every per-request
+    exception and counts it as `errors`, by design, so a load run
+    degrades under real transient failures instead of aborting. Wiring
+    this in surfaces what that means for fan-out specifically and the
+    unit tests for `run_load_per_node` alone did not, because they only
+    ever exercise it against a real, shared cluster
+    (`test_load_multi_node.py`): a node whose namespace was never
+    replicated reports `outcome: measured`, `error_rate: 1.0`,
+    `achieved_qps: 0.0` -- the identical shape a genuinely healthy-but-
+    saturated node would report at concurrency high enough to time
+    everything out. Nothing in the row says "this node never had the
+    data" versus "this node is failing under load"; a reader has to
+    already know the deployment replicated the namespace to tell them
+    apart. That asymmetry is worth a finding of its own, not a fix
+    invented here: MULTI_NODE.md never promises the two are
+    distinguishable, and inventing a distinguishing signal is exactly the
+    kind of guess this task's brief says to report instead of build.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        req = _prepared(tmp, verify_block={
+            "kind": "declared", "target": "local", "engine": "stub",
+            "endpoint": "memory://", "ks": [10],
+            "engine_params": {"m": 32, "hnsw_ef": 128},
+            "node_endpoints": ["memory://a", "memory://b"]})
+        wd, _ = _capture(verify.run, req, log_fn=_quiet)
+        d = _block(json.load(open(os.path.join(wd, "verify.json"),
+                                  encoding="utf-8")))
+        lpn = d["load_per_node"]
+        assert lpn["outcome"] == "measured", lpn
+        assert len(lpn["nodes"]) == 2, lpn
+        for node in lpn["nodes"]:
+            assert node["error_rate"] == 1.0, node
+            assert node["achieved_qps"] == 0.0, node
+
+
 def test_calibration_error_is_simulated_minus_measured_synthetic():
     with tempfile.TemporaryDirectory() as tmp:
         req = _prepared(tmp)
