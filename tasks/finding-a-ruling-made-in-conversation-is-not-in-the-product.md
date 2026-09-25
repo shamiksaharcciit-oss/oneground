@@ -63,6 +63,35 @@ written down before treating the description as the design. A precise
 memory and a checked-in document produce identical-sounding summaries; only
 one of them survives being asked "show me."
 
+## A narrower instance of the same shape, found researching this one
+
+`oneground/verify/compose/qdrant.yml`'s own comment: *"Single node. Verify
+measures latency shape on one node in this task; cluster shapes are task
+011 on a pod."* Checked: `tasks/011-cloud-verify-cost.md` and its report
+built the `runpod` verify target, the load generator and the cost model
+(`nodes × node_price × hours/month` — a capacity estimate, not a
+measurement of a running cluster). It never built cluster verification.
+The comment has pointed at a task that does not close its own gap since
+the file was written, uncorrected.
+
+This is the same general shape one size down: not a whole brief that never
+reached the tree, but a comment *citing* one that, when checked, turns out
+not to have done the thing cited. **The general form: a comment citing a
+task number is a claim nobody verifies**, and it is cheaper to write than
+the work it cites, which is exactly why it survives — nothing about
+writing "task 011" costs more than writing nothing, and nothing checks
+that task 011 actually settled what the comment says it settled.
+
+Two instances of this shape are recorded here, both found in this same
+research pass. A third was not independently found — searched for in
+`docs/PRACTICE.md` and the other `tasks/finding-*.md` files by the same
+method used to verify this file's own count elsewhere, and nothing else
+matched the pattern closely enough to cite as a third without the same
+verification this whole finding insists on. If a third instance is known,
+it belongs here by name; absent that, this file records two, not three,
+because a count stated on trust is the same failure this finding exists to
+name.
+
 ## What is not decided here
 
 Whether "multi-node" should be designed at all, and if so what it means

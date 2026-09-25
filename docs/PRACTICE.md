@@ -675,6 +675,66 @@ it. Either assertion alone would have let the other regress silently.
 > stop the right thing — only that it stops *something*, which a guard
 > that stops everything also does.
 
+**13. An exception handler with an explanatory comment is a claim about
+which failure it is catching, and nothing checks that claim.** The
+coverage-claim family (warnings 1–12 above are all some version of it)
+arriving inside a `try` block, and a worse case than the others: the
+comment does not merely fail to state the gap, it actively reassures a
+reader that the gap is understood and narrow.
+
+**The instance.** `oneground/adapters/qdrant/adapter.py::describe()`
+(task 056, found while researching task 037):
+
+```python
+try:
+    cluster = _model_dump(c.get_collection_cluster_info(collection_name=ns))
+    ...
+except Exception:                             # noqa: BLE001
+    pass          # single-node deployments may not expose cluster info
+```
+
+The pinned client, `qdrant-client==1.19.0`, has no method named
+`get_collection_cluster_info` — it is `collection_cluster_info`, no `get_`
+prefix. Every call raised `AttributeError`, caught by the bare `except`,
+silently, since the repository's first commit. `EngineFacts.nodes`
+returned `None` unconditionally, on every topology this adapter has ever
+described — single-node included, checked directly: a genuinely
+non-clustered instance answers the *correctly*-named call without
+complaint, reporting one local shard and no remote ones. **The comment
+was never true of the failure it was written beside.** It describes a
+real, narrow case — some server or version genuinely not exposing the
+endpoint — that this code has never once hit, because a different,
+unconditional failure was hitting the same line first every time.
+
+**Why this is worse than a check that passes wrongly.** Every warning
+above this one involves a claim a reader could in principle doubt: a
+green check, a coverage percentage, a guard's silence. A comment beside an
+`except` does not read as a claim to verify — it reads as the verification
+already done, on the author's authority, at the moment of writing. A
+reader deciding whether to trust `nodes: None` has nothing to weigh it
+against: the code offers no green light to distrust, only an absence and
+a sentence explaining the absence as expected. The sentence is the whole
+of what stood between this bug and three months of silence.
+
+> The tell: **when a broad `except` carries a comment naming the case it
+> is for, ask whether anything has ever tested that the exception you get
+> in that case is the exception the comment names.** If the narrow case
+> and the broad `except Exception` were never told apart — by exception
+> type, by a message pattern, by anything — the comment is a description
+> of intent, not of behaviour, and intent does not run.
+
+**The repair.** Narrow the `except` to the specific exception the engine's
+own client raises when it genuinely declines a request —
+`qdrant_client.http.exceptions.UnexpectedResponse` here, confirmed by
+reading the client's exception hierarchy rather than assumed — so that a
+programming error under the same line (a typo'd method name, an import
+that fails, an attribute that moved) surfaces instead of being caught by
+a comment written for a different failure. The general form: **a broad
+`except` is a coverage claim over every exception type at once, and
+narrowing it to the type the comment actually describes is what makes the
+comment checkable** — by the interpreter, on every run, rather than by a
+reader's trust in prose beside a `pass`.
+
 ---
 
 ## 3. A gated commit runs in the foreground
