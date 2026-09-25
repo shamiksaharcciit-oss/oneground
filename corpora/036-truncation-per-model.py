@@ -15,16 +15,28 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.abspath("."))
+# See corpora/036-ordering-experiment.py's own comment: anchored to
+# __file__, matching the majority convention in this directory
+# (corpora/build_fixture.py, corpora/export_ground_view.py,
+# corpora/run_chunking.py), not the caller's cwd. This file's own previous
+# `os.path.abspath(".")` was the minority form that happened to work
+# because `run_036_models.sh` always `cd`s to the repo root first -- which
+# is exactly the kind of route-dependent correctness `tasks/finding-a-
+# check-that-takes-a-different-route-than-production.md` is about.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..")))
 
-from oneground.embed import count_truncated
-from oneground.embed.compare import truncation_confound, ModelObservation
-from oneground.embed.registry import resolve
+from oneground.embed import count_truncated                     # noqa: E402
+from oneground.embed.compare import (                            # noqa: E402
+    truncation_confound, ModelObservation)
+from oneground.embed.registry import resolve                    # noqa: E402
 
-# Reuse the experiment's own corpus construction so the records are identical.
-import importlib.util
+# Reuse the experiment's own corpus construction so the records are
+# identical. Path built from __file__, not a bare relative string, for the
+# same reason the sys.path insert above is.
+import importlib.util                                            # noqa: E402
 spec = importlib.util.spec_from_file_location(
-    "ordering", "corpora/036-ordering-experiment.py")
+    "ordering", os.path.join(_HERE, "036-ordering-experiment.py"))
 ordering = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ordering)
 
