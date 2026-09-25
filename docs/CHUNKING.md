@@ -194,6 +194,13 @@ measures are on all 10,000 — not the same population), 2,000 anchors, k=5.
 | `self_recall@5` | **0.2260** | 0.2070 | 0.2195 |
 | `containing_hit@5` | 0.2485 | 0.2600 | **0.2725** |
 
+*`sentence`'s two path-B numbers above predate task 054's floor
+unification and were not re-measured after it. `sentence` was the only
+strategy whose chunk set changed (orphans −62.5%); `fixed` and
+`structure` — the two strategies the finding below compares — produced
+bit-identical chunks before and after, so nothing in this table's
+headline result depends on `sentence`'s column being current.*
+
 ### The finding, and it is the argument for the side-by-side rule
 
 **The structure-aware strategy wins the structural measures by 241× and loses
