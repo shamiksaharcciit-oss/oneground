@@ -611,16 +611,33 @@ def _model_offences(path):
     return out
 
 
-def test_the_proposals_package_has_no_model_no_api_call_and_no_prompt():
+#: docs/PROPOSALS.md §2.1's second path was ruled 19 September 2026 and
+#: built as task 059: `translate.py` is *meant* to import a network module
+#: and carry a prompt string -- that is the module, not a regression, and
+#: its own test file necessarily exercises the same words and imports to
+#: test it. This guard's job stays the same for every other file in the
+#: package: tier 1 (`propose.py`, `policy.py`, `prediction.py`, `card.py`,
+#: `verdict.py`, and this package's OTHER test files) must still have no
+#: model in it, so a change to one of THOSE files reaching for `requests`
+#: or writing `PROMPT = ...` still fails loudly. `test_translate.py` is
+#: the guard for what `translate.py` itself may and may not do.
+TIER_2_FILES = ("translate.py", "test_translate.py")
+
+
+def test_tier_1_has_no_model_no_api_call_and_no_prompt():
     """Tier 1's whole point, asserted against the source.
 
     Tier 1 is the loop with the model removed, and it exists to prove the
     receipt machinery before a model is near it. An HTTP import or a prompt
-    string here would mean tier 2 had started without anyone deciding to.
+    string in one of tier 1's own files would mean tier 2 had reached them
+    without anyone deciding to -- which is a different claim from "the
+    package has no model in it at all" now that tier 2 is one of its
+    files, deliberately.
     """
     offences = []
     for name in sorted(os.listdir(HERE)):
-        if not name.endswith(".py") or name == os.path.basename(__file__):
+        if (not name.endswith(".py") or name == os.path.basename(__file__)
+                or name in TIER_2_FILES):
             continue
         for what, line in _model_offences(os.path.join(HERE, name)):
             offences.append("oneground/proposals/%s:%d %s" % (name, line,
