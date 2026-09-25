@@ -403,7 +403,20 @@ class QdrantAdapter:
         replicas = ((raw.get("config") or {}).get("params") or {}).get(
             "replication_factor")
         try:
-            cluster = _model_dump(c.get_collection_cluster_info(
+            # `collection_cluster_info`, not `get_collection_cluster_info` --
+            # task 056 found this call named a method the pinned client does
+            # not have, raising `AttributeError` unconditionally, on a
+            # single node exactly as on three. Checked directly against a
+            # real, non-clustered v1.19.1 instance: the correctly-named call
+            # succeeds there too, reporting `remote_shards: []` and one
+            # local shard -- so `UnexpectedResponse` (the server itself
+            # declining this endpoint, checked against
+            # `qdrant_client.http.exceptions`) is the narrow case this
+            # `except` is actually for; a coding mistake like the one this
+            # replaces is not, and must surface rather than be swallowed by
+            # a comment that explains a failure it was never seeing.
+            from qdrant_client.http.exceptions import UnexpectedResponse
+            cluster = _model_dump(c.collection_cluster_info(
                 collection_name=ns))
             raw["cluster"] = cluster
             peers = cluster.get("peer_id")
@@ -413,8 +426,8 @@ class QdrantAdapter:
             nodes = 1 + len({r.get("peer_id") for r in remote
                              if isinstance(r, dict)}) if remote else (
                 1 if peers is not None else None)
-        except Exception:                             # noqa: BLE001
-            pass          # single-node deployments may not expose cluster info
+        except UnexpectedResponse:
+            pass          # this server/version does not expose the endpoint
 
         raw["indexed_vectors_count"] = getattr(info, "indexed_vectors_count",
                                                None)

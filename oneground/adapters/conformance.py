@@ -206,9 +206,18 @@ def run_conformance(name, factory, endpoint_desc, verbose=True):
         assert facts.dim == DIM, facts
         assert facts.kind == "declared", (
             "engine-reported facts must be labelled declared")
+        # Task 056: `nodes` had silently returned `None` on every topology,
+        # single-node included, since the repository's first commit -- a
+        # wrong method name behind a bare `except Exception: pass`. A live
+        # engine, even the single instance this suite runs against, reports
+        # a real cluster of one; nothing before this asserted it.
+        assert facts.nodes is not None, (
+            "describe() reported no node count against a live engine -- "
+            "the cluster-info call is failing silently again")
         results["describe"] = facts.as_dict()
         say(f"(d) describe: {facts.point_count} points, dim {facts.dim}, "
-            f"index {facts.index_type} {facts.index_params}")
+            f"index {facts.index_type} {facts.index_params}, "
+            f"nodes {facts.nodes}")
 
         # (e) scroll returns what went in
         got_ids, got_vecs = engine.scroll(namespace, 100)
