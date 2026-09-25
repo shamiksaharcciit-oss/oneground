@@ -23,7 +23,7 @@
 # measured), so this ordering is close to truncation-free where the
 # three-corpus one was not.
 #
-# Also fixed this task: the ordering experiment (`tasks/scratch/
+# Also fixed this task: the ordering experiment (`corpora/
 # 036-ordering-experiment.py::measure`) called `boundary_crispness` directly,
 # bypassing `crispness.reading()` -- which would have reported exactly the
 # collapsed near-zero count under e5 that made a subsample-scale read of this
@@ -95,22 +95,26 @@ remote_repo: /workspace/oneground
 remote_log: /workspace/oneground-session.log
 done_marker: DONE
 
-# Task 065. `corpora/run_036_models.sh` runs two scripts under
-# `tasks/scratch/`, and `tasks/scratch/` is entirely gitignored -- the repo
-# reaches the pod as a git bundle, which "carries commits, not the working
-# tree" (`oneground/pod/session.py`'s own `Input` docstring, which records a
-# prior session, 20260909-195824, that spent four minutes of pod time
-# discovering exactly this for `runs/`). Without these, `up` would create a
-# pod, clone a bundle with no `tasks/scratch/036-ordering-experiment.py` in
-# it, and fail at that `python` call having spent the setup time for
-# nothing -- a second, independent way this session could have been a
-# wasted one, found by checking what `run:` actually invokes rather than
-# only what the run measures.
+# Task 065. `corpora/run_036_models.sh` runs two scripts that used to live
+# under `tasks/scratch/`, which is entirely gitignored -- the repo reaches
+# the pod as a git bundle, which "carries commits, not the working tree"
+# (`oneground/pod/session.py`'s own `Input` docstring, which records a prior
+# session, 20260909-195824, that spent four minutes of pod time discovering
+# exactly this for `runs/`). Task 065 first patched this with `inputs:` for
+# both scripts; the developer correctly named the deeper problem that fix
+# left standing: the code producing this session's published measurement
+# still would not have been in git history, so a run that had already
+# happened could not be reproduced or audited from the repository, only
+# from whichever laptop's local disk still had the scratch file. `corpora/
+# 036-ordering-experiment.py` and `corpora/036-truncation-per-model.py` are
+# now tracked, committed files -- the git bundle carries them like any other
+# product file, so no `inputs:` entry is needed for either any more.
+# `corpora/036-render-ordering.py`, which turns the raw numbers into the
+# ordering verdict, moved the same way for the same reason, though it never
+# runs on the pod itself. `036-price.json` remains a local pricing receipt,
+# not code, and stays declared below as an optional convenience for the
+# bundled tarball.
 inputs:
-  - {local: tasks/scratch/036-ordering-experiment.py,
-     remote: /workspace/oneground/tasks/scratch/036-ordering-experiment.py}
-  - {local: tasks/scratch/036-truncation-per-model.py,
-     remote: /workspace/oneground/tasks/scratch/036-truncation-per-model.py}
   - {local: tasks/scratch/036-price.json,
      remote: /workspace/oneground/tasks/scratch/036-price.json,
      optional: true}
