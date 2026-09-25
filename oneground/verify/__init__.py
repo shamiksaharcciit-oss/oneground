@@ -1133,6 +1133,29 @@ def _verify_local(req, cfg, workdir, engine_name, endpoint, session_id, ks,
                        f"concurrency {out['qps_max']['at_concurrency']}; "
                        f"{out['qps_max']['stopped_because']}")
 
+        # docs/MULTI_NODE.md §6: "a declared list of endpoints in the
+        # requirements file rather than one" -- not a new CLI flag, not a
+        # new adapter method. A sibling measurement to the single-
+        # endpoint load phase above, not a replacement for it: this asks
+        # a different question (per-node fan-out) using the same query
+        # set and the same offered load, which only makes sense when
+        # node_endpoints names two or more addresses (§4.2's own
+        # couldnt_check otherwise).
+        node_endpoints = cfg.get("node_endpoints")
+        if node_endpoints:
+            log_fn(f"load (multi-node): {len(node_endpoints)} declared "
+                  "endpoint(s)")
+            out["load_per_node"] = loadgen.run_load_per_node(
+                get_engine(engine_name), node_endpoints, ns, queries, k=10,
+                credentials_env=cfg.get("credentials_env"),
+                concurrency=int(lat_cfg.get("concurrency",
+                                            cfg.get("concurrency", 8))),
+                target_qps=float(lat_cfg.get("at_qps",
+                                             cfg.get("target_qps", 0))),
+                duration_minutes=float(cfg.get("duration_minutes", 1.0)),
+                warmup_seconds=float(cfg.get("warmup_seconds", 10.0)),
+                params=engine_params, log_fn=log_fn)
+
         out["engine_facts"] = engine.describe(ns).as_dict()
 
     # calibration
