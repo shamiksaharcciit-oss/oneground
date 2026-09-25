@@ -11,6 +11,26 @@ set -euo pipefail
 
 cd /workspace/oneground
 
+# Every other run script activates the venv before its first bare `python`
+# call (`corpora/run_arxiv_150k.sh`, `corpora/run_fixture_build.sh`); this
+# one never did. Nothing upstream of the run -- `_setup_script`'s own venv
+# build/symlink runs over a SEPARATE ssh connection, and `start_run` launches
+# this script fresh, with no activation carried over -- puts the venv on
+# PATH, so a bare `python` here resolves to the pod's system interpreter,
+# which has no numpy. Found the hard way, at the probe (session
+# 20260925-200837): "ModuleNotFoundError: No module named 'numpy'", after
+# the input check had already passed.
+if [ -f .venv/bin/activate ]; then
+    # shellcheck disable=SC1091
+    . .venv/bin/activate                      # Linux pod
+elif [ -f .venv/Scripts/activate ]; then
+    # shellcheck disable=SC1091
+    . .venv/Scripts/activate                  # Git Bash on Windows
+else
+    echo "ERROR: no virtualenv at $(pwd)/.venv" >&2
+    exit 1
+fi
+
 ASSETS="${ONEGROUND_ASSETS:-/workspace}"
 OUT_DIR=/workspace/036-models
 mkdir -p "$OUT_DIR"
