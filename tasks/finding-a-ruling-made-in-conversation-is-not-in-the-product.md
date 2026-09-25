@@ -77,20 +77,37 @@ the file was written, uncorrected.
 This is the same general shape one size down: not a whole brief that never
 reached the tree, but a comment *citing* one that, when checked, turns out
 not to have done the thing cited. **The general form: a comment citing a
-task number is a claim nobody verifies**, and it is cheaper to write than
-the work it cites, which is exactly why it survives — nothing about
-writing "task 011" costs more than writing nothing, and nothing checks
-that task 011 actually settled what the comment says it settled.
+task number is a claim nobody verifies, and it survives precisely because
+it looks like provenance.** A number after the word "task" reads as a
+pointer into a record — checkable, specific, the opposite of a guess — and
+that is exactly what makes it convincing without being checked. It costs
+nothing to write beyond the seven characters "task 011"; nothing about
+writing it is harder than writing nothing, and nothing anywhere verifies
+that the cited task actually settled what the comment says it settled.
+The citation borrows its credibility from the existence of a numbered task
+system this project actually has, which is also what makes it different
+from an unsourced claim: an unsourced claim reads as opinion, and this
+reads as a fact with an address.
 
-Two instances of this shape are recorded here, both found in this same
-research pass. A third was not independently found — searched for in
-`docs/PRACTICE.md` and the other `tasks/finding-*.md` files by the same
-method used to verify this file's own count elsewhere, and nothing else
-matched the pattern closely enough to cite as a third without the same
-verification this whole finding insists on. If a third instance is known,
-it belongs here by name; absent that, this file records two, not three,
-because a count stated on trust is the same failure this finding exists to
-name.
+**One confirmed instance of this exact shape exists in the tree, checked
+twice.** The qdrant.yml/task-011 citation above. A second pass, prompted by
+a claim that a third instance existed, searched broadly rather than
+narrowly: every comment in the repository matching `task \d+` as a
+forward-reference ("X is task N's job", "task N handles this", "see task
+N") — several hundred hits across `.py`, `.yml` and `.md` files. The great
+majority are plain changelog-style provenance ("added in task N",
+"measured in task N"), which is not this shape and was not the search's
+target. Of the candidates that *do* make a forward-reference claim —
+`oneground/verify/__init__.py:24` and `:116` (both citing task 011 for
+throughput/concurrency, which task 011 did build), `docs/ADAPTERS.md:41`
+(task 034 building `index_families`, confirmed against task 034's report),
+`docs/ADAPTERS.md:294-296` (task 011's load phase vs. task 017's `qps_max`
+ceiling, both confirmed) — every one checked out true. **This file records
+one confirmed instance, not three.** If a third is known, it belongs here
+by name and by the same verification the first one got; a count asserted
+without that check is the same failure this finding exists to name, and
+recording an unverified count here would be a fresh instance of it rather
+than a description of one.
 
 ## What is not decided here
 
