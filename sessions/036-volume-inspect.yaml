@@ -58,9 +58,17 @@ remote_log: /workspace/oneground-session.log
 done_marker: DONE
 
 outputs:
+  # Both land under tasks/scratch/, not repo root. This session's own
+  # first fetch (20260925-193004) did not, extracting an untracked,
+  # unignored `036-volume-inspect/` at the repository root because the
+  # tarball's own internal path is flat rather than routed under
+  # `runs/`/`fixtures/<corpus>/`, and it blocked the next session's `up`
+  # until cleared by hand -- exactly the shape task 065/066's `inputs:`
+  # audit found for gitignored dependencies, on the output side instead.
   - {remote: /workspace/oneground-session.log,
      local: tasks/scratch/036-volume-inspect-log/}
-  - {remote: /workspace/036-volume-inspect.tgz, local: ./, extract: true}
+  - {remote: /workspace/036-volume-inspect.tgz,
+     local: tasks/scratch/036-volume-inspect-log/, extract: true}
 
 # Provisioning, ssh, bundle sync and the venv setup step dominate this --
 # 036-models.yaml's own session measured ~250s (4.2 min) for that alone,

@@ -123,9 +123,18 @@ outputs:
   # The log first, so a run stopped at the cap still comes home with every
   # cell it completed -- the experiment writes its results file after each
   # one, so a partial run is partial evidence rather than none (task 030b).
+  #
+  # Both land under tasks/scratch/, not repo root: the tarball's own
+  # internal path is a flat `036-models/...`, not a `fixtures/<corpus>/...`
+  # or `runs/...` prefix that would route `local: ./` somewhere already
+  # tracked or already gitignored. `local: ./` would extract an untracked,
+  # unignored `036-models/` at the repository root -- a session that
+  # completes and then blocks the next `up`'s dirty-tree check, found the
+  # hard way by `036-volume-inspect.yaml`'s own identical mistake.
   - {remote: /workspace/oneground-session.log,
      local: tasks/scratch/036-session-log/}
-  - {remote: /workspace/036-models.tgz, local: ./, extract: true}
+  - {remote: /workspace/036-models.tgz,
+     local: tasks/scratch/036-session-log/, extract: true}
 
 # Six embedding cells (task 065: two corpora, not three). The quiet
 # stretches are inside a cell, and the longest at the priced rate is
