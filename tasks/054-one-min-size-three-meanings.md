@@ -46,56 +46,72 @@ says in its own documentation that the other strategies mean something
 else by the same idea. `docs/CHUNKING.md`'s task-052 addendum names this
 and defers the mechanism here rather than re-deriving it.
 
+**Two constraints from the ruling, ahead of the Do list because they
+decide its shape.** (1) Decide what `min_size` — the floor, under
+whichever parameter name each strategy calls it — means, **once**, and
+make all three strategies obey that one meaning. A strategy that
+genuinely cannot obey it gets a **declared exception with a reason**,
+the same shape `OUTSIDE_THE_TABLE` already uses elsewhere in this
+package for a rule one place cannot express — not a silent third
+behavior standing in for a decision nobody made. (2) Say what changes in
+the *published* 031 comparison once the floor is unified. If the 241×
+boundary-alignment result or the A/B disagreement (`structure` losing
+`self_recall@5` to `fixed`) moves — direction, not just margin — **that
+is the finding, and it outranks the repair.** A cleaner floor that leaves
+the headline unchanged is a smaller result than a cleaner floor that
+changes what the project's best-known finding was actually measuring.
+
 ## Do
 
-1. **State the three behaviors as one comparison**, in `oneground/chunk/
-   strategies.py` where the three `Param` declarations already live —
-   each `min_final`/`min_size` note should say what it does *and* that
-   the other two strategies mean something different by the same role,
-   so a reader of one Param's note is not left to discover the other two
-   by separately reading three functions.
-2. **Decide, and rule on, whether `fixed` dropping trailing content is
-   the behavior this project wants.** It is currently silent data loss at
-   the chunk level: tokens the user's document contains that appear in no
-   chunk `oneground chunk` writes. Options to weigh, not to pick
-   unilaterally — bring them to the developer rather than choosing:
-   - keep it, documented more prominently, with the dropped token count
-     surfaced somewhere the run reports it (today it is invisible —
-     nothing counts or reports how many tokens `fixed` drops per
-     document);
-   - change `fixed` to merge its short tail into the previous window the
-     way `sentence` does, which would make the two consistent and would
-     change `fixed`'s own numbers on every existing measurement that used
-     it, including 031's;
-   - leave `fixed` as is and give it its own reported count (analogous to
-     `orphans`) of tokens dropped, so the behavior is visible without
-     changing it.
-3. **Give `sentence` the same interior-group protection its trailing-chunk
-   merge already has, or explain why the asymmetry is correct.** If a
-   too-small chunk deserves merging at the end of a document, say why one
-   in the middle of a document does not — or extend the merge to every
-   undersized group, and remeasure what that does to the 7,333 orphan
-   count.
-4. **Re-measure orphan counts (and anything downstream of them) on the
-   same `sec-filings-10k` 10% subsample task 031 used**, under whatever
-   the developer rules on for items 2 and 3, and report the before/after
-   — this is what task 052 named as the prerequisite for eventually
-   quantifying self-retrieval's orphan exposure, not something this task
-   itself needs to resolve.
+1. **State the one floor semantics, and make all three strategies use
+   it.** Read the three current behaviors (above) as three candidate
+   answers to one question — *what happens to content that would produce
+   a chunk shorter than the floor* — and decide which is right, applying
+   it uniformly: merge into the nearest neighbor (`sentence`'s current
+   trailing-only behavior, extended to every undersized group, in every
+   position a document can produce one); or something else, stated as
+   plainly. `fixed`'s current behavior (drop the tail rather than ship or
+   merge it) is silent data loss and is not a defensible landing point on
+   its own merits — if it is kept, it needs the declared-exception
+   treatment in item 2, not silent retention.
+2. **Where a strategy genuinely cannot implement the chosen semantics,
+   declare the exception, with the reason, in the same place the Param
+   notes live** — not a footnote, not a comment three functions away from
+   where a reader would look. `structure.min_size`'s pre-chunking merge
+   (by structural unit, not by resulting chunk) may be one of these,
+   since it operates at a different stage than `fixed`/`sentence`'s
+   post-hoc window fixup — decide whether that difference is a genuine
+   structural necessity (structure cuts on document boundaries that exist
+   before tokenization has a "trailing window" to speak of) or whether it
+   too can be brought in line.
+3. **Update each Param's own note** to state its (possibly now-shared)
+   behavior and to name any declared exception — a reader of one note
+   should not have to separately read three functions to learn the other
+   two differ.
+4. **Re-measure on the same `sec-filings-10k` 10% subsample task 031
+   used**, before-and-after, every measure orphan count could plausibly
+   move (length distribution, both path-B columns, and boundary
+   alignment / span survival if the floor change alters chunk starts
+   materially) — and lead the report with whichever of the 241× ratio or
+   the `self_recall@5` A/B disagreement moved, if either did, ahead of
+   the mechanical description of what changed in the code.
 
 ## Acceptance
 
-- Each strategy's floor-handling Param note states its own behavior *and*
-  names that the others differ, cross-referenced rather than siloed.
-- A ruling exists (from the developer, brought to them per item 2) on
-  whether `fixed`'s silent tail-drop stays, is counted and reported, or is
-  changed to merge — and the code matches whichever is chosen.
-- `sentence`'s asymmetry (protects only the trailing chunk) is either
-  extended to interior short groups or explicitly justified in the
-  module's own documentation.
-- Orphan counts (and any measure that moved) re-measured on the same
-  10% subsample and compared against task 031's published numbers, with
-  the delta reported plainly.
+- One stated floor semantics, applied by all three strategies, or a
+  declared exception with a reason for any that does not — no strategy
+  left on undocumented, ad hoc behavior.
+- Every floor-handling Param note states its own behavior and names any
+  other strategy that differs and why.
+- `fixed`'s silent tail-drop is gone, merged into the chosen semantics,
+  or kept only as a declared exception with a stated reason — never left
+  as an undocumented default.
+- Orphan counts and every measure named in item 4 re-measured on the same
+  10% subsample and compared against task 031's published numbers.
+- The report states plainly whether the 241× finding or the A/B
+  disagreement moved direction, not only margin — and if either did, that
+  is stated as the task's headline finding, ahead of the mechanical
+  description of the fix.
 - Full suite green, guard clean, identifier scan runs rather than skips.
 
 ## Do not
@@ -105,7 +121,7 @@ and defers the mechanism here rather than re-deriving it.
 - Re-run the full-corpus 3-strategy comparison. The 10% subsample is
   sufficient to measure what this task changes; a full-scale re-run is a
   separate cost decision.
-- Silently pick one of item 2's three options without bringing it to the
-  developer first — a strategy's data-loss behavior is exactly the kind
-  of thing this project does not decide unilaterally partway through a
-  task.
+- Leave a strategy's inability to comply undeclared. If it cannot be
+  brought in line, say so, with a reason, where the Param notes live —
+  not silently, and not as a private judgment call left unexplained in
+  the report alone.

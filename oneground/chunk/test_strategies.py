@@ -100,16 +100,25 @@ def test_offsets_index_the_text_they_claim(name):
 
 @pytest.mark.parametrize("name", ["fixed", "sentence", "structure"])
 def test_every_character_is_in_at_least_one_chunk(name):
-    """No strategy may silently drop text. `min_final` drops a trailing
-    fragment for `fixed`, which is why that one is checked to its last
-    chunk's end rather than to the end of the text."""
+    """No strategy may silently drop text -- to the end of the document,
+    not merely to whichever chunk happens to end last.
+
+    Task 054: `fixed` used to drop a trailing fragment shorter than
+    `min_final` instead of merging it, so this test could only check
+    coverage up to `chunks[-1].end` rather than `len(TEXT)` -- the gap
+    itself was invisible to a test that stopped where the dropped content
+    started. `_merge_undersized` closes it for every strategy; checking
+    against `len(TEXT)` directly is the mutant for the old behaviour."""
     params, kw = {"fixed": (FIXED, {}), "sentence": (SENTENCE, {}),
                   "structure": (STRUCTURE, {"units": units_of()})}[name]
     chunks = st.chunk_document(TEXT, name, params, doc_id="d", **kw)
     covered = set()
     for c in chunks:
         covered |= set(range(c.start, c.end))
-    assert covered == set(range(0, chunks[-1].end))
+    assert chunks[-1].end == len(TEXT), (
+        "the last chunk does not reach the end of the document -- content "
+        "was dropped")
+    assert covered == set(range(0, len(TEXT)))
 
 
 @pytest.mark.parametrize("name", ["fixed", "sentence", "structure"])
@@ -152,10 +161,36 @@ def test_sentence_chunks_start_and_end_on_sentence_boundaries():
         assert c.end in spans, c.end
 
 
-def test_fixed_drops_a_trailing_fragment_rather_than_shipping_it():
-    small = st.chunk_document(TEXT, "fixed", dict(FIXED, min_final=0))
-    big = st.chunk_document(TEXT, "fixed", dict(FIXED, min_final=14))
-    assert len(big) <= len(small)
+def test_fixed_merges_a_trailing_fragment_rather_than_dropping_it():
+    """Task 054. `min_final` still reduces the chunk count -- a short
+    trailing window no longer stands alone -- but the reason is now a
+    merge, not a drop: the last chunk still reaches the end of the
+    document either way, which distinguishes this from the old behaviour
+    (where raising `min_final` would have *shortened* `big[-1].end`).
+
+    52 tokens at size 16, overlap 4 (`FIXED`) happens to divide evenly and
+    never produces a short tail at all -- overlap 0 (stride 16 over 52
+    tokens, a remainder of 4) is used here instead, deliberately, so this
+    test exercises the case it is named for rather than one that passes
+    regardless of whether the merge fires."""
+    params = dict(FIXED, overlap=0)
+    small = st.chunk_document(TEXT, "fixed", dict(params, min_final=0))
+    big = st.chunk_document(TEXT, "fixed", dict(params, min_final=14))
+    assert len(big) < len(small), "a larger floor should merge at least one"
+    assert small[-1].end == big[-1].end == len(TEXT)
+
+
+def test_min_final_is_measured_in_tokens_not_characters():
+    """`min_final` is declared in tokens, like `size`. The trailing window
+    at overlap 0 over 52 tokens (`FIXED`, minus its overlap) is 4 tokens
+    and 23 characters -- 10 is above the token count and below the
+    character count, so the two readings disagree about whether it merges.
+    """
+    params = dict(FIXED, overlap=0)
+    last = st.chunk_document(TEXT, "fixed", dict(params, min_final=0))[-1]
+    assert last.end - last.start == 23, "the fixture's trailing window moved"
+    merged = st.chunk_document(TEXT, "fixed", dict(params, min_final=10))
+    assert len(merged) == 3, "min_final was read as characters"
 
 
 # ------------------------------------------------------------- structure
@@ -206,7 +241,14 @@ def test_structure_merges_units_under_min_size():
 
 def test_a_merged_unit_over_max_size_is_still_split():
     """Merging and splitting compose: merge short units, then split the result
-    if it is too long. Neither silently disables the other."""
+    if it is too long. Neither silently disables the other.
+
+    Task 054's own mutant: `min_size=100` is well above either split
+    piece's own token count, so the shared floor merge every strategy now
+    ends on would remerge them back into one chunk -- undoing the split
+    max_size exists to enforce -- if `_merge_undersized`'s `mergeable`
+    exemption for split pieces were not there. `len(chunks) == 2`, not 1,
+    is what proves the exemption is doing something rather than nothing."""
     us = units_of()
     chunks = st.chunk_document(TEXT, "structure",
                                dict(STRUCTURE, max_size=40, min_size=100),
