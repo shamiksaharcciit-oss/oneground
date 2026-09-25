@@ -1,0 +1,78 @@
+# What is actually on the vecbench volume, where, and by what digest.
+#
+#     oneground pod plan sessions/036-volume-inspect.yaml   # resolves and prices
+#     oneground pod up   sessions/036-volume-inspect.yaml   # the only billable one
+#
+# Session 20260925-185647 (036-models.yaml, bundled at a40d281) refused at
+# its very first input check: `/workspace/arxiv-150k/sample.jsonl.zst` was
+# not there. That path is this project's own laptop convention
+# (`ONEGROUND_ASSETS`/`~/oneground-assets/<corpus>/...`), never confirmed to
+# be how the corpora sit on THIS volume -- the release tarballs' own
+# manifests (`tasks/022b-release-tarballs-without-owner.report.md`) instead
+# show `fixtures/arxiv-150k/sample.jsonl.zst`. A prior session put
+# *something* on `vecbench`; nobody has checked what, or where, since.
+#
+# READ-ONLY, AND THE WHOLE RUN IS THE ANSWER
+#
+# `corpora/run_036_volume_inspect.sh` does four things, none of which loads
+# a model, touches the GPU, or writes to the volume:
+#
+#   1. a recursive listing of $ONEGROUND_ASSETS, depth 4, with sizes --
+#      not just whether the one expected path exists.
+#   2. a name search for the corpus files (`sample.jsonl.zst`,
+#      `documents.jsonl.zst`, `vectors.npy`, `queries.npy`) anywhere under
+#      it, so a corpus under a different layout is still found.
+#   3. whether each of the three corpus directories (`arxiv-150k`,
+#      `stackexchange-150k`, `sec-filings-10k`) exists anywhere by name,
+#      answering "present under some layout" separately from "present at
+#      the exact path the models session expects."
+#   4. `sha256sum` of every file (2) finds, so the next attempt at
+#      036-models.yaml can verify it read what it thinks it read, rather
+#      than discovering a mismatch at a second failure.
+#
+# Priced on the cheapest GPU offered with this volume, because this session
+# needs none of one -- `find`, `sha256sum` and a JSON assembly step, nothing
+# that reads a vector.
+
+gpu:
+  - RTX PRO 4500
+  - RTX PRO 6000
+  - RTX 6000 Ada
+  - RTX 4090
+
+volume: vecbench                 # datacenter derived from the name; this
+                                  # session exists to inspect it
+volume_mount_path: /workspace
+
+image: runpod/pytorch:1.1.0-cu1300-torch291-ubuntu2404
+disk_gb: 20
+
+env:
+  ONEGROUND_ASSETS: /workspace
+
+setup: corpora/POD_SETUP.md
+run: bash corpora/run_036_volume_inspect.sh
+
+remote_repo: /workspace/oneground
+remote_log: /workspace/oneground-session.log
+done_marker: DONE
+
+outputs:
+  - {remote: /workspace/oneground-session.log,
+     local: tasks/scratch/036-volume-inspect-log/}
+  - {remote: /workspace/036-volume-inspect.tgz, local: ./, extract: true}
+
+# Provisioning, ssh, bundle sync and the venv setup step dominate this --
+# 036-models.yaml's own session measured ~250s (4.2 min) for that alone,
+# and this session's own work (find + sha256sum over, at most, a handful of
+# corpus-sized files) is seconds to low tens of seconds on top. 10 minutes
+# is generous headroom for a stall that should not happen.
+stall_minutes: 10
+
+caps:
+  # ~5 min fixed overhead (provisioning/ssh/bundle/setup, measured on
+  # 036-models.yaml's own session) + well under a minute of find/sha256sum.
+  # 15 minutes is triple that; at $0.72/hr the worst case is $0.18.
+  max_hours: 0.25
+  max_concurrent: 1
+  max_usd: 0.50
