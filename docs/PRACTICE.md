@@ -887,6 +887,51 @@ meaning for `default`. **A key that nearly fits is the dangerous kind**: the
 name is right, the type is right, the values line up in most rows, and the one
 row where the two meanings diverge is the row nobody checks.
 
+### An orchestrator's version of the same failure
+
+Everything above is a tool answering an adjacent question. The same shape
+occurs one level up, when the reader is not a tool but the agent running the
+tools, and the source is not code but a position paper.
+
+**The instance.** Asked whether "proposals tier 2" was closed as a design or
+still open, the answer given was *closed* — citing `docs/PROPOSALS.md` §2.1's
+ruling on which model runs a translation, no default, refused without
+`--model`, a local endpoint first-class, the user approving the policy and
+never the sentence. Every one of those details is real and correctly quoted.
+None of them is about tier 2. §2.1 rules on **path 2** — one of two ways to
+produce a single proposal. **Tier 2** is a different axis entirely: the
+triage queue named in `docs/CHARTER.md`'s backlog, "which proposals are worth
+a developer's five hours." The same document holding the ruling that was
+quoted states, one section later, in its own words: *"Tier-2 triage: ...
+unchanged from the original concept and unaddressed here"* (§5), and states
+the distinction itself even earlier: *"Tier 1 is **path 1** of §2.1"* (§5a).
+The document does not conflate path and tier. The reading did.
+
+*Does §2.1 rule on which model translates a proposal* is not *is tier-2
+triage designed* — the same non-identity this section's table already
+states three other ways. The two questions share a document, a number
+("two"/"2"), and a neighbourhood of sections, which is exactly the
+condition under which an adjacent answer is hardest to notice: it is not a
+wrong fact, it is a right fact to a question nobody asked, delivered with
+the same confidence a right answer would carry.
+
+**What caught it.** Not a check — there is no tool here to write one for.
+The person who asked the question re-read the section the answer was drawn
+from, found the document naming the distinction in its own next section,
+and said so, in terms that named the failure as an instance of this one
+rather than as a one-off correction: *"which this project has now recorded
+[several] instances of and I have just added [one]."* Counting an
+orchestrator's misreading alongside a tool's is the same move §2's opening
+rule makes about claims going stale — the failure has one shape regardless
+of what is doing the reading.
+
+> The tell, ported from this section's own tools: **before answering "is X
+> settled," name the exact section that settles it and read that section's
+> own neighbours** — not the section whose content happens to answer a
+> question that sounds like the one asked. A ruling and a backlog item can
+> share a document, a heading style and a number, and still be two
+> different things the document itself keeps apart.
+
 ### A claim with four homes is corrected three times and still wrong
 
 The same defect in a sentence rather than a key, and it is the half worth
