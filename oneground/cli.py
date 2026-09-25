@@ -9,6 +9,11 @@
                                                  measure one change you wrote,
                                                  against a prediction you wrote
                                                  first (tier 1: no model)
+    oneground propose translate <workdir> --describe "..." --model ...
+                                                 a model writes the policy from
+                                                 a sentence; writes policy.yaml
+                                                 and stops -- never runs it
+                                                 (path 2, docs/PROPOSALS.md §2.1)
     oneground calibrate <curve|engine|show>      measure our own error
     oneground fixture verify <id>                check a fixture's digests
     oneground fixture build --spec ... --source ...
@@ -85,6 +90,8 @@ def dispatchable_commands():
     names |= {f"oneground fixture {a}" for a in _fixture_actions()}
     names |= {f"oneground calibrate {a}" for a in _calibrate_actions()}
     names.add("oneground pod")            # one money boundary, one entry
+    names.add("oneground propose translate")   # its own parser, dispatched
+                                                # before `propose`'s
     return names
 
 
@@ -360,6 +367,83 @@ def _fixture_parser():
     return ap
 
 
+def _translate_parser():
+    """`oneground propose translate` -- its own parser, per `docs/
+    PROPOSALS.md` §2.1: `--describe` and `--model` do not fit the shared
+    `propose` subparser's `--policy`/`--prediction` shape, and `translate`
+    is a second positional keyword after `propose`, not a flag."""
+    ap = argparse.ArgumentParser(prog="oneground propose translate")
+    ap.add_argument("workdir",
+                    help="a workdir `characterize`, `simulate` and `report` "
+                         "have already written -- translate shows the "
+                         "model manifest.yaml's recommended configuration")
+    ap.add_argument("--describe", required=True,
+                    help="the change, in one sentence")
+    ap.add_argument("--model", default=None,
+                    help="ollama:<name> for a local Ollama, or <name> with "
+                         "--endpoint for any other OpenAI-compatible "
+                         "server. No default: omitting this refuses.")
+    ap.add_argument("--endpoint", default=None,
+                    help="the OpenAI-compatible base URL, for a --model "
+                         "with no ollama: prefix")
+    ap.add_argument("--temperature", type=float, default=None)
+    ap.add_argument("--top-p", type=float, default=None, dest="top_p")
+    ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--max-tokens", type=int, default=None, dest="max_tokens")
+    ap.add_argument("--requirements", default=None,
+                    help="the requirements file the baseline run used; "
+                         "defaults to the one simulate_info.json recorded")
+    ap.add_argument("--out", default=None,
+                    help="where policy.yaml and the disclosure are "
+                         "written; defaults to <workdir>")
+    envmod.add_argument(ap)
+    return ap
+
+
+def _cmd_propose_translate(argv):
+    """`oneground propose translate`. Guards itself, like `fixture` and
+    `pod`: its argument shape does not fit the shared `propose` parser's
+    contract, so it is dispatched before `build_parser()` ever sees it
+    (`GUARDS_ON_USE` in `oneground/test_environment.py` names this
+    command for the same reason it names `fixture verify`)."""
+    from .proposals import translate as tr
+
+    args = _translate_parser().parse_args(argv)
+    stamp, code = envmod.guard_or_exit(
+        "oneground propose translate", allow_unpinned=args.allow_unpinned)
+    if code:
+        return code
+
+    try:
+        result = tr.translate(
+            args.workdir, args.describe, args.model, endpoint=args.endpoint,
+            temperature=args.temperature, top_p=args.top_p, seed=args.seed,
+            max_tokens=args.max_tokens, out_dir=args.out,
+            requirements_path=args.requirements, log_fn=print)
+    except tr.TranslateError as e:
+        # The same shape every other refusal in this command line takes:
+        # printed, not raised, exit 2 -- docs/PROPOSALS.md §2.1's own
+        # refusal without an explicit --model lands here.
+        print(str(e))
+        return 2
+
+    print()
+    print(f"wrote {result['policy_path']}")
+    print()
+    print(tr.render_policy_plain(result["policy"]))
+    print()
+    print("--- the policy file, in full ---")
+    with open(result["policy_path"], encoding="utf-8") as f:
+        print(f.read(), end="")
+    print("--- end of policy file ---")
+    print()
+    print("This is not approval, and nothing has run. Read the policy "
+         "above. Approval is running it yourself:")
+    print(f"    oneground propose {args.workdir} --policy "
+         f"{result['policy_path']} --prediction <prediction.yaml>")
+    return 0
+
+
 def _cmd_fixture(argv):
     """`fixture verify`, `fixture build` and `fixture project`."""
     ap = _fixture_parser()
@@ -629,7 +713,11 @@ def main(argv=None):
 
 def _dispatch(argv):
     # `fixture` and `pod` own the rest of the command line; parsing them here
-    # would mean maintaining two copies of their flags.
+    # would mean maintaining two copies of their flags. `propose translate`
+    # joins them for the same reason: its flags do not fit the shared
+    # `propose` subparser's --policy/--prediction shape.
+    if argv and argv[0] == "propose" and len(argv) > 1 and argv[1] == "translate":
+        return _cmd_propose_translate(argv[2:])
     if argv and argv[0] == "fixture":
         return _cmd_fixture(argv[1:])
     if argv and argv[0] == "calibrate":

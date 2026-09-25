@@ -355,3 +355,31 @@ def translate(workdir, describe, model, endpoint=None, temperature=None,
 
     return {"policy_path": policy_path, "disclosure_path": disclosure_path,
            "policy": policy_doc, "disclosure": disclosure}
+
+
+def render_policy_plain(policy_doc):
+    """The policy, in a sentence, beside the YAML `translate` already
+    writes verbatim -- never a replacement for reading the file, a second
+    way into the same content for a reader who does not parse YAML by
+    eye. Built from the parsed document's own fields; nothing here is
+    inferred beyond what the file states.
+    """
+    p = (policy_doc or {}).get("policy") or {}
+    family = p.get("family", "<no family>")
+    changes = p.get("changes") or []
+    rationale = p.get("rationale")
+
+    if not changes:
+        change_text = "names no parameter changes"
+    else:
+        parts = [f"{c.get('param')} from {c.get('from')!r} to {c.get('to')!r}"
+                for c in changes if isinstance(c, dict)]
+        change_text = "changes " + "; ".join(parts) if parts else \
+            "names no parameter changes"
+
+    lines = [f"This policy proposes a change to {family}: {change_text}."]
+    if rationale:
+        lines.append(f'Rationale, in the proposer\'s own words: "{rationale}"')
+    else:
+        lines.append("No rationale was given.")
+    return "\n".join(lines)
