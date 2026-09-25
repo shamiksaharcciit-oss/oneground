@@ -164,9 +164,31 @@ identify afterwards.
 
 ## 4. What comes back, and what may sit beside what
 
+**This section named what comes back without having read the file it
+comes back in, and task 055 corrected it against the source rather than
+building past the gap.** `vectordb-bench==2.0.0` writes one JSON file per
+provider run, `results/<Provider>/result_<date>_<label>_<provider>.json`
+— a `TestResult`: `run_id`, `task_label`, and `results`, a list of
+`CaseResult`. Each case carries `metrics` (`Metric`'s own fields — `qps`,
+`serial_latency_p50/p95/p99`, `recall`, `ndcg`, `load_duration`,
+`insert_duration`, `optimize_duration`, `max_load_count`, among others),
+`task_config` (which engine, `db`; its `db_config.version`, when the
+config declares one; the case and stage configuration), and `label` —
+`":)"` for a normal case, `"x"` (`ResultLabel.FAILED`) or `"?"`
+(`ResultLabel.OUTOFRANGE`) otherwise.
+
 **Imported:** per-case raw measurements — QPS, latency percentiles,
-recall, index build time, load duration — each labelled with the engine,
-its version, VectorDBBench's version, and the host it ran on.
+recall, index build time, load duration — labelled with the engine
+(`task_config.db`) and its version (`task_config.db_config.version`,
+when present).
+
+**Two of the four labels this section originally named are not in the
+file at all.** Neither VectorDBBench's own package version nor the host
+it ran on appears anywhere in `TestResult`, `CaseResult` or `TaskConfig`
+— not in the schema, not in any of the real result files shipped in the
+package itself. Read `null`, with the reason stated, the shape §2.1 of
+`docs/PROPOSALS.md` already uses for a model version a provider does not
+report: declared absent rather than guessed or silently dropped.
 
 **Never imported:** VectorDBBench's composite scores. Its scoring
 computes each system's result relative to the best value per case and
@@ -175,11 +197,32 @@ assigned a value twice as bad as the worst observed — half the lowest
 QPS, double the maximum latency. That is a couldn't-check rounded into
 the scale so an aggregate stays computable. It is a defensible choice for
 a leaderboard and the opposite of oneground's rule, and importing it
-would import the rounding.
+would import the rounding. **No per-case result file contains one to
+exclude** — the composite is computed downstream, across every
+provider's file at once, by the package's own leaderboard script, never
+persisted beside the raw numbers a single result file carries. The
+exclusion this position calls for is satisfied by scope — the importer
+reads one provider's result file and never opens a leaderboard file —
+not by filtering a field out of what it reads.
 
-**A failure stays a failure.** A VectorDBBench case that fails or times
-out is reported as `couldnt_check` with the reason and the timeout that
-fired, never as a low number.
+**A failure stays a failure, and this section overstated what the file
+says about why.** A VectorDBBench case that fails or times out is
+reported as `couldnt_check`, never as a low number — that much holds.
+What does not: **VectorDBBench's own runner catches the exception, logs
+it, and discards it** (`interface.py::_async_task_v2`); only the `label`
+survives to the file. A captured `LoadTimeoutError` or
+`PerformanceTimeoutError` writes `"?"`; any other exception writes
+`"x"`. Neither carries a reason string, and neither carries the duration
+the process actually ran before it gave up — that information exists
+only in that run's console output, which oneground never sees, because
+oneground does not run VectorDBBench (§5). What the file *does* still
+let a reader ask: which of the two kinds of failure occurred, and —
+where the case's own configuration declares one — the *configured*
+timeout for the search-concurrency stage (`case_config.
+concurrency_search_config.concurrency_timeout`). That is the configured
+value for one stage, not *the* timeout that fired; nothing in the file
+says which stage's timeout ended the case, or distinguishes a load
+timeout from a search one.
 
 **The table rule.** A VectorDBBench measurement may sit in the same table
 as an oneground measurement **only** when both used the same ground
