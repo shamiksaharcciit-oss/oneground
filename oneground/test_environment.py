@@ -213,6 +213,10 @@ GUARDS_ON_USE = {
     "oneground fixture project",
     "oneground calibrate fixture", "oneground calibrate layers",
     "oneground calibrate curve", "oneground calibrate engine",
+    # `propose translate` has its own parser, dispatched before the shared
+    # one ever sees it, the same reason `fixture verify`/`fixture build`
+    # are here rather than decorated.
+    "oneground propose translate",
 }
 
 
