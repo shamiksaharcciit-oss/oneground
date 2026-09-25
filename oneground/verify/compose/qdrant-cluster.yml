@@ -1,0 +1,79 @@
+# A real three-node Qdrant cluster, for `oneground verify`'s multi-node
+# fan-out measure (task 057, `docs/MULTI_NODE.md` §6).
+#
+# docs/MULTI_NODE.md §4.1 found that nothing in a search response or its
+# headers identifies which node answered it -- checked against the real
+# QueryResponse/ScoredPoint types, not assumed. The only mechanism is §4.2's:
+# the client knows which node it queried because it chose the address. This
+# file exists to give the client three addresses to choose between, exactly
+# the shape the position paper's own research cluster used, not a mock.
+#
+#     docker compose -f oneground/verify/compose/qdrant-cluster.yml up -d
+#     docker compose -f oneground/verify/compose/qdrant-cluster.yml down -v
+#
+# Each node publishes its OWN REST port on the host -- 16333/16343/16353 --
+# deliberately not behind one shared port. A single shared entrypoint is
+# exactly the case §4.2 says per-node attribution cannot be built for; this
+# compose file is the addressable case, on purpose, so the fan-out measure
+# has something real to run against.
+#
+# Image tag matches oneground/verify/compose/qdrant.yml's pin, for the same
+# reason stated there: the client refuses to vouch for a server more than
+# one minor version away.
+
+services:
+  qdrant-node1:
+    image: qdrant/qdrant:v1.19.1
+    container_name: oneground-verify-qdrant-node1
+    command: ["./qdrant", "--uri", "http://qdrant-node1:6335"]
+    environment:
+      QDRANT__CLUSTER__ENABLED: "true"
+      QDRANT__LOG_LEVEL: WARN
+    ports:
+      - "16333:6333"
+      - "16334:6334"
+    volumes:
+      - oneground-qdrant-cluster-node1:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/6333' || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  qdrant-node2:
+    image: qdrant/qdrant:v1.19.1
+    container_name: oneground-verify-qdrant-node2
+    command: ["./qdrant", "--bootstrap", "http://qdrant-node1:6335",
+             "--uri", "http://qdrant-node2:6335"]
+    environment:
+      QDRANT__CLUSTER__ENABLED: "true"
+      QDRANT__LOG_LEVEL: WARN
+    ports:
+      - "16343:6333"
+      - "16344:6334"
+    volumes:
+      - oneground-qdrant-cluster-node2:/qdrant/storage
+    depends_on:
+      - qdrant-node1
+
+  qdrant-node3:
+    image: qdrant/qdrant:v1.19.1
+    container_name: oneground-verify-qdrant-node3
+    command: ["./qdrant", "--bootstrap", "http://qdrant-node1:6335",
+             "--uri", "http://qdrant-node3:6335"]
+    environment:
+      QDRANT__CLUSTER__ENABLED: "true"
+      QDRANT__LOG_LEVEL: WARN
+    ports:
+      - "16353:6333"
+      - "16354:6334"
+    volumes:
+      - oneground-qdrant-cluster-node3:/qdrant/storage
+    depends_on:
+      - qdrant-node1
+
+volumes:
+  oneground-qdrant-cluster-node1:
+  oneground-qdrant-cluster-node2:
+  oneground-qdrant-cluster-node3:
