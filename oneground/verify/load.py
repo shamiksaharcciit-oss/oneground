@@ -409,3 +409,129 @@ def ramp_to_ceiling(engine, namespace, queries, k=10, params=None,
         "open_loop": True,
         "caveat": QPS_MAX_CAVEAT,
     }
+
+
+# ------------------------------------------- multi-node fan-out (task 057)
+#
+# docs/MULTI_NODE.md §4.1: nothing in a search response or its headers
+# identifies which node answered it -- checked against the real return
+# types, not assumed. §4.2: the only mechanism is the client knowing which
+# node it queried because it chose the address. This is that mechanism,
+# applied to the load generator above: the same query set, run against each
+# node's own endpoint in turn, never against anything the engine declares.
+
+MULTI_NODE_COULDNT_CHECK_REASON = (
+    "fewer than two node endpoints were declared. Per-node fan-out needs "
+    "each node's own address (docs/MULTI_NODE.md §4.2); a single shared "
+    "entrypoint -- a load balancer, a managed cluster's one connection "
+    "string -- cannot be attributed to a node by anything a client can ask "
+    "the engine, and this is not a smaller version of the measurement, it "
+    "is the case the measurement cannot be built for.")
+
+
+def run_load_per_node(engine_factory, node_endpoints, namespace, queries,
+                      k=10, credentials_env=None, log_fn=None,
+                      **run_load_kwargs):
+    """The same query set, against each node's own address, in turn.
+
+    `node_endpoints` is the declared fact this needs, the same way
+    `credentials_env` declares where a secret comes from rather than being
+    assumed absent (`docs/ADAPTERS.md`): fewer than two addresses is not a
+    smaller measurement, it is `couldnt_check`, honestly, per
+    `docs/MULTI_NODE.md` §4.2.
+
+    `engine_factory` is a zero-argument callable returning a fresh,
+    unconnected adapter instance -- the same shape
+    `oneground.adapters.conformance.run_conformance` takes it, so a caller
+    already has one. A fresh instance connects to each address in turn;
+    the protocol has no disconnect method, so nothing needs releasing
+    between nodes any more than `_verify_local`'s own single-node run does.
+
+    `namespace` must already exist and be searchable from every node --
+    built once, beforehand, the way any `verify` run builds it; this
+    function runs no ingest and creates nothing. The fan-out it measures is
+    real only if the collection is genuinely replicated across the nodes
+    named, which this function does not check and cannot: whether a
+    namespace is shared cluster state is a fact about the deployment, not
+    something a load generator can infer from outside it.
+
+    Every other argument is `run_load`'s own -- `concurrency`,
+    `target_qps`, `duration_minutes`, `warmup_seconds`, `params` -- applied
+    identically to every node, because a fan-out measurement compares nodes
+    under the same offered load, not under whatever each happened to get.
+    """
+    def say(msg):
+        if log_fn:
+            log_fn(msg)
+
+    node_endpoints = list(node_endpoints or [])
+    if len(node_endpoints) < 2:
+        say(f"load (multi-node): couldnt_check -- "
+            f"{len(node_endpoints)} endpoint(s) declared, need >= 2")
+        return {"outcome": "couldnt_check",
+               "reason": MULTI_NODE_COULDNT_CHECK_REASON,
+               "declared_endpoints": node_endpoints, "nodes": []}
+
+    say(f"load (multi-node): {len(node_endpoints)} nodes, "
+        f"{run_load_kwargs.get('concurrency', DEFAULT_CONCURRENCY)} workers "
+        "each")
+    nodes = []
+    for i, endpoint in enumerate(node_endpoints):
+        engine = engine_factory()
+        engine.connect(endpoint, credentials_env)
+        say(f"  node {i} ({endpoint}):")
+        result = run_load(engine, namespace, queries, k=k,
+                          log_fn=(lambda m, i=i: say(f"    {m}"))
+                          if log_fn else None,
+                          **run_load_kwargs)
+        row = result.as_dict()
+        row["node_index"] = i
+        row["endpoint"] = endpoint
+        nodes.append(row)
+
+    achieved = [n["achieved_qps"] for n in nodes]
+    p95s = [n["latency_under_load"].get("p95_ms") for n in nodes
+           if n["latency_under_load"].get("p95_ms") is not None]
+
+    fan_out = {
+        "mean_achieved_qps": round(statistics.mean(achieved), 2),
+        "min_achieved_qps": round(min(achieved), 2),
+    }
+    slowest_by_qps = min(nodes, key=lambda n: n["achieved_qps"])
+    fan_out["slowest_node_by_qps"] = {
+        "node_index": slowest_by_qps["node_index"],
+        "endpoint": slowest_by_qps["endpoint"],
+        "achieved_qps": slowest_by_qps["achieved_qps"]}
+
+    if p95s:
+        fan_out["mean_p95_ms"] = round(statistics.mean(p95s), 2)
+        fan_out["max_p95_ms"] = round(max(p95s), 2)
+        slowest_by_latency = max(
+            nodes, key=lambda n: n["latency_under_load"].get("p95_ms", 0.0))
+        fan_out["slowest_node_by_latency"] = {
+            "node_index": slowest_by_latency["node_index"],
+            "endpoint": slowest_by_latency["endpoint"],
+            "p95_ms": slowest_by_latency["latency_under_load"].get("p95_ms")}
+    else:
+        fan_out["mean_p95_ms"] = None
+        fan_out["max_p95_ms"] = None
+        fan_out["slowest_node_by_latency"] = None
+
+    say(f"load (multi-node): slowest node achieved "
+        f"{fan_out['min_achieved_qps']:.1f} qps against a mean of "
+        f"{fan_out['mean_achieved_qps']:.1f}; slowest p95 "
+        f"{fan_out.get('max_p95_ms')} ms against a mean of "
+        f"{fan_out.get('mean_p95_ms')} ms")
+
+    return {
+        "outcome": "measured",
+        "nodes": nodes,
+        "fan_out": fan_out,
+        "note": ("Each row is the same measurement run_load() always makes, "
+                 "against the node named by its own endpoint -- attribution "
+                 "the client has because it chose the address, not because "
+                 "the engine declared one (docs/MULTI_NODE.md §4.1). "
+                 "'slowest' is reported two ways -- lowest achieved_qps and "
+                 "highest p95 latency under load -- because they can name "
+                 "different nodes, and picking one would hide that."),
+    }
