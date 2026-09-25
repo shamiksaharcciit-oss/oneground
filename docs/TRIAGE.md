@@ -2,11 +2,11 @@
 
 *25 September 2026. Written before implementation, in the order the six
 earlier positions were written: the exam before the code. Three scoping
-decisions in it are marked as defaults, not rulings — the developer has
-not decided them, and this paper says what would change if he decides
-the other way, for each. Everything else stated here is a finding,
-checked against the source, or a design decision this paper is entitled
-to make on its own.*
+decisions in it were written as defaults, not rulings; the developer
+ruled all three on 25 September 2026, for the reasons given at each —
+his reasons, kept as written rather than replaced by this paper's own.
+Everything else stated here is a finding, checked against the source, or
+a design decision this paper is entitled to make on its own.*
 
 ## 0. The finding that shapes everything below
 
@@ -86,13 +86,16 @@ carries a rationale — `docs/PROPOSALS.md` §2.2: *"quoted in the card,
 never an input to a verdict."*). Neither is a judgement about the idea.
 Both are facts about what already happened.
 
-## 3. Three scoping decisions, defaulted, not ruled
+## 3. Three scoping decisions, ruled 25 September 2026
 
 ### 3.1 What is triaged
 
-**Default: proposals `propose` refused — specifically the refusals
+**Ruled: proposals `propose` refused — specifically the refusals
 `validate_policy` raises for a family or parameter that does not exist
-— not cards tier 1 produced.**
+— not cards tier 1 produced.** *The developer's own reason: triaging
+cards would collide with `docs/LIBRARY.md` §3's refusal to score them,
+and a refused proposal has no result to rank by, so this ruling avoids
+that collision by construction.*
 
 `plan_proposal` (`oneground/proposals/propose.py`) refuses for several
 reasons, and they are not one kind of thing. Checked directly: a missing
@@ -108,61 +111,57 @@ model family named %r"* (a family or parameter this codebase has not
 built) — are refusals **about the idea itself**: the simulator
 genuinely cannot represent what was asked for. Those, and only those,
 are this paper's candidate pool. A card tier 1 *did* produce is not a
-triage candidate under this default — it already ran, already has a
-`held`/`did_not_hold`/`couldnt_check` verdict, and is a `docs/
-LIBRARY.md` question, not a `docs/CHARTER.md` Phase 5 one.
+triage candidate — it already ran, already has a `held`/`did_not_hold`/
+`couldnt_check` verdict, and is a `docs/LIBRARY.md` question, not a
+`docs/CHARTER.md` Phase 5 one.
 
-**If ruled the other way** — triaging cards, not refusals — the whole
-measured basis changes. A card carries real numbers (a predicted delta,
-a measured one, a budget verdict); triaging cards would be triaging
-*results*, closer to a leaderboard `docs/LIBRARY.md` §3 already refuses
-outright (*"Rank corpora, or cards across corpora... The library sorts
-and filters; it does not score"*). This paper's default avoids that
-collision by construction, because a refused proposal has no result to
-rank by. Ruling for cards would mean writing this paper again against
-`LIBRARY.md`'s refusal rather than beside it.
+*What the rejected alternative would have cost, kept for record.*
+Triaging cards would have meant triaging *results* — a card carries a
+predicted delta, a measured one, a budget verdict — which is closer to a
+leaderboard `docs/LIBRARY.md` §3 already refuses outright (*"Rank
+corpora, or cards across corpora... The library sorts and filters; it
+does not score"*). Refused proposals have no result to collide with that
+refusal over.
 
 ### 3.2 Whose hours
 
-**Default: the developer's own review queue for structural proposals,
-per Phase 5's own wording — "maintainer-reviewed" — not a user-facing
-feature.**
+**Ruled: the developer's own review queue for structural proposals, per
+Phase 5's own wording — "maintainer-reviewed" — not a user-facing
+feature.** *The developer's own reason: a stranger shown a sorted list
+of ideas the tool cannot build reads it as a roadmap the tool is
+proposing.*
 
 Nothing in `CHARTER.md` says a user ever sees this queue; "maintainer-
-reviewed" names one reader. A tool showing a stranger a list of ideas it
-cannot build, sorted by anything, reads as a roadmap the tool is
-proposing — the "authoritative and is not" failure the brief that
-commissioned this paper names by name. A maintainer reading their own
-refusal log already knows it is not a verdict, the same way `docs/
-INTERFACE.md`'s write half is legible to a maintainer who knows what a
-supervisor is and would not be to a stranger handed the same page cold.
+reviewed" names one reader. A maintainer reading their own refusal log
+already knows it is not a verdict, the same way `docs/INTERFACE.md`'s
+write half is legible to a maintainer who knows what a supervisor is and
+would not be to a stranger handed the same page cold.
 
-**If ruled the other way** — a user-facing feature — every output this
-paper scopes in §4 would need the same disclosure discipline `docs/
-PROPOSALS.md` §2.1 gives a model-translated policy: who is being shown
-this, on whose authority, with what statement of what it is not. A
-maintainer's private queue does not need that scaffolding; a public one
-would, in full, before it could ship.
+*What the rejected alternative would have cost, kept for record.* A
+user-facing feature would need the same disclosure discipline `docs/
+PROPOSALS.md` §2.1 gives a model-translated policy — who is being shown
+this, on whose authority, with what statement of what it is not — before
+it could ship at all.
 
 ### 3.3 What it may use
 
-**Default: only what the tool already measured, plus what the proposer
-declared. Never an estimate of implementation effort.**
+**Ruled: only what the tool already measured, plus what the proposer
+declared. Never an estimate of implementation effort.** *The developer's
+own reason: an invented effort figure would be the first unfounded
+number in this product, and refusing to be where that number first
+appears is the correct instinct.*
 
 The tool has no way to see effort — it is not a fact about a corpus, a
 configuration, or a measurement, it is a fact about a codebase and the
 people who would change it, neither of which oneground has ever
-modelled. An invented effort figure would be the first unfounded number
-this product has produced; every other quantity in every other position
-paper is measured, declared, or explicitly `couldnt_check`. This default
-is not really a scoping choice so much as this paper refusing to be the
-place that number first appears.
+modelled. Every other quantity in every other position paper is
+measured, declared, or explicitly `couldnt_check`.
 
-**If ruled the other way** — triage may estimate effort — that estimate
-would need its own position paper before this one could cite it, on the
-same "exam before the code" convention every other measured quantity in
-this product was given. This paper does not write that one speculatively
-on the chance the ruling goes that way.
+*What the rejected alternative would have cost, kept for record.* An
+estimate of effort would need its own position paper before this one
+could cite it, on the same "exam before the code" convention every other
+measured quantity in this product was given — not written speculatively
+here on the chance a future ruling asks for it.
 
 ## 4. What is measured, what is declared
 
@@ -268,11 +267,9 @@ the family/parameter named and the sentence or policy declared. No
 grouping, no counting, no output shape from §4/§5 — those read the
 record once one exists to read.
 
-Not before the three defaults in §3 are ruled, if any part of the
-record's shape depends on which way they go — §3.1 in particular
-changes what a "refusal" even is to record. Recording can start under
-the defaults stated here; a ruling that reverses one after records
-exist under the old shape is a migration question for whoever is
-ruling, not one this paper answers in advance.
+§3's three defaults are ruled (25 September 2026), so the record's shape
+follows the rulings above directly rather than waiting further —
+§3.1 in particular decides what a "refusal" is to record, and it is
+decided.
 
 *The exam, before the code.*

@@ -123,8 +123,16 @@ def _named_file(recorded):
 
 
 def plan_proposal(workdir, policy_path, prediction_path, name=None,
-                  requirements_path=None, tolerance=CALIBRATION_TOLERANCE):
-    """A `Plan`, or `ProposeError` naming every problem at once."""
+                  requirements_path=None, tolerance=CALIBRATION_TOLERANCE,
+                  log_fn=None, dry_run=False):
+    """A `Plan`, or `ProposeError` naming every problem at once.
+
+    `dry_run` gates the refusal receipt (`docs/TRIAGE.md` §7) the same
+    way it gates everything else here: `docs/PROPOSALS.md` §2.1's own
+    contract for the flag is "validate everything, print what would run,
+    write nothing," and a receipt is a write. A dry run still shows every
+    problem `--dry-run` always showed; it just leaves nothing behind.
+    """
     import yaml
 
     problems = []
@@ -149,6 +157,25 @@ def plan_proposal(workdir, policy_path, prediction_path, name=None,
     except PolicyError as e:
         problems.extend("--policy %s: %s" % (policy_path, p)
                         for p in e.problems)
+        # docs/TRIAGE.md §7's first item: a refusal used to be printed and
+        # discarded. This is the receipt, written where the refusal
+        # happens rather than reconstructed later from nothing -- a
+        # workdir this far along already has what the receipt needs
+        # (characterization.json, simulate_info.json). Skipped under
+        # --dry-run, whose own contract (docs/PROPOSALS.md §2.1) is
+        # "write nothing," and a receipt is a write.
+        if not dry_run:
+            from .refusal import write_refusal_receipt
+            try:
+                write_refusal_receipt(workdir, policy_path, e.problems,
+                                      log_fn=log_fn)
+            except Exception as receipt_error:                # noqa: BLE001
+                # A receipt that fails to write must never turn a refusal
+                # into a crash -- the original ProposeError below is
+                # still the whole of what the caller needs to see.
+                if log_fn:
+                    log_fn("propose: refusal receipt not written -- "
+                          f"{receipt_error}")
     except yaml.YAMLError as e:
         problems.append("--policy %s is not valid YAML: %s" % (policy_path, e))
 
@@ -454,7 +481,8 @@ def run(workdir, policy_path, prediction_path, name=None, dry_run=False,
     """Validate, measure the changed configuration, judge it, write the card."""
     t0 = time.time()
     plan = plan_proposal(workdir, policy_path, prediction_path, name=name,
-                         requirements_path=requirements_path)
+                         requirements_path=requirements_path, log_fn=log_fn,
+                         dry_run=dry_run)
     if dry_run:
         _print_plan(plan)
         return 0
